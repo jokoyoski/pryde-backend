@@ -3,10 +3,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Pryde.Domain.Common;
 
 namespace Pryde.Domain.Entities
 {
-    public class Role
+    public class Role : BaseEntity
     {
+        public string Name { get; set; } = string.Empty;
+        public ICollection<UserRole> Roles { get; set; } = new List<UserRole>();
     }
 }
