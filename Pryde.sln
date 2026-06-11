@@ -1,0 +1,43 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35913.81 d17.13
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pryde.Api", "Pryde.Api\Pryde.Api.csproj", "{5E4B702B-E8B6-40C9-A4AC-1BBB3D33CEFD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pryde.Domain", "Pryde.Domain\Pryde.Domain.csproj", "{1A973FF4-D39E-4D69-B740-CBBD96A83F87}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pryde.Persistence", "Pryde.Persistence\Pryde.Persistence.csproj", "{277A166F-941A-46D6-BCB6-AFCD86645742}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pryde.Services", "Pryde.Services\Pryde.Services.csproj", "{1090E875-03C5-4DE3-B663-9F69E5B3CD55}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5E4B702B-E8B6-40C9-A4AC-1BBB3D33CEFD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5E4B702B-E8B6-40C9-A4AC-1BBB3D33CEFD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5E4B702B-E8B6-40C9-A4AC-1BBB3D33CEFD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5E4B702B-E8B6-40C9-A4AC-1BBB3D33CEFD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A973FF4-D39E-4D69-B740-CBBD96A83F87}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A973FF4-D39E-4D69-B740-CBBD96A83F87}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A973FF4-D39E-4D69-B740-CBBD96A83F87}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A973FF4-D39E-4D69-B740-CBBD96A83F87}.Release|Any CPU.Build.0 = Release|Any CPU
+		{277A166F-941A-46D6-BCB6-AFCD86645742}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{277A166F-941A-46D6-BCB6-AFCD86645742}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{277A166F-941A-46D6-BCB6-AFCD86645742}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{277A166F-941A-46D6-BCB6-AFCD86645742}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1090E875-03C5-4DE3-B663-9F69E5B3CD55}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1090E875-03C5-4DE3-B663-9F69E5B3CD55}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1090E875-03C5-4DE3-B663-9F69E5B3CD55}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1090E875-03C5-4DE3-B663-9F69E5B3CD55}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {8E6E6A4B-5E52-4F59-9900-A63C042FD7EB}
+	EndGlobalSection
+EndGlobal

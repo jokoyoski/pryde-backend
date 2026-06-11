@@ -1,0 +1,6 @@
+@Pryde.Api_HostAddress = http://localhost:5149
+
+GET {{Pryde.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
