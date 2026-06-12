@@ -13,13 +13,13 @@ namespace Pryde.Domain.Entities
         public string LicensePlateNumber { get; set; } = string.Empty;
 
         public string VehicleImageUrl { get; set; } = string.Empty;
+        public bool IsActive { get; set; }
 
         public int Capacity { get; set; }
 
-        public string? InsuranceDocumentUrl { get; set; }
-
-        public DateTime? InsuranceExpiryDate { get; set; }
-
         public User User { get; set; } = null!;
+
+        public ICollection<VehicleDocument> Documents { get; set; }
+            = new List<VehicleDocument>();
     }
 }
