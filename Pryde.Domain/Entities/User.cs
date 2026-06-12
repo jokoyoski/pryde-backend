@@ -17,6 +17,8 @@ namespace Pryde.Domain.Entities
         public bool IsPhoneNumberVerified { get; set; }
         public bool IsTwoFactorEnabled { get; set; }
         public UserStatus Status { get; set; }
+        public Profile? Profile { get; set; }
+        public KycVerification? kycVerification { get; set; }
         public ICollection<UserRole> UserRoles {  get; set; } = new List<UserRole>();
 
     }
