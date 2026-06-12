@@ -1,0 +1,18 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Pryde.Domain.Common;
+using Pryde.Domain.Enums;
+
+namespace Pryde.Domain.Entities
+{
+    public class VehicleDocument : BaseEntity
+    {
+        public VehicleDocumentType DocumentType { get; set; }
+        public string DocumentUrl { get; set; } = string.Empty;
+        public DateTime ExpiryDate { get; set; }
+        public Vehicle Vehicle { get; set; } = null!;
+    }
+}
