@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Pryde.Domain.Enums
 {
-    public enum KycStatus
+    public enum VehicleDocumentType
     {
         Pending = 1,
         Submitted = 2,
