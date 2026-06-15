@@ -10,6 +10,6 @@ namespace Pryde.Domain.Entities
     public class Role : BaseEntity
     {
         public string Name { get; set; } = string.Empty;
-        public ICollection<UserRole> Roles { get; set; } = new List<UserRole>();
+        public ICollection<UserRoles> Roles { get; set; } = new List<UserRoles>();
     }
 }

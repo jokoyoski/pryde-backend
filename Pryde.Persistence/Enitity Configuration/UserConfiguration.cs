@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Pryde.Persistence.Enitity_Configuration
 {
-    internal class KycVerificationConfiguration
+    public class UserConfiguration
     {
     }
 }
