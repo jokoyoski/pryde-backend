@@ -7,7 +7,7 @@ using Pryde.Domain.Common;
 
 namespace Pryde.Domain.Entities
 {
-    public class UserRoles : BaseEntity
+    public class UserRole : BaseEntity
     {
         public Guid UserId { get; set; }
         public Guid RoleId { get; set; }

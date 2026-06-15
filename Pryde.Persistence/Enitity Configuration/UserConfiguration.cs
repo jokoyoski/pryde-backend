@@ -35,7 +35,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasForeignKey<Profile>(x => x.UserId);
 
         builder.HasOne(x => x.KycVerification)
-            .WithOne()
+            .WithOne(x => x.User)
             .HasForeignKey<KycVerification>(x => x.UserId);
 
         builder.HasMany(x => x.UserRoles)

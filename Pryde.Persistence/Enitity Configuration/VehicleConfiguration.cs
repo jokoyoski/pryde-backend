@@ -1,12 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore;
+using Pryde.Domain.Entities;
 
-namespace Pryde.Persistence.Enitity_Configuration
+public class VehicleConfiguration : IEntityTypeConfiguration<Vehicle>
 {
-    public class VehicleConfiguration
+    public void Configure(EntityTypeBuilder<Vehicle> builder)
     {
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.LicensePlateNumber)
+            .IsRequired()
+            .HasMaxLength(50);
+
+        builder.Property(x => x.Capacity)
+            .IsRequired();
     }
 }

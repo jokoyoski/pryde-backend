@@ -1,12 +1,19 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore;
+using Pryde.Domain.Entities;
 
-namespace Pryde.Persistence.Enitity_Configuration
+public class UserRolesConfiguration : IEntityTypeConfiguration<UserRole>
 {
-    public class UserRoleConfiguration
+    public void Configure(EntityTypeBuilder<UserRole> builder)
     {
+        builder.HasKey(x => x.Id);
+
+        builder.HasOne(x => x.User)
+            .WithMany(x => x.UserRoles)
+            .HasForeignKey(x => x.UserId);
+
+        builder.HasOne(x => x.Role)
+            .WithMany(x => x.UserRoles)
+            .HasForeignKey(x => x.RoleId);
     }
 }

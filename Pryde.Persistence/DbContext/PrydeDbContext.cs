@@ -1,6 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Pryde.Domain.Entities;
-using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
 
@@ -14,7 +13,7 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     public DbSet<Profile> Profiles { get; set; }
 
     public DbSet<Role> Roles { get; set; }
-    public DbSet<UserRoles> UserRoles { get; set; }
+    public DbSet<UserRole> UserRoles { get; set; }
 
     public DbSet<KycVerification> KycVerifications { get; set; }
     public DbSet<Vehicle> Vehicles { get; set; }

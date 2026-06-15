@@ -1,12 +1,17 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore;
+using Pryde.Domain.Entities;
 
-namespace Pryde.Persistence.Enitity_Configuration
+public class KycVerificationConfiguration : IEntityTypeConfiguration<KycVerification>
 {
-    public class KycVerificationConfiguration
+    public void Configure(EntityTypeBuilder<KycVerification> builder)
     {
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.Status)
+            .IsRequired();
+
+        builder.HasIndex(x => x.UserId)
+            .IsUnique();
     }
 }

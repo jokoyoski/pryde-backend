@@ -19,7 +19,7 @@ namespace Pryde.Domain.Entities
         public UserStatus Status { get; set; }
         public Profile? Profile { get; set; }
         public KycVerification? KycVerification { get; set; }
-        public ICollection<UserRoles> UserRoles {  get; set; } = new List<UserRoles>();
+        public ICollection<UserRole> UserRoles {  get; set; } = new List<UserRole>();
         public ICollection<Vehicle> Vehicles { get; set; } = new List<Vehicle>();
 
     }
