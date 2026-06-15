@@ -1,12 +1,21 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore;
+using Pryde.Domain.Entities;
 
-namespace Pryde.Persistence.Enitity_Configuration
+public class VehicleDocumentConfiguration : IEntityTypeConfiguration<VehicleDocument>
 {
-    public class VehicleDocumentConfiguration
+    public void Configure(EntityTypeBuilder<VehicleDocument> builder)
     {
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.DocumentUrl)
+            .IsRequired();
+
+        builder.Property(x => x.DocumentType)
+            .IsRequired();
+
+        builder.HasOne(x => x.Vehicle)
+            .WithMany(x => x.Documents)
+            .HasForeignKey(x => x.VehicleId);
     }
 }

@@ -18,7 +18,7 @@ namespace Pryde.Domain.Entities
         public bool IsTwoFactorEnabled { get; set; }
         public UserStatus Status { get; set; }
         public Profile? Profile { get; set; }
-        public KycVerification? kycVerification { get; set; }
+        public KycVerification? KycVerification { get; set; }
         public ICollection<UserRoles> UserRoles {  get; set; } = new List<UserRoles>();
         public ICollection<Vehicle> Vehicles { get; set; } = new List<Vehicle>();
 
