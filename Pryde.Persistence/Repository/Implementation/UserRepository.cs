@@ -20,13 +20,14 @@ public class UserRepository(PrydeDbContext context) : IUserRepository
 
         return await context.Users
             .FirstOrDefaultAsync(
-            u => u.Email.ToLower() == email, cancellationToken);
+            u => u.Email == email, cancellationToken);
     }
 
     public async Task<User?> GetByPhoneNumberAsync( string phoneNumber,
         CancellationToken cancellationToken = default)
     {
         return await context.Users
+            .AsNoTracking()
             .FirstOrDefaultAsync(
             u => u.PhoneNumber == phoneNumber,
             cancellationToken);
@@ -56,15 +57,13 @@ public class UserRepository(PrydeDbContext context) : IUserRepository
         return user;
     }
 
-    public Task UpdateAsync(User user,CancellationToken cancellationToken = default)
+    public void Update(User user)
     {
         context.Users.Update(user);
-        return Task.CompletedTask;
     }
 
-    public Task DeleteAsync(User user,CancellationToken cancellationToken = default)
+    public void Delete(User user)
     {
         context.Users.Remove(user);
-        return Task.CompletedTask;
     }
 }

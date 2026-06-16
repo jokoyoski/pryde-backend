@@ -1,12 +1,22 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Pryde.Domain.Entities;
 
-namespace Pryde.Persistence.Repository.Interfaces
+namespace Pryde.Persistence.Repository.Interfaces;
+
+public interface IUserRepository
 {
-    internal class IUserRepository
-    {
-    }
+    Task<User?> GetByIdAsync( Guid id, CancellationToken cancellationToken = default);
+
+    Task<User?> GetByEmailAsync(string email, CancellationToken cancellationToken = default);
+
+    Task<User?> GetByPhoneNumberAsync( string phoneNumber, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<User>> GetAllAsync(CancellationToken cancellationToken = default);
+
+    Task<bool> ExistsAsync(string email,string? phoneNumber, CancellationToken cancellationToken = default);
+
+    Task<User> CreateAsync( User user, CancellationToken cancellationToken = default);
+
+    void Update( User user);
+
+    void Delete( User user);
 }
