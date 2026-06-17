@@ -12,7 +12,7 @@ public interface IRoleRepository
 
     Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken = default);
 
-    Task CreateAsync(Role role, CancellationToken cancellationToken = default);
+    Task<Role> CreateAsync(Role role, CancellationToken cancellationToken = default);
 
     void Update(Role role);
 
