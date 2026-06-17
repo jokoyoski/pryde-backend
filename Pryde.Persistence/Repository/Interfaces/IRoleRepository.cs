@@ -1,12 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Pryde.Domain.Entities;
 
-namespace Pryde.Persistence.Repository.Interfaces
+namespace Pryde.Persistence.Repository.Interfaces;
+
+public interface IRoleRepository
 {
-    internal class IRoleRepository
-    {
-    }
+    Task<Role?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<Role?> GetByNameAsync(string name, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Role>> GetAllAsync(CancellationToken cancellationToken = default);
+
+    Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task CreateAsync(Role role, CancellationToken cancellationToken = default);
+
+    void Update(Role role);
+
+    void Delete(Role role);
 }
