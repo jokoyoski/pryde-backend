@@ -1,7 +1,7 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+using Pryde.Domain.Common;
 using Pryde.Domain.Entities;
 using System.Reflection;
-using System.Reflection.Emit;
 
 namespace Pryde.Persistence.Context;
 
@@ -9,28 +9,48 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     : DbContext(options)
 {
     public DbSet<User> Users { get; set; }
-
     public DbSet<Profile> Profiles { get; set; }
-
     public DbSet<Role> Roles { get; set; }
     public DbSet<UserRole> UserRoles { get; set; }
-
     public DbSet<KycVerification> KycVerifications { get; set; }
     public DbSet<Vehicle> Vehicles { get; set; }
-
     public DbSet<VehicleDocument> VehicleDocuments { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-
-        modelBuilder.ApplyConfigurationsFromAssembly(
-            Assembly.GetExecutingAssembly());
+        modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
     }
 
-    protected override void ConfigureConventions(
-        ModelConfigurationBuilder configurationBuilder)
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
-        base.ConfigureConventions(configurationBuilder);
+        ApplyAuditInformation();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        ApplyAuditInformation();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void ApplyAuditInformation()
+    {
+        var now = DateTime.UtcNow;
+
+        foreach (var entry in ChangeTracker.Entries<BaseEntity>())
+        {
+            if (entry.State == EntityState.Added && entry.Entity.CreatedAt == default)
+            {
+                entry.Entity.CreatedAt = now;
+            }
+
+            if (entry.State == EntityState.Modified)
+            {
+                entry.Entity.UpdatedAt = now;
+            }
+        }
     }
 }

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Pryde.Persistence.Context;
@@ -11,9 +12,11 @@ using Pryde.Persistence.Context;
 namespace Pryde.Persistence.Migrations
 {
     [DbContext(typeof(PrydeDbContext))]
-    partial class PrydeDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260620195228_EnforceUniqueUserRole")]
+    partial class EnforceUniqueUserRole
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -60,7 +63,7 @@ namespace Pryde.Persistence.Migrations
                     b.HasIndex("UserId")
                         .IsUnique();
 
-                    b.ToTable("KycVerifications", (string)null);
+                    b.ToTable("KycVerifications");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.Profile", b =>
@@ -99,7 +102,7 @@ namespace Pryde.Persistence.Migrations
                     b.HasIndex("UserId")
                         .IsUnique();
 
-                    b.ToTable("Profiles", (string)null);
+                    b.ToTable("Profiles");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.Role", b =>
@@ -127,7 +130,7 @@ namespace Pryde.Persistence.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Roles", (string)null);
+                    b.ToTable("Roles");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.User", b =>
@@ -179,7 +182,7 @@ namespace Pryde.Persistence.Migrations
                     b.HasIndex("PhoneNumber")
                         .IsUnique();
 
-                    b.ToTable("Users", (string)null);
+                    b.ToTable("Users");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.UserRole", b =>
@@ -210,7 +213,7 @@ namespace Pryde.Persistence.Migrations
                     b.HasIndex("UserId", "RoleId")
                         .IsUnique();
 
-                    b.ToTable("UserRoles", (string)null);
+                    b.ToTable("UserRoles");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.Vehicle", b =>
@@ -250,7 +253,7 @@ namespace Pryde.Persistence.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("Vehicles", (string)null);
+                    b.ToTable("Vehicles");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.VehicleDocument", b =>
@@ -285,7 +288,7 @@ namespace Pryde.Persistence.Migrations
 
                     b.HasIndex("VehicleId");
 
-                    b.ToTable("VehicleDocuments", (string)null);
+                    b.ToTable("VehicleDocuments");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.KycVerification", b =>

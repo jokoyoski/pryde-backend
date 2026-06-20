@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Pryde.Domain.Entities;
+using Pryde.Domain.Enums;
 using Pryde.Persistence.Context;
 using Pryde.Persistence.Repository.Interfaces;
 
@@ -13,6 +14,7 @@ public class KycVerificationRepository(PrydeDbContext context)
         CancellationToken cancellationToken = default)
     {
         return await context.KycVerifications
+            .AsNoTracking()
             .FirstOrDefaultAsync(kyc => kyc.Id == id, cancellationToken);
     }
 
@@ -21,6 +23,7 @@ public class KycVerificationRepository(PrydeDbContext context)
         CancellationToken cancellationToken = default)
     {
         return await context.KycVerifications
+            .AsNoTracking()
             .FirstOrDefaultAsync(kyc => kyc.UserId == userId, cancellationToken);
     }
 
@@ -30,6 +33,17 @@ public class KycVerificationRepository(PrydeDbContext context)
         return await context.KycVerifications
             .AsNoTracking()
             .OrderByDescending(kyc => kyc.CreatedAt)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<KycVerification>> GetByStatusAsync(
+    KycStatus status,
+    CancellationToken cancellationToken = default)
+    {
+        return await context.KycVerifications
+            .AsNoTracking()
+            .Where(k => k.Status == status)
+            .OrderByDescending(k => k.CreatedAt)
             .ToListAsync(cancellationToken);
     }
 
