@@ -10,6 +10,7 @@ namespace Pryde.Domain.Entities
 {
     public class VehicleDocument : BaseEntity
     {
+        public Guid VehicleId { get; set; }
         public VehicleDocumentType DocumentType { get; set; }
         public string DocumentUrl { get; set; } = string.Empty;
         public DateTime ExpiryDate { get; set; }
