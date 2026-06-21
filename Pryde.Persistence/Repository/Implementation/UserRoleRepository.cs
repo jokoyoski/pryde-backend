@@ -1,4 +1,3 @@
-// UserRoleRepository.cs
 using Microsoft.EntityFrameworkCore;
 using Pryde.Domain.Entities;
 using Pryde.Persistence.Context;

@@ -35,6 +35,13 @@ public class UserRepository(PrydeDbContext context) : IUserRepository
         string phoneNumber,
         CancellationToken cancellationToken = default)
     {
+        phoneNumber = NormalizePhoneNumber(phoneNumber);
+
+        if (string.IsNullOrWhiteSpace(phoneNumber))
+        {
+            return null;
+        }
+
         return await context.Users
             .AsNoTracking()
             .FirstOrDefaultAsync(
@@ -57,6 +64,7 @@ public class UserRepository(PrydeDbContext context) : IUserRepository
         CancellationToken cancellationToken = default)
     {
         email = NormalizeEmail(email);
+        phoneNumber = NormalizePhoneNumber(phoneNumber);
 
         return await context.Users.AnyAsync(
             user => user.Email == email ||
@@ -89,5 +97,10 @@ public class UserRepository(PrydeDbContext context) : IUserRepository
     private static string NormalizeEmail(string email)
     {
         return email.Trim().ToLowerInvariant();
+    }
+
+    private static string? NormalizePhoneNumber(string? phoneNumber)
+    {
+        return phoneNumber?.Trim();
     }
 }
