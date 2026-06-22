@@ -2,6 +2,9 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Pryde.Persistence.Context;
+using Pryde.Persistence.Extension;
+using Pryde.Persistence.Repository.Implementations;
+using Pryde.Persistence.Repository.Interfaces;
 
 namespace Pryde.Persistence.DependencyInjection;
 
@@ -11,17 +14,30 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString("PrydeConnection");
+        var connectionString = configuration
+            .GetDbConnectionStringBuilder()
+            .ConnectionString;
 
         services.AddDbContext<PrydeDbContext>(options =>
             options.UseNpgsql(
                 connectionString,
-                action =>
-                    action.MigrationsAssembly(typeof(PrydeDbContext).Assembly.FullName)
-                          .EnableRetryOnFailure(
-                              maxRetryCount: 5,
-                              maxRetryDelay: TimeSpan.FromSeconds(30),
-                              errorCodesToAdd: null)));
+                npgsqlOptions =>
+                    npgsqlOptions.MigrationsAssembly(
+                            typeof(PrydeDbContext).Assembly.FullName)
+                        .EnableRetryOnFailure(
+                            maxRetryCount: 5,
+                            maxRetryDelay: TimeSpan.FromSeconds(30),
+                            errorCodesToAdd: null)));
+
+        services.AddRepositories();
+
+        return services;
+    }
+
+    private static IServiceCollection AddRepositories(this IServiceCollection services)
+    {
+        services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IRoleRepository, RoleRepository>();
 
         return services;
     }
