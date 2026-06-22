@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Pryde.Persistence.Context;
@@ -38,6 +38,12 @@ public static class ServiceCollectionExtensions
     {
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRoleRepository, RoleRepository>();
+        services.AddScoped<IKycVerificationRepository, KycVerificationRepository>();
+        services.AddScoped<IUserRoleRepository, UserRoleRepository>();
+        services.AddScoped<IProfileRepository, ProfileRepository>();
+        services.AddScoped<IVehicleRepository, VehicleRepository>();
+        services.AddScoped<IVehicleDocumentRepository, VehicleDocumentRepository>();
+
 
         return services;
     }

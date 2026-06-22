@@ -1,5 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Pryde.Domain.Entities;
 
 public class UserRolesConfiguration : IEntityTypeConfiguration<UserRole>
@@ -7,6 +7,9 @@ public class UserRolesConfiguration : IEntityTypeConfiguration<UserRole>
     public void Configure(EntityTypeBuilder<UserRole> builder)
     {
         builder.HasKey(x => x.Id);
+
+        builder.HasIndex(x => new { x.UserId, x.RoleId })
+            .IsUnique();
 
         builder.HasOne(x => x.User)
             .WithMany(x => x.UserRoles)
