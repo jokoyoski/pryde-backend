@@ -40,6 +40,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRoleRepository, RoleRepository>();
         services.AddScoped<IKycVerificationRepository, KycVerificationRepository>();
         services.AddScoped<IUserRoleRepository, UserRoleRepository>();
+        services.AddScoped<IProfileRepository, ProfileRepository>();
+
 
         return services;
     }
