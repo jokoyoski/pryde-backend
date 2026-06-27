@@ -5,8 +5,7 @@ using Pryde.Persistence.Context;
 using Pryde.Persistence.Extension;
 using Pryde.Persistence.Repository.Implementations;
 using Pryde.Persistence.Repository.Interfaces;
-
-namespace Pryde.Persistence.DependencyInjection;
+using Pryde.Persistence.Settings;
 
 public static class ServiceCollectionExtensions
 {
@@ -14,6 +13,9 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        //services.Configure<DatabaseSettings>(
+        //configuration.GetSection(DatabaseSettings.SectionName));
+
         var connectionString = configuration
             .GetDbConnectionStringBuilder()
             .ConnectionString;
@@ -44,7 +46,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<IVehicleDocumentRepository, VehicleDocumentRepository>();
 
-
+        services.AddScoped<IUnitOfWork, UnitOfWork>();
         return services;
     }
 }

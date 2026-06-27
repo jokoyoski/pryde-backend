@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pryde-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pryde}
+      POSTGRES_USER: ${POSTGRES_USER:-pryde_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pryde_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pryde_user} -d ${POSTGRES_DB:-pryde}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrator
+    container_name: pryde-migrator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PrydeConnection__Host: postgres
+      PrydeConnection__Port: "5432"
+      PrydeConnection__Database: ${POSTGRES_DB:-pryde}
+      PrydeConnection__Username: ${POSTGRES_USER:-pryde_user}
+      PrydeConnection__Password: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      PrydeConnection__SslMode: Disable
+      PrydeConnection__ChannelBinding: Disable
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: final
+    container_name: pryde-api
+    restart: unless-stopped
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      PrydeConnection__Host: postgres
+      PrydeConnection__Port: "5432"
+      PrydeConnection__Database: ${POSTGRES_DB:-pryde}
+      PrydeConnection__Username: ${POSTGRES_USER:-pryde_user}
+      PrydeConnection__Password: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      PrydeConnection__SslMode: Disable
+      PrydeConnection__ChannelBinding: Disable
+      JwtSettings__Key: ${JWT_KEY:?set JWT_KEY in .env}
+      JwtSettings__Issuer: Pryde.Api
+      JwtSettings__Audience: Pryde.Client
+      JwtSettings__AccessTokenExpiryMinutes: "60"
+    ports:
+      - "8080:8080"
+
+volumes:
+  pryde_pgdata:

@@ -10,7 +10,7 @@ public static class NpgsqlConnectionExtension
         this IConfiguration configuration)
     {
         var settings = configuration
-            .GetSection("PrydeConnection")
+            .GetSection(DatabaseSettings.SectionName)
             .Get<DatabaseSettings>()
             ?? throw new InvalidOperationException(
                 "PrydeConnection configuration is missing.");

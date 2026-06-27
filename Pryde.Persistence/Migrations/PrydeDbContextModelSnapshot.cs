@@ -60,7 +60,7 @@ namespace Pryde.Persistence.Migrations
                     b.HasIndex("UserId")
                         .IsUnique();
 
-                    b.ToTable("KycVerifications", (string)null);
+                    b.ToTable("KycVerifications");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.Profile", b =>
@@ -99,7 +99,7 @@ namespace Pryde.Persistence.Migrations
                     b.HasIndex("UserId")
                         .IsUnique();
 
-                    b.ToTable("Profiles", (string)null);
+                    b.ToTable("Profiles");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.Role", b =>
@@ -127,7 +127,37 @@ namespace Pryde.Persistence.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Roles", (string)null);
+                    b.ToTable("Roles");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("11111111-1111-1111-1111-111111111111"),
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsDeleted = false,
+                            Name = "SuperAdmin"
+                        },
+                        new
+                        {
+                            Id = new Guid("22222222-2222-2222-2222-222222222222"),
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsDeleted = false,
+                            Name = "Admin"
+                        },
+                        new
+                        {
+                            Id = new Guid("33333333-3333-3333-3333-333333333333"),
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsDeleted = false,
+                            Name = "Driver"
+                        },
+                        new
+                        {
+                            Id = new Guid("44444444-4444-4444-4444-444444444444"),
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            IsDeleted = false,
+                            Name = "Passenger"
+                        });
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.User", b =>
@@ -179,7 +209,7 @@ namespace Pryde.Persistence.Migrations
                     b.HasIndex("PhoneNumber")
                         .IsUnique();
 
-                    b.ToTable("Users", (string)null);
+                    b.ToTable("Users");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.UserRole", b =>
@@ -210,7 +240,7 @@ namespace Pryde.Persistence.Migrations
                     b.HasIndex("UserId", "RoleId")
                         .IsUnique();
 
-                    b.ToTable("UserRoles", (string)null);
+                    b.ToTable("UserRoles");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.Vehicle", b =>
@@ -250,7 +280,7 @@ namespace Pryde.Persistence.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("Vehicles", (string)null);
+                    b.ToTable("Vehicles");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.VehicleDocument", b =>
@@ -285,7 +315,7 @@ namespace Pryde.Persistence.Migrations
 
                     b.HasIndex("VehicleId");
 
-                    b.ToTable("VehicleDocuments", (string)null);
+                    b.ToTable("VehicleDocuments");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.KycVerification", b =>
