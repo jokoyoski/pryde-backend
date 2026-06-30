@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Asp.Versioning.Mvc" Version="8.1.1" />
+	  <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="8.1.1" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.13" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.13">
       <PrivateAssets>all</PrivateAssets>
@@ -21,6 +22,8 @@
     <ProjectReference Include="..\Pryde.Domain\Pryde.Domain.csproj" />
     <ProjectReference Include="..\Pryde.Persistence\Pryde.Persistence.csproj" />
     <ProjectReference Include="..\Pryde.Services\Pryde.Services.csproj" />
+	<ProjectReference Include="..\Pryde.Contracts\Pryde.Contracts.csproj" />
+
   </ItemGroup>
 
 </Project>

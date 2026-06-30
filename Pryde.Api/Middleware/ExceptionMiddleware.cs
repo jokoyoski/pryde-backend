@@ -1,6 +1,6 @@
 ﻿using System.Text.Json;
 using Pryde.Domain.Common.Exceptions;
-using Pryde.Domain.DTOs.ResponseModels;
+using Pryde.Contracts.ResponseModels;
 
 namespace Pryde.Api.Middleware;
 
