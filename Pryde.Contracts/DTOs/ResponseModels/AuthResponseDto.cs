@@ -1,5 +1,4 @@
-namespace Pryde.Domain.DTOs.ResponseModels;
-
+namespace Pryde.Contracts.ResponseModels;
 public class AuthResponseDto
 {
     public Guid UserId { get; set; }

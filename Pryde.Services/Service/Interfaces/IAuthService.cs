@@ -1,5 +1,5 @@
-﻿using Pryde.Domain.DTOs.RequestModels;
-using Pryde.Domain.DTOs.ResponseModels;
+﻿using Pryde.Contracts.RequestModels;
+using Pryde.Contracts.ResponseModels;
 
 namespace Pryde.Services.Service.Interface;
 

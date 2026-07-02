@@ -1,4 +1,4 @@
-namespace Pryde.Domain.DTOs.RequestModels;
+namespace Pryde.Contracts.RequestModels;
 
 public class LoginRequestDto
 {

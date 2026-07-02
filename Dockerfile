@@ -8,6 +8,7 @@ COPY ["Pryde.Api/Pryde.Api.csproj", "Pryde.Api/"]
 COPY ["Pryde.Domain/Pryde.Domain.csproj", "Pryde.Domain/"]
 COPY ["Pryde.Persistence/Pryde.Persistence.csproj", "Pryde.Persistence/"]
 COPY ["Pryde.Services/Pryde.Services.csproj", "Pryde.Services/"]
+COPY ["Pryde.Contracts/Pryde.Contracts.csproj", "Pryde.Contracts/"]
 RUN dotnet restore "Pryde.Api/Pryde.Api.csproj"
 
 COPY . .

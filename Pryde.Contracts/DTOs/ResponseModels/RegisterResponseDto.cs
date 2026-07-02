@@ -1,6 +1,6 @@
 using Pryde.Domain.Enums;
 
-namespace Pryde.Domain.DTOs.ResponseModels;
+namespace Pryde.Contracts.ResponseModels;
 
 public class RegisterResponseDto
 {
