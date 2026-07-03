@@ -11,6 +11,6 @@ namespace Pryde.Domain.Enums
         Pending = 1,
         Active = 2,
         Suspended = 3,
-        Deactiviated = 4,
+        Deactivated = 4,
     }
 }

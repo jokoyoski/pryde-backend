@@ -1,0 +1,17 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/.git/
+**/.github/
+**/.idea/
+**/.agents/
+**/.sixth/
+**/node_modules/
+**/*.user
+**/*.suo
+**/*.md
+.env
+.env.*
+Dockerfile*
+docker-compose*

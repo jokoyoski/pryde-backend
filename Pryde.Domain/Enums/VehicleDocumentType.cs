@@ -8,9 +8,10 @@ namespace Pryde.Domain.Enums
 {
     public enum VehicleDocumentType
     {
-        Pending = 1,
-        Submitted = 2,
-        Approved = 3,
-        Rejected = 4
+        VehicleRegistration = 1,
+        Insurance = 2,
+        RoadworthinessCertificate = 3,
+        DriversLicense = 4,
+        Other = 5
     }
 }

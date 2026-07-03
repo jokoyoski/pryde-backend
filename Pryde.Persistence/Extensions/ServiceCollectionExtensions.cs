@@ -1,12 +1,11 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Pryde.Persistence.Context;
 using Pryde.Persistence.Extension;
 using Pryde.Persistence.Repository.Implementations;
 using Pryde.Persistence.Repository.Interfaces;
-
-namespace Pryde.Persistence.DependencyInjection;
+using Pryde.Persistence.Settings;
 
 public static class ServiceCollectionExtensions
 {
@@ -14,6 +13,9 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        //services.Configure<DatabaseSettings>(
+        //configuration.GetSection(DatabaseSettings.SectionName));
+
         var connectionString = configuration
             .GetDbConnectionStringBuilder()
             .ConnectionString;
@@ -38,7 +40,13 @@ public static class ServiceCollectionExtensions
     {
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRoleRepository, RoleRepository>();
+        services.AddScoped<IKycVerificationRepository, KycVerificationRepository>();
+        services.AddScoped<IUserRoleRepository, UserRoleRepository>();
+        services.AddScoped<IProfileRepository, ProfileRepository>();
+        services.AddScoped<IVehicleRepository, VehicleRepository>();
+        services.AddScoped<IVehicleDocumentRepository, VehicleDocumentRepository>();
 
+        services.AddScoped<IUnitOfWork, UnitOfWork>();
         return services;
     }
 }

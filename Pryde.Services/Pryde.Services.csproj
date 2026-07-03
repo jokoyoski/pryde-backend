@@ -7,7 +7,27 @@
   </PropertyGroup>
 
   <ItemGroup>
+	<FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
+    <PackageReference Include="CloudinaryDotNet" Version="1.29.2" />
+    <PackageReference Include="Mapster" Version="10.0.8" />
+    <PackageReference Include="Mapster.DependencyInjection" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Identity.Core" Version="10.0.9" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.19.1" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Pryde.Domain\Pryde.Domain.csproj" />
+    <ProjectReference Include="..\Pryde.Persistence\Pryde.Persistence.csproj" />
+	<ProjectReference Include="..\Pryde.Contracts\Pryde.Contracts.csproj" />
+
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Security\Interface\" />
   </ItemGroup>
 
 </Project>
