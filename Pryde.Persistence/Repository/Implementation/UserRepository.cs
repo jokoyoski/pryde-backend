@@ -73,7 +73,7 @@ public class UserRepository(PrydeDbContext context) : IUserRepository
             cancellationToken);
     }
 
-    public async Task CreateAsync(
+    public async Task<User> CreateAsync(
         User user,
         CancellationToken cancellationToken = default)
     {
@@ -81,6 +81,7 @@ public class UserRepository(PrydeDbContext context) : IUserRepository
         user.PhoneNumber = NormalizePhoneNumber(user.PhoneNumber);
 
         await context.Users.AddAsync(user, cancellationToken);
+        return user;
     }
 
     public void Update(User user)

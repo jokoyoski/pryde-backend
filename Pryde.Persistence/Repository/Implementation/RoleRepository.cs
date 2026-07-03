@@ -52,5 +52,5 @@ public class RoleRepository(PrydeDbContext context) : IRoleRepository
         context.Roles.Remove(role);
     }
 
-    private static string NormalizeName(string name) => name.Trim().ToLowerInvariant();
+    private static string NormalizeName(string name) => name.Trim();
 }

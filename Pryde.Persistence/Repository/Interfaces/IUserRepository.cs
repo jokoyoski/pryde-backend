@@ -24,7 +24,7 @@ public interface IUserRepository
         string? phoneNumber,
         CancellationToken cancellationToken = default);
 
-    Task CreateAsync(
+    Task<User> CreateAsync(
         User user,
         CancellationToken cancellationToken = default);
 

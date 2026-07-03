@@ -2,6 +2,8 @@
 
 public sealed class DatabaseSettings
 {
+    public const string SectionName = "PrydeConnection";
+
     public string Host { get; set; } = string.Empty;
     public int Port { get; set; } = 5432;
     public string Database { get; set; } = string.Empty;
