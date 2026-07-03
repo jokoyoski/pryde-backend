@@ -1,6 +1,7 @@
-﻿using Pryde.Domain.Common.Exceptions;
-using Pryde.Domain.DTOs.RequestModels;
-using Pryde.Domain.DTOs.ResponseModels;
+﻿using Mapster;
+using Pryde.Domain.Common.Exceptions;
+using Pryde.Contracts.RequestModels;
+using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
@@ -8,6 +9,7 @@ using Pryde.Services.Security.Interface;
 using Pryde.Services.Service.Interface;
 
 namespace Pryde.Services.Service.Implementation;
+
 
 public class AuthService(
     IUnitOfWork unitOfWork,
@@ -86,13 +88,9 @@ public class AuthService(
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return new RegisterResponseDto
-        {
-            UserId = user.Id,
-            Email = user.Email,
-            Status = user.Status,
-            Roles = assignedRoles
-        };
+        var response = user.Adapt<RegisterResponseDto>();
+        response.Roles = assignedRoles;
+        return response;
     }
 
     public async Task<LoginResponseDto> LoginAsync(
@@ -145,12 +143,9 @@ public class AuthService(
             user.Email,
             roleNames);
 
-        return new LoginResponseDto
-        {
-            UserId = user.Id,
-            Email = user.Email,
-            AccessToken = accessToken
-        };
+        var response = user.Adapt<LoginResponseDto>();
+        response.AccessToken = accessToken;
+        return response;
     }
 
     private static void ValidateRegistrationRequest(RegisterRequestDto request)

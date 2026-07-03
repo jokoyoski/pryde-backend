@@ -1,20 +1,27 @@
+using Mapster;
 using Microsoft.EntityFrameworkCore;
+using Pryde.Api.Extension;
 using Pryde.Api.Extensions;
 using Pryde.Api.Middleware;
 using Pryde.Persistence.Context;
 using Pryde.Services.DependencyInjection;
-using Pryde.Services.Settings;
 
 var builder = WebApplication.CreateBuilder(args);
 
+TypeAdapterConfig.GlobalSettings.Scan(
+    typeof(Program).Assembly,
+    typeof(Pryde.Services.Mapping.MapsterConfig).Assembly);
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+
+builder.Services.AddApiVersioningConfiguration();
+builder.Services.AddSwaggerConfiguration();
 
 builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddServices();
-builder.Services.AddApiVersioningConfiguration();
-builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection(JwtSettings.SectionName));
+
+builder.Services.AddAuthenticationConfiguration(builder.Configuration);
 
 var app = builder.Build();
 

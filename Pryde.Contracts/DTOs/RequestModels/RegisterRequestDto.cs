@@ -1,6 +1,6 @@
 using Pryde.Domain.Enums;
 
-namespace Pryde.Domain.DTOs.RequestModels;
+namespace Pryde.Contracts.RequestModels;
 
 public class RegisterRequestDto
 {

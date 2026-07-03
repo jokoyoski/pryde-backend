@@ -1,0 +1,57 @@
+﻿using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using Pryde.Services.Settings;
+
+namespace Pryde.Api.Extension;
+
+public static class AuthenticationExtensions
+{
+    public static IServiceCollection AddAuthenticationConfiguration(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        var jwtSettingsSection = configuration.GetSection(JwtSettings.SectionName);
+
+        services.Configure<JwtSettings>(jwtSettingsSection);
+        services.Configure<CloudinarySettings>(
+            configuration.GetSection(CloudinarySettings.SectionName));
+
+        var jwtSettings = jwtSettingsSection.Get<JwtSettings>()
+            ?? throw new InvalidOperationException(
+                "JwtSettings configuration is missing.");
+
+        if (string.IsNullOrWhiteSpace(jwtSettings.Key) ||
+            string.IsNullOrWhiteSpace(jwtSettings.Issuer) ||
+            string.IsNullOrWhiteSpace(jwtSettings.Audience))
+        {
+            throw new InvalidOperationException(
+                "JwtSettings is incomplete.");
+        }
+
+        services
+            .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer(options =>
+            {
+                options.TokenValidationParameters =
+                    new TokenValidationParameters
+                    {
+                        ValidateIssuer = true,
+                        ValidateAudience = true,
+                        ValidateLifetime = true,
+                        ValidateIssuerSigningKey = true,
+
+                        ValidIssuer = jwtSettings.Issuer,
+                        ValidAudience = jwtSettings.Audience,
+
+                        IssuerSigningKey =
+                            new SymmetricSecurityKey(
+                                Encoding.UTF8.GetBytes(jwtSettings.Key))
+                    };
+            });
+
+        services.AddAuthorization();
+
+        return services;
+    }
+}

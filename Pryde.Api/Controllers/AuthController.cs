@@ -1,6 +1,6 @@
 ﻿using Asp.Versioning;
 using Microsoft.AspNetCore.Mvc;
-using Pryde.Domain.DTOs.RequestModels;
+using Pryde.Contracts.RequestModels;
 using Pryde.Services.Service.Interface;
 
 namespace Pryde.Api.Controllers.V1;
