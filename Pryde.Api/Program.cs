@@ -39,6 +39,7 @@ if (app.Configuration.GetValue<bool>("RunMigrationsOnStartup"))
     var dbContext = scope.ServiceProvider.GetRequiredService<PrydeDbContext>();
     await dbContext.Database.MigrateAsync();
 }
+await app.SeedDatabaseAsync();
 
 app.UseSwagger();
 app.UseSwaggerUI();

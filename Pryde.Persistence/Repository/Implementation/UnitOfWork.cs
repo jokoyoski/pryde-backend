@@ -11,7 +11,8 @@ public class UnitOfWork(
     IProfileRepository profiles,
     IKycVerificationRepository kycVerifications,
     IVehicleRepository vehicles,
-    IVehicleDocumentRepository vehicleDocuments)
+    IVehicleDocumentRepository vehicleDocuments,
+    IRefreshTokenRepository refreshTokenRepository)
     : IUnitOfWork
 {
     public IUserRepository Users { get; } = users;
@@ -21,6 +22,8 @@ public class UnitOfWork(
     public IKycVerificationRepository KycVerifications { get; } = kycVerifications;
     public IVehicleRepository Vehicles { get; } = vehicles;
     public IVehicleDocumentRepository VehicleDocuments { get; } = vehicleDocuments;
+    public IRefreshTokenRepository RefreshTokens { get; } = refreshTokenRepository;
+
 
     public async Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default)

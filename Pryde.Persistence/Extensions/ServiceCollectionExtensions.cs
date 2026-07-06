@@ -13,9 +13,6 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        //services.Configure<DatabaseSettings>(
-        //configuration.GetSection(DatabaseSettings.SectionName));
-
         var connectionString = configuration
             .GetDbConnectionStringBuilder()
             .ConnectionString;
@@ -45,6 +42,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IProfileRepository, ProfileRepository>();
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<IVehicleDocumentRepository, VehicleDocumentRepository>();
+        services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         return services;

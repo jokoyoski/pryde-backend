@@ -21,6 +21,7 @@ namespace Pryde.Domain.Entities
         public KycVerification? KycVerification { get; set; }
         public ICollection<UserRole> UserRoles {  get; set; } = new List<UserRole>();
         public ICollection<Vehicle> Vehicles { get; set; } = new List<Vehicle>();
+        public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
 
     }
 }
