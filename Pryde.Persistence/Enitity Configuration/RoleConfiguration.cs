@@ -25,6 +25,7 @@ public class RoleConfiguration : IEntityTypeConfiguration<Role>
             {
                 Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
                 Name = "SuperAdmin",
+                
                 CreatedAt = SeedDate
             },
             new Role

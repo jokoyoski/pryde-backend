@@ -18,6 +18,7 @@ services:
       JwtSettings__Issuer: Pryde.Api
       JwtSettings__Audience: Pryde.Client
       JwtSettings__AccessTokenExpiryMinutes: "60"
+      JwtSettings__RefreshTokenExpiryDays: "30"
 
   api:
     build:
@@ -44,6 +45,7 @@ services:
       JwtSettings__Issuer: Pryde.Api
       JwtSettings__Audience: Pryde.Client
       JwtSettings__AccessTokenExpiryMinutes: "60"
+      JwtSettings__RefreshTokenExpiryDays: "30"
 
       CloudinarySettings__CloudName: ${CLOUDINARY_CLOUD_NAME}
       CloudinarySettings__ApiKey: ${CLOUDINARY_API_KEY}

@@ -15,6 +15,7 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     public DbSet<KycVerification> KycVerifications { get; set; }
     public DbSet<Vehicle> Vehicles { get; set; }
     public DbSet<VehicleDocument> VehicleDocuments { get; set; }
+    public DbSet<RefreshToken> RefreshTokens { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

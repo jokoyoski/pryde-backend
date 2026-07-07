@@ -11,7 +11,8 @@ public interface IUnitOfWork
     IKycVerificationRepository KycVerifications { get; }
     IVehicleRepository Vehicles { get; }
     IVehicleDocumentRepository VehicleDocuments { get; }
-
+    IRefreshTokenRepository RefreshTokens { get; }
+    
     Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default);
 }

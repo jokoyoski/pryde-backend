@@ -1,7 +1,8 @@
 ﻿using Mapster;
-using Pryde.Domain.Common.Exceptions;
+using Pryde.Contracts.DTOs.RequestModels;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
+using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
@@ -138,13 +139,110 @@ public class AuthService(
             .Distinct()
             .ToList();
 
-        var accessToken = jwtService.GenerateToken(
+        var response = await IssueTokensAsync(user, roleNames, cancellationToken);
+
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return response;
+    }
+
+    public async Task<LoginResponseDto> RefreshTokenAsync(
+        RefreshTokenRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request?.RefreshToken))
+        {
+            throw new ValidationException("Refresh token is required.");
+        }
+
+        var tokenHash = jwtService.HashToken(request.RefreshToken);
+
+        var storedToken = await unitOfWork.RefreshTokens.GetByTokenHashAsync(
+            tokenHash,
+            cancellationToken);
+
+        if (storedToken is null || !storedToken.IsActive)
+        {
+            throw new UnauthorizedException("Refresh token is invalid or has expired.");
+        }
+
+        var user = await unitOfWork.Users.GetByIdAsync(
+            storedToken.UserId,
+            cancellationToken)
+            ?? throw new UnauthorizedException("Refresh token is invalid or has expired.");
+
+        if (user.Status is UserStatus.Suspended or UserStatus.Deactivated)
+        {
+            throw new ForbiddenException("This account is no longer active.");
+        }
+
+        unitOfWork.RefreshTokens.Revoke(storedToken);
+
+        var userRoles = await unitOfWork.UserRoles.GetByUserIdAsync(
+            user.Id,
+            cancellationToken);
+
+        var roleNames = userRoles
+            .Select(ur => ur.Role.Name)
+            .Distinct()
+            .ToList();
+
+        var response = await IssueTokensAsync(user, roleNames, cancellationToken);
+
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return response;
+    }
+
+    public async Task LogoutAsync(
+        RefreshTokenRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request?.RefreshToken))
+        {
+            throw new BadRequestException("Refresh token is required.");
+        }
+
+        var tokenHash = jwtService.HashToken(request.RefreshToken);
+
+        var storedToken = await unitOfWork.RefreshTokens.GetByTokenHashAsync(
+            tokenHash,
+            cancellationToken);
+
+        if (storedToken is null || storedToken.IsRevoked)
+        {
+            throw new UnauthorizedException("Invalid or revoked refresh token.");
+
+        }
+
+        unitOfWork.RefreshTokens.Revoke(storedToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<LoginResponseDto> IssueTokensAsync(
+        User user,
+        IEnumerable<string> roleNames,
+        CancellationToken cancellationToken)
+    {
+        var accessToken = jwtService.GenerateAccessToken(
             user.Id,
             user.Email,
             roleNames);
 
+        var refreshToken = jwtService.GenerateRefreshToken();
+
+        await unitOfWork.RefreshTokens.CreateAsync(
+            new RefreshToken
+            {
+                UserId = user.Id,
+                TokenHash = jwtService.HashToken(refreshToken),
+                ExpiresAt = DateTime.UtcNow.AddDays(jwtService.RefreshTokenExpiryDays)
+            },
+            cancellationToken);
+
         var response = user.Adapt<LoginResponseDto>();
         response.AccessToken = accessToken;
+        response.RefreshToken = refreshToken;
         return response;
     }
 
