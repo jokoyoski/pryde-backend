@@ -1,5 +1,4 @@
-﻿using Pryde.Contracts.DTOs.RequestModels;
-using Pryde.Contracts.RequestModels;
+﻿using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 
 namespace Pryde.Services.Service.Interface;
@@ -17,5 +16,11 @@ public interface IAuthService
         CancellationToken cancellationToken = default);
     Task LogoutAsync(
         RefreshTokenRequestDto request,
+        CancellationToken cancellationToken = default);
+    Task ForgotPasswordAsync(
+        ForgotPasswordRequestDto request, 
+        CancellationToken cancellationToken = default);
+    Task ResetPasswordAsync(
+        ResetPasswordRequestDto request, 
         CancellationToken cancellationToken = default);
 }

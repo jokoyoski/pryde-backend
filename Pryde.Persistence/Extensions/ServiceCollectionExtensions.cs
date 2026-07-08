@@ -43,6 +43,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<IVehicleDocumentRepository, VehicleDocumentRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<IPasswordResetCodeRepository, PasswordResetCodeRepository>();
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         return services;

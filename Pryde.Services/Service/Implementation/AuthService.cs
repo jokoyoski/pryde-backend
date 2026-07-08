@@ -1,5 +1,5 @@
 ﻿using Mapster;
-using Pryde.Contracts.DTOs.RequestModels;
+using Pryde.Services.Notifications.Interface;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
@@ -13,9 +13,8 @@ namespace Pryde.Services.Service.Implementation;
 
 
 public class AuthService(
-    IUnitOfWork unitOfWork,
-    IPasswordHasher passwordHasher,
-    IJwtService jwtService) : IAuthService
+    IUnitOfWork unitOfWork,IPasswordHasher passwordHasher,IJwtService jwtService,
+    IEmailService emailService) : IAuthService
 {
     public async Task<RegisterResponseDto> RegisterAsync(
         RegisterRequestDto request,
@@ -244,6 +243,71 @@ public class AuthService(
         response.AccessToken = accessToken;
         response.RefreshToken = refreshToken;
         return response;
+    }
+    public async Task ForgotPasswordAsync(
+        ForgotPasswordRequestDto request, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request?.Email))
+            throw new ValidationException("Email is required.");
+
+        var user = await unitOfWork.Users.GetByEmailAsync(
+            request.Email.Trim().ToLowerInvariant(), cancellationToken);
+
+        if (user is null) return;
+
+        await unitOfWork.PasswordResetCodes.InvalidateAllForUserAsync(user.Id, cancellationToken);
+
+        var code = System.Security.Cryptography.RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+
+        await unitOfWork.PasswordResetCodes.CreateAsync(
+            new PasswordResetCode
+            {
+                UserId = user.Id,
+                CodeHash = HashCode(code),
+                ExpiresAt = DateTime.UtcNow.AddMinutes(10)
+            },
+            cancellationToken);
+
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        await emailService.SendAsync(
+            user.Email,
+            "Reset your Pryde password",
+            $"<p>Your password reset code is <strong>{code}</strong>. It expires in 10 minutes.</p>",
+            cancellationToken);
+    }
+
+    public async Task ResetPasswordAsync(
+        ResetPasswordRequestDto request, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request?.Email) ||
+            string.IsNullOrWhiteSpace(request.Code) ||
+            string.IsNullOrWhiteSpace(request.NewPassword))
+        {
+            throw new ValidationException("Email, code, and new password are all required.");
+        }
+
+        var user = await unitOfWork.Users.GetByEmailAsync(
+            request.Email.Trim().ToLowerInvariant(), cancellationToken)
+            ?? throw new ValidationException("Invalid or expired reset code.");
+
+        var code = await unitOfWork.PasswordResetCodes.GetLatestActiveByUserIdAsync(
+            user.Id, cancellationToken);
+
+        if (code is null || !code.IsValid || code.CodeHash != HashCode(request.Code))
+            throw new ValidationException("Invalid or expired reset code.");
+
+        unitOfWork.PasswordResetCodes.MarkUsed(code);
+        user.PasswordHash = passwordHasher.Hash(request.NewPassword);
+        unitOfWork.Users.Update(user);
+
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string HashCode(string code)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(code);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
     }
 
     private static void ValidateRegistrationRequest(RegisterRequestDto request)

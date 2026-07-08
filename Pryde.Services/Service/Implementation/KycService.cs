@@ -165,4 +165,33 @@ public class KycService(
 
         return upload.PublicUrl;
     }
+    public async Task<KycVerificationResponseDto> ApproveAsync(
+        Guid userId, CancellationToken cancellationToken = default)
+    {
+        var kyc = await unitOfWork.KycVerifications.GetByUserIdAsync(userId, cancellationToken)
+            ?? throw new NotFoundException(nameof(KycVerification), userId);
+
+        kyc.Status = KycStatus.Approved;
+        kyc.VerifiedAt = DateTime.UtcNow;
+
+        unitOfWork.KycVerifications.Update(kyc);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return kyc.Adapt<KycVerificationResponseDto>();
+    }
+
+    public async Task<KycVerificationResponseDto> RejectAsync(
+        Guid userId, string reason, CancellationToken cancellationToken = default)
+    {
+        var kyc = await unitOfWork.KycVerifications.GetByUserIdAsync(userId, cancellationToken)
+            ?? throw new NotFoundException(nameof(KycVerification), userId);
+
+        kyc.Status = KycStatus.Rejected;
+        kyc.VerifiedAt = null;
+
+        unitOfWork.KycVerifications.Update(kyc);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return kyc.Adapt<KycVerificationResponseDto>();
+    }
 }

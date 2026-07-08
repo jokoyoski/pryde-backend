@@ -8,38 +8,50 @@ using Pryde.Services.Service.Interface;
 namespace Pryde.Services.Service.Implementation;
 public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
 {
-    public async Task<VehicleResponseDto> CreateAsync(Guid driverId, string licensePlateNumber, int capacity, string vehicleImageUrl, CancellationToken cancellationToken = default)
+    public async Task<VehicleResponseDto> CreateAsync( Guid driverId,string licensePlateNumber,
+    int capacity,string vehicleImageUrl, CancellationToken cancellationToken = default)
+{
+    licensePlateNumber = licensePlateNumber?.Trim().ToUpperInvariant();
+    vehicleImageUrl = vehicleImageUrl?.Trim();
+
+    if (string.IsNullOrWhiteSpace(licensePlateNumber))
+        throw new ValidationException("License plate number is required.");
+
+    if (string.IsNullOrWhiteSpace(vehicleImageUrl))
+        throw new ValidationException("Vehicle image is required.");
+
+    if (capacity <= 0)
+        throw new ValidationException("Capacity must be greater than zero.");
+
+    var userRoles = await unitOfWork.UserRoles.GetByUserIdAsync(driverId, cancellationToken);
+
+    var isDriver = userRoles.Any(ur => ur.Role.Name == RoleType.Driver.ToString());
+
+    if (!isDriver)
+        throw new ForbiddenException("Only users with the Driver role can register a vehicle.");
+
+    var kyc = await unitOfWork.KycVerifications.GetByUserIdAsync(driverId, cancellationToken);
+
+    if (kyc is null || kyc.Status != KycStatus.Approved)
+        throw new ForbiddenException("Your KYC verification must be approved before registering a vehicle.");
+
+    if (await unitOfWork.Vehicles.ExistsAsync(licensePlateNumber, cancellationToken))
+        throw new ConflictException("A vehicle with this license plate is already registered.");
+
+    var vehicle = new Vehicle
     {
-        if (string.IsNullOrWhiteSpace(licensePlateNumber))
-            throw new ValidationException("License plate number is required.");
-        if (string.IsNullOrWhiteSpace(vehicleImageUrl))
-            throw new ValidationException("Vehicle image is required.");
-        if (capacity <= 0)
-            throw new ValidationException("Capacity must be greater than zero.");
+        UserId = driverId,
+        LicensePlateNumber = licensePlateNumber,
+        VehicleImageUrl = vehicleImageUrl,
+        Capacity = capacity,
+        IsActive = false
+    };
 
-        var userRoles = await unitOfWork.UserRoles.GetByUserIdAsync(driverId, cancellationToken);
-        var isDriver = userRoles.Any(ur => ur.Role.Name == RoleType.Driver.ToString());
-        if (!isDriver)
-            throw new ForbiddenException("Only users with the Driver role can register a vehicle.");
+    await unitOfWork.Vehicles.CreateAsync(vehicle, cancellationToken);
+    await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var plate = licensePlateNumber.Trim();
-        if (await unitOfWork.Vehicles.ExistsAsync(plate, cancellationToken))
-            throw new ConflictException("A vehicle with this license plate is already registered.");
-
-        var vehicle = new Vehicle
-        {
-            UserId = driverId,
-            LicensePlateNumber = plate,
-            VehicleImageUrl = vehicleImageUrl.Trim(),
-            Capacity = capacity,
-            IsActive = false
-        };
-
-        await unitOfWork.Vehicles.CreateAsync(vehicle, cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
-
-        return vehicle.Adapt<VehicleResponseDto>();
-    }
+    return vehicle.Adapt<VehicleResponseDto>();
+}
 
     public async Task<VehicleResponseDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {

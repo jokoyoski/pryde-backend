@@ -12,7 +12,8 @@ public interface IUnitOfWork
     IVehicleRepository Vehicles { get; }
     IVehicleDocumentRepository VehicleDocuments { get; }
     IRefreshTokenRepository RefreshTokens { get; }
-    
+    IPasswordResetCodeRepository PasswordResetCodes { get; }
+
     Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default);
 }

@@ -16,6 +16,7 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     public DbSet<Vehicle> Vehicles { get; set; }
     public DbSet<VehicleDocument> VehicleDocuments { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
+    public DbSet<PasswordResetCode> PasswordResetCodes { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
