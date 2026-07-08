@@ -22,7 +22,7 @@ public static class ServiceCollectionExtension
 
         services.AddScoped<IFileStorageService, CloudinaryFileStorageService>();
         services.AddScoped<IVehicleDocumentService, VehicleDocumentService>();
-
+        services.AddScoped<IUserService, UserService>();
         return services;
     }
 }

@@ -1,6 +1,6 @@
 ﻿
 
-namespace Pryde.Contracts.DTOs.RequestModels
+namespace Pryde.Contracts.RequestModels
 {
     public class RefreshTokenRequestDto
     {

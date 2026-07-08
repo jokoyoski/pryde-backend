@@ -20,6 +20,12 @@ services:
       JwtSettings__AccessTokenExpiryMinutes: "60"
       JwtSettings__RefreshTokenExpiryDays: "30"
 
+      EmailSettings__ApiKey: ${RESEND_API_KEY}
+      EmailSettings__FromAddress: ${EMAIL_FROM_ADDRESS}
+      EmailSettings__FromName: Pryde
+
+
+
   api:
     build:
       context: .
@@ -50,6 +56,11 @@ services:
       CloudinarySettings__CloudName: ${CLOUDINARY_CLOUD_NAME}
       CloudinarySettings__ApiKey: ${CLOUDINARY_API_KEY}
       CloudinarySettings__ApiSecret: ${CLOUDINARY_API_SECRET}
+
+      EmailSettings__ApiKey: ${RESEND_API_KEY}
+      EmailSettings__FromAddress: ${EMAIL_FROM_ADDRESS}
+      EmailSettings__FromName: ${EMAIL_FROM_NAME}
+      EmailSettings__OtpExpiryMinutes: ${EMAIL_OTP_EXPIRY_MINUTES}
 
     ports:
       - "8080:8080"

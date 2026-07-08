@@ -1,4 +1,5 @@
-﻿using Pryde.Persistence.Context;
+﻿using Pryde.Domain.Entities;
+using Pryde.Persistence.Context;
 using Pryde.Persistence.Repository.Interfaces;
 
 namespace Pryde.Persistence.Repository.Implementations;
@@ -12,7 +13,8 @@ public class UnitOfWork(
     IKycVerificationRepository kycVerifications,
     IVehicleRepository vehicles,
     IVehicleDocumentRepository vehicleDocuments,
-    IRefreshTokenRepository refreshTokenRepository)
+    IRefreshTokenRepository refreshTokenRepository,
+    IPasswordResetCodeRepository passwordResetCodes)
     : IUnitOfWork
 {
     public IUserRepository Users { get; } = users;
@@ -23,7 +25,7 @@ public class UnitOfWork(
     public IVehicleRepository Vehicles { get; } = vehicles;
     public IVehicleDocumentRepository VehicleDocuments { get; } = vehicleDocuments;
     public IRefreshTokenRepository RefreshTokens { get; } = refreshTokenRepository;
-
+    public IPasswordResetCodeRepository PasswordResetCodes { get; } = passwordResetCodes;
 
     public async Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default)

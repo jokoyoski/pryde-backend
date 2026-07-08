@@ -5,6 +5,9 @@ using Pryde.Api.Extensions;
 using Pryde.Api.Middleware;
 using Pryde.Persistence.Context;
 using Pryde.Services.DependencyInjection;
+using Pryde.Services.Notifications.Implementation;
+using Pryde.Services.Notifications.Interface;
+using Pryde.Services.Settings;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,6 +23,15 @@ builder.Services.AddSwaggerConfiguration();
 
 builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddServices();
+
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection(EmailSettings.SectionName));
+builder.Services.AddHttpClient<IEmailService, ResendEmailService>();
+
+// to delete //
+Console.WriteLine(builder.Configuration["EmailSettings:ApiKey"]);
+Console.WriteLine(builder.Configuration["EmailSettings:FromAddress"]);
+Console.WriteLine(builder.Configuration["EmailSettings:FromName"]);
+// to delete//
 
 builder.Services.AddAuthenticationConfiguration(builder.Configuration);
 

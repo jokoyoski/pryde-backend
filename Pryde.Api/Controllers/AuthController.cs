@@ -1,6 +1,5 @@
 ﻿using Asp.Versioning;
 using Microsoft.AspNetCore.Mvc;
-using Pryde.Contracts.DTOs.RequestModels;
 using Pryde.Contracts.RequestModels;
 using Pryde.Services.Service.Interface;
 
@@ -47,6 +46,22 @@ public class AuthController(IAuthService authService) : ControllerBase
     {
         await authService.LogoutAsync(request, cancellationToken);
         return Ok(new { message = "Logged out successfully." });
+    }
+
+    [HttpPost("forgot-password")]
+    public async Task<IActionResult> ForgotPassword(
+        [FromBody] ForgotPasswordRequestDto request, CancellationToken cancellationToken)
+    {
+        await authService.ForgotPasswordAsync(request, cancellationToken);
+        return Ok(new { message = "If that email exists, a reset code has been sent." });
+    }
+
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword(
+        [FromBody] ResetPasswordRequestDto request, CancellationToken cancellationToken)
+    {
+        await authService.ResetPasswordAsync(request, cancellationToken);
+        return Ok(new { message = "Password reset successfully." });
     }
 
 
