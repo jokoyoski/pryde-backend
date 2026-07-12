@@ -7,7 +7,9 @@ using Pryde.Domain.Common.Exceptions;
 using Pryde.Services.Service.Interface;
 using Pryde.Services.Storage.Enums;
 using Pryde.Services.Storage.Interface;
+
 namespace Pryde.Api.Controllers.V1;
+
 [ApiController]
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/vehicles")]
@@ -20,15 +22,13 @@ public class VehicleController(
     [Consumes("multipart/form-data")]
     public async Task<IActionResult> Create([FromForm] VehicleCreateRequestDto request, CancellationToken cancellationToken)
     {
-        ValidateFile(request.VehicleImage, "Vehicle image");
+        if (request.VehicleImages is null || request.VehicleImages.Count == 0)
+            throw new ValidationException("At least one vehicle image is required.");
 
         var userId = GetUserId();
-        await using var stream = request.VehicleImage!.OpenReadStream();
-        var upload = await fileStorageService.UploadAsync(
-            stream, request.VehicleImage.FileName, request.VehicleImage.ContentType,
-            FileCategory.VehiclePhoto, userId, cancellationToken);
+        var imageUrls = await UploadImagesAsync(request.VehicleImages, userId, cancellationToken);
 
-        var result = await vehicleService.CreateAsync(userId, request.LicensePlateNumber, request.Capacity, upload.PublicUrl, cancellationToken);
+        var result = await vehicleService.CreateAsync(userId, request.LicensePlateNumber, request.Capacity, imageUrls, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, result);
     }
 
@@ -47,19 +47,27 @@ public class VehicleController(
     }
 
     [HttpPut("{id:guid}")]
-    [Consumes("multipart/form-data")]
-    public async Task<IActionResult> Update(Guid id, [FromForm] VehicleUpdateRequestDto request, CancellationToken cancellationToken)
+    public async Task<IActionResult> Update(Guid id, [FromBody] VehicleUpdateRequestDto request, CancellationToken cancellationToken)
     {
-        ValidateFile(request.VehicleImage, "Vehicle image");
-
-        var userId = GetUserId();
-        await using var stream = request.VehicleImage!.OpenReadStream();
-        var upload = await fileStorageService.UploadAsync(
-            stream, request.VehicleImage.FileName, request.VehicleImage.ContentType,
-            FileCategory.VehiclePhoto, userId, cancellationToken);
-
-        var result = await vehicleService.UpdateAsync(id, userId, request.Capacity, upload.PublicUrl, cancellationToken);
+        var result = await vehicleService.UpdateAsync(id, GetUserId(), request.Capacity, cancellationToken);
         return Ok(result);
+    }
+
+    [HttpPost("{id:guid}/images")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> AddImages(Guid id, [FromForm] List<IFormFile> images, CancellationToken cancellationToken)
+    {
+        var userId = GetUserId();
+        var imageUrls = await UploadImagesAsync(images, userId, cancellationToken);
+        var result = await vehicleService.AddImagesAsync(id, userId, imageUrls, cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpDelete("{id:guid}/images/{imageId:guid}")]
+    public async Task<IActionResult> DeleteImage(Guid id, Guid imageId, CancellationToken cancellationToken)
+    {
+        await vehicleService.DeleteImageAsync(id, imageId, GetUserId(), cancellationToken);
+        return NoContent();
     }
 
     [HttpDelete("{id:guid}")]
@@ -68,28 +76,21 @@ public class VehicleController(
         await vehicleService.DeleteAsync(id, GetUserId(), cancellationToken);
         return NoContent();
     }
-
-    [HttpPost("{id:guid}/activate")]
-    [Authorize(Roles = "Admin")]
-    public async Task<IActionResult> Activate(Guid id, CancellationToken cancellationToken)
-    {
-        var result = await vehicleService.ActivateAsync(id, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpPost("{id:guid}/deactivate")]
-    [Authorize(Roles = "Admin")]
-    public async Task<IActionResult> Deactivate(Guid id, CancellationToken cancellationToken)
-    {
-        var result = await vehicleService.DeactivateAsync(id, cancellationToken);
-        return Ok(result);
-    }
-
     private Guid GetUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
-    private static void ValidateFile(IFormFile? file, string name)
+    private async Task<List<string>> UploadImagesAsync(List<IFormFile> files, Guid userId, CancellationToken cancellationToken)
     {
-        if (file is null || file.Length == 0)
-            throw new ValidationException($"{name} is required.");
+        var urls = new List<string>();
+        foreach (var file in files)
+        {
+            if (file is null || file.Length == 0)
+                throw new ValidationException("One of the uploaded images is empty.");
+
+            await using var stream = file.OpenReadStream();
+            var upload = await fileStorageService.UploadAsync(
+                stream, file.FileName, file.ContentType, FileCategory.VehiclePhoto, userId, cancellationToken);
+            urls.Add(upload.PublicUrl);
+        }
+        return urls;
     }
 }

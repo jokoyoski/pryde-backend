@@ -8,4 +8,6 @@ public class RegisterResponseDto
     public string Email { get; set; } = string.Empty;
     public UserStatus Status { get; set; }
     public List<RoleType> Roles { get; set; } = [];
+    public string AccessToken { get; set; } = string.Empty;
+    public string RefreshToken { get; set; } = string.Empty;
 }

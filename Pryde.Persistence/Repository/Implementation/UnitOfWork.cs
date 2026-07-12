@@ -14,7 +14,14 @@ public class UnitOfWork(
     IVehicleRepository vehicles,
     IVehicleDocumentRepository vehicleDocuments,
     IRefreshTokenRepository refreshTokenRepository,
-    IPasswordResetCodeRepository passwordResetCodes)
+    IPasswordResetCodeRepository passwordResetCodes,
+    ITripBookingRepository tripBooking,
+    ITripRepository trip,
+    IRecurringTripRepository recurringTrip,
+    ITripSubscriptionRepository tripSubscription,
+    IWalletRepository wallet,
+    IWalletTransactionRepository walletTransaction,
+    IVehicleImageRepository vehicleImage)
     : IUnitOfWork
 {
     public IUserRepository Users { get; } = users;
@@ -26,6 +33,14 @@ public class UnitOfWork(
     public IVehicleDocumentRepository VehicleDocuments { get; } = vehicleDocuments;
     public IRefreshTokenRepository RefreshTokens { get; } = refreshTokenRepository;
     public IPasswordResetCodeRepository PasswordResetCodes { get; } = passwordResetCodes;
+    public ITripBookingRepository TripBookings { get; } = tripBooking;
+    public ITripRepository Trips { get; } = trip;
+    public IRecurringTripRepository RecurringTrips { get; } = recurringTrip;
+    public ITripSubscriptionRepository TripSubscriptions { get; } = tripSubscription;
+    public IWalletRepository Wallets { get; } = wallet;
+    public IWalletTransactionRepository WalletTransactions { get; } = walletTransaction;
+    public IVehicleImageRepository VehicleImages { get; } = vehicleImage;
+
 
     public async Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default)

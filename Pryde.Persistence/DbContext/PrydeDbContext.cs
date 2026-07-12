@@ -17,6 +17,13 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     public DbSet<VehicleDocument> VehicleDocuments { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
     public DbSet<PasswordResetCode> PasswordResetCodes { get; set; }
+    public DbSet<Trip> Trips { get; set; }
+    public DbSet<TripBooking> TripBookings { get; set; }
+    public DbSet<RecurringTrip> RecurringTrips { get; set; }
+    public DbSet<TripSubscription> TripSubscriptions { get; set; }
+    public DbSet<Wallet> Wallets { get; set; }
+    public DbSet<WalletTransaction> WalletTransactions { get; set; }
+    public DbSet<VehicleImage> VehicleImages { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
