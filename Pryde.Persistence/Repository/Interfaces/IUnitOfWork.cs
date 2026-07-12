@@ -13,6 +13,14 @@ public interface IUnitOfWork
     IVehicleDocumentRepository VehicleDocuments { get; }
     IRefreshTokenRepository RefreshTokens { get; }
     IPasswordResetCodeRepository PasswordResetCodes { get; }
+    ITripRepository Trips { get; }
+    ITripBookingRepository TripBookings { get; }
+    IRecurringTripRepository RecurringTrips { get; }
+    ITripSubscriptionRepository TripSubscriptions { get; }
+    IWalletRepository Wallets { get; }
+    IWalletTransactionRepository WalletTransactions { get; }
+    IVirtualAccountRepository VirtualAccounts { get; }
+    IVehicleImageRepository VehicleImages { get; }
 
     Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default);

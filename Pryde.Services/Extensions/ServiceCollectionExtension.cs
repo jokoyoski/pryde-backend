@@ -5,6 +5,8 @@ using Pryde.Services.Service.Implementation;
 using Pryde.Services.Service.Interface;
 using Pryde.Services.Storage.Implementation;
 using Pryde.Services.Storage.Interface;
+using Pryde.Services.Trips.Implementation;
+using Pryde.Services.Trips.Interface;
 namespace Pryde.Services.DependencyInjection;
 
 public static class ServiceCollectionExtension
@@ -23,6 +25,10 @@ public static class ServiceCollectionExtension
         services.AddScoped<IFileStorageService, CloudinaryFileStorageService>();
         services.AddScoped<IVehicleDocumentService, VehicleDocumentService>();
         services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IWalletService, WalletService>();
+
+        services.AddScoped<IFareCalculator, FareCalculator>();
+        services.AddScoped<IRouteMatchingService, RouteMatchingService>();
         return services;
     }
 }

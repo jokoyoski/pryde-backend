@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Pryde.Persistence.Context;
@@ -11,9 +12,11 @@ using Pryde.Persistence.Context;
 namespace Pryde.Persistence.Migrations
 {
     [DbContext(typeof(PrydeDbContext))]
-    partial class PrydeDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260710104013_AddTripsAndWallet")]
+    partial class AddTripsAndWallet
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -316,10 +319,6 @@ namespace Pryde.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
-                    b.Property<string>("OriginAddress")
-                        .IsRequired()
-                        .HasColumnType("text");
-
                     b.Property<double>("OriginLatitude")
                         .HasColumnType("double precision");
 
@@ -571,6 +570,10 @@ namespace Pryde.Persistence.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("VehicleImageUrl")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.HasIndex("UserId");
@@ -611,85 +614,6 @@ namespace Pryde.Persistence.Migrations
                     b.HasIndex("VehicleId");
 
                     b.ToTable("VehicleDocuments");
-                });
-
-            modelBuilder.Entity("Pryde.Domain.Entities.VehicleImage", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ImageUrl")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsPrimary")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("VehicleId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("VehicleId");
-
-                    b.ToTable("VehicleImages");
-                });
-
-            modelBuilder.Entity("Pryde.Domain.Entities.VirtualAccount", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("AccountName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("AccountNumber")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)");
-
-                    b.Property<string>("BankName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("WalletId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccountNumber")
-                        .IsUnique();
-
-                    b.HasIndex("WalletId")
-                        .IsUnique();
-
-                    b.ToTable("VirtualAccounts");
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.Wallet", b =>
@@ -921,28 +845,6 @@ namespace Pryde.Persistence.Migrations
                     b.Navigation("Vehicle");
                 });
 
-            modelBuilder.Entity("Pryde.Domain.Entities.VehicleImage", b =>
-                {
-                    b.HasOne("Pryde.Domain.Entities.Vehicle", "Vehicle")
-                        .WithMany("Images")
-                        .HasForeignKey("VehicleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Vehicle");
-                });
-
-            modelBuilder.Entity("Pryde.Domain.Entities.VirtualAccount", b =>
-                {
-                    b.HasOne("Pryde.Domain.Entities.Wallet", "Wallet")
-                        .WithOne("VirtualAccount")
-                        .HasForeignKey("Pryde.Domain.Entities.VirtualAccount", "WalletId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Wallet");
-                });
-
             modelBuilder.Entity("Pryde.Domain.Entities.Wallet", b =>
                 {
                     b.HasOne("Pryde.Domain.Entities.User", "User")
@@ -998,13 +900,6 @@ namespace Pryde.Persistence.Migrations
             modelBuilder.Entity("Pryde.Domain.Entities.Vehicle", b =>
                 {
                     b.Navigation("Documents");
-
-                    b.Navigation("Images");
-                });
-
-            modelBuilder.Entity("Pryde.Domain.Entities.Wallet", b =>
-                {
-                    b.Navigation("VirtualAccount");
                 });
 #pragma warning restore 612, 618
         }

@@ -27,11 +27,8 @@ builder.Services.AddServices();
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection(EmailSettings.SectionName));
 builder.Services.AddHttpClient<IEmailService, ResendEmailService>();
 
-// to delete //
-Console.WriteLine(builder.Configuration["EmailSettings:ApiKey"]);
-Console.WriteLine(builder.Configuration["EmailSettings:FromAddress"]);
-Console.WriteLine(builder.Configuration["EmailSettings:FromName"]);
-// to delete//
+builder.Services.Configure<PricingSettings>(
+    builder.Configuration.GetSection("PricingSettings"));
 
 builder.Services.AddAuthenticationConfiguration(builder.Configuration);
 

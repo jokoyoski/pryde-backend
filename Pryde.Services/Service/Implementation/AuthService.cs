@@ -1,11 +1,12 @@
 ﻿using Mapster;
-using Pryde.Services.Notifications.Interface;
+using Microsoft.Extensions.Logging;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
+using Pryde.Services.Notifications.Interface;
 using Pryde.Services.Security.Interface;
 using Pryde.Services.Service.Interface;
 
@@ -14,7 +15,7 @@ namespace Pryde.Services.Service.Implementation;
 
 public class AuthService(
     IUnitOfWork unitOfWork,IPasswordHasher passwordHasher,IJwtService jwtService,
-    IEmailService emailService) : IAuthService
+    IEmailService emailService, IWalletService walletService, ILogger<AuthService> logger) : IAuthService
 {
     public async Task<RegisterResponseDto> RegisterAsync(
         RegisterRequestDto request,
@@ -86,10 +87,34 @@ public class AuthService(
             },
             cancellationToken);
 
+        await walletService.CreateWalletForUserAsync(
+            user,
+            $"{profile.FirstName} {profile.LastName}",
+            cancellationToken);
+
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await emailService.SendAsync(
+                user.Email,
+                "Welcome to Pryde!",
+                $"<p>Hello {profile.FirstName},</p><p>Thank you for registering with Pryde.</p>",
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to send welcome email to {Email}", user.Email);
+        }
+
+        var roleNames = assignedRoles.Select(r => r.ToString()).ToList();
+        var tokens = await IssueTokensAsync(user, roleNames, cancellationToken);
+
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         var response = user.Adapt<RegisterResponseDto>();
         response.Roles = assignedRoles;
+        response.AccessToken = tokens.AccessToken;
+        response.RefreshToken = tokens.RefreshToken;
         return response;
     }
 
