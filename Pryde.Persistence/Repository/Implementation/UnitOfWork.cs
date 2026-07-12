@@ -21,6 +21,7 @@ public class UnitOfWork(
     ITripSubscriptionRepository tripSubscription,
     IWalletRepository wallet,
     IWalletTransactionRepository walletTransaction,
+    IVirtualAccountRepository virtualAccount,
     IVehicleImageRepository vehicleImage)
     : IUnitOfWork
 {
@@ -39,6 +40,7 @@ public class UnitOfWork(
     public ITripSubscriptionRepository TripSubscriptions { get; } = tripSubscription;
     public IWalletRepository Wallets { get; } = wallet;
     public IWalletTransactionRepository WalletTransactions { get; } = walletTransaction;
+    public IVirtualAccountRepository VirtualAccounts { get; } = virtualAccount;
     public IVehicleImageRepository VehicleImages { get; } = vehicleImage;
 
 

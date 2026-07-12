@@ -15,7 +15,7 @@ namespace Pryde.Services.Service.Implementation;
 
 public class AuthService(
     IUnitOfWork unitOfWork,IPasswordHasher passwordHasher,IJwtService jwtService,
-    IEmailService emailService, ILogger<AuthService> logger) : IAuthService
+    IEmailService emailService, IWalletService walletService, ILogger<AuthService> logger) : IAuthService
 {
     public async Task<RegisterResponseDto> RegisterAsync(
         RegisterRequestDto request,
@@ -85,6 +85,11 @@ public class AuthService(
                 UserId = user.Id,
                 Status = KycStatus.Pending
             },
+            cancellationToken);
+
+        await walletService.CreateWalletForUserAsync(
+            user,
+            $"{profile.FirstName} {profile.LastName}",
             cancellationToken);
 
         await unitOfWork.SaveChangesAsync(cancellationToken);

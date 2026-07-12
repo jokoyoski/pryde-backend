@@ -25,6 +25,7 @@ public static class ServiceCollectionExtension
         services.AddScoped<IFileStorageService, CloudinaryFileStorageService>();
         services.AddScoped<IVehicleDocumentService, VehicleDocumentService>();
         services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IWalletService, WalletService>();
 
         services.AddScoped<IFareCalculator, FareCalculator>();
         services.AddScoped<IRouteMatchingService, RouteMatchingService>();

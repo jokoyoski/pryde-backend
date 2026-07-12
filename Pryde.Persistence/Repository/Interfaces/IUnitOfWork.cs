@@ -19,6 +19,7 @@ public interface IUnitOfWork
     ITripSubscriptionRepository TripSubscriptions { get; }
     IWalletRepository Wallets { get; }
     IWalletTransactionRepository WalletTransactions { get; }
+    IVirtualAccountRepository VirtualAccounts { get; }
     IVehicleImageRepository VehicleImages { get; }
 
     Task<int> SaveChangesAsync(

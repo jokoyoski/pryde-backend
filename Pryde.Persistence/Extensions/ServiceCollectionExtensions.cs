@@ -50,6 +50,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITripSubscriptionRepository, TripSubscriptionRepository>();
         services.AddScoped<IWalletRepository, WalletRepository>();
         services.AddScoped<IWalletTransactionRepository, WalletTransactionRepository>();
+        services.AddScoped<IVirtualAccountRepository, VirtualAccountRepository>();
         services.AddScoped<IVehicleImageRepository, VehicleImageRepository>();
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();

@@ -23,6 +23,7 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     public DbSet<TripSubscription> TripSubscriptions { get; set; }
     public DbSet<Wallet> Wallets { get; set; }
     public DbSet<WalletTransaction> WalletTransactions { get; set; }
+    public DbSet<VirtualAccount> VirtualAccounts { get; set; }
     public DbSet<VehicleImage> VehicleImages { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

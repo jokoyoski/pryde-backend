@@ -8,5 +8,6 @@ namespace Pryde.Domain.Entities
         public User User { get; set; } = null!;
         public decimal Balance { get; set; }
         public decimal EscrowBalance { get; set; }
+        public VirtualAccount? VirtualAccount { get; set; }
     }
 }
