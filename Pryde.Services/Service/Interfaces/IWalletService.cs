@@ -12,6 +12,19 @@ public interface IWalletService
         CancellationToken cancellationToken = default);
 
     Task<FundVirtualAccountResponseDto> FundVirtualAccountAsync(
+        Guid userId,
         FundVirtualAccountRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    Task<WalletResponseDto> GetMineAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<WalletTransactionResponseDto>> GetTransactionsAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
+    Task<VirtualAccountResponseDto> GetVirtualAccountAsync(
+        Guid userId,
         CancellationToken cancellationToken = default);
 }

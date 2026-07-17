@@ -40,6 +40,25 @@ namespace Pryde.Persistence.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<DateTime?>("LastProviderUpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProviderName")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ProviderReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ProviderStatus")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
                     b.Property<string>("SecondaryIdentificationUrl")
                         .HasColumnType("text");
 
@@ -56,6 +75,10 @@ namespace Pryde.Persistence.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ProviderReference")
+                        .IsUnique()
+                        .HasFilter("\"ProviderReference\" IS NOT NULL");
 
                     b.HasIndex("UserId")
                         .IsUnique();
@@ -282,6 +305,7 @@ namespace Pryde.Persistence.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<int>("AvailableSeats")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.Property<int>("BookingWindowHours")
@@ -407,6 +431,7 @@ namespace Pryde.Persistence.Migrations
                         .HasColumnType("numeric(18,2)");
 
                     b.Property<int>("Status")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.Property<decimal>("TotalAmount")
@@ -423,7 +448,9 @@ namespace Pryde.Persistence.Migrations
 
                     b.HasIndex("PassengerId");
 
-                    b.HasIndex("TripId", "PassengerId");
+                    b.HasIndex("TripId", "PassengerId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" IN (1, 2)");
 
                     b.ToTable("TripBookings");
                 });

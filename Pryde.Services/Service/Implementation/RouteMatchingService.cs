@@ -1,6 +1,6 @@
-﻿using Pryde.Services.Trips.Interface;
+using Pryde.Services.Service.Interface;
 
-namespace Pryde.Services.Trips.Implementation;
+namespace Pryde.Services.Service.Implementation;
 
 // Placeholder — approximates the driver's path as a straight line between
 // origin and destination. Swap for real polyline-based corridor checking
@@ -20,9 +20,6 @@ public class RouteMatchingService : IRouteMatchingService
 
         if (pickupDistance > radiusKm) return false;
 
-        // Direction check: passenger's destination must project further
-        // along the route than their pickup point, so they're travelling
-        // the same way as the driver, not against them.
         var pickupProgress = ProjectionFraction(
             driverOriginLat, driverOriginLng, driverDestLat, driverDestLng,
             passengerLat, passengerLng);
@@ -42,8 +39,7 @@ public class RouteMatchingService : IRouteMatchingService
         var lengthSquared = dx * dx + dy * dy;
         if (lengthSquared == 0) return 0;
 
-        var t = ((pLng - aLng) * dx + (pLat - aLat) * dy) / lengthSquared;
-        return t;
+        return ((pLng - aLng) * dx + (pLat - aLat) * dy) / lengthSquared;
     }
 
     private static double DistanceFromLineKm(

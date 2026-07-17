@@ -24,6 +24,7 @@ builder.Services.AddSwaggerConfiguration();
 
 builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddServices();
+builder.Services.AddDojahIntegration(builder.Configuration);
 
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection(EmailSettings.SectionName));
 builder.Services.AddHttpClient<IEmailService, ResendEmailService>();

@@ -20,12 +20,69 @@ public class TripRepository(PrydeDbContext context) : ITripRepository
             .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
     }
 
+    public async Task<Trip?> GetByIdWithDetailsAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await context.Trips
+            .AsNoTracking()
+            .Include(t => t.Driver)
+                .ThenInclude(d => d.Profile)
+            .Include(t => t.Vehicle)
+                .ThenInclude(v => v.Images)
+            .Include(t => t.Bookings)
+            .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+    }
+
+    public async Task<Trip?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await context.Trips
+            .Include(t => t.Vehicle)
+            .Include(t => t.Bookings)
+            .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+    }
+
     public async Task<IReadOnlyList<Trip>> GetByDriverIdAsync(Guid driverId, CancellationToken cancellationToken = default)
     {
         return await context.Trips
             .AsNoTracking()
+            .Include(t => t.Driver)
+                .ThenInclude(d => d.Profile)
+            .Include(t => t.Vehicle)
+                .ThenInclude(v => v.Images)
             .Where(t => t.DriverId == driverId)
             .OrderByDescending(t => t.DepartureTime)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Trip>> SearchAsync(
+        DateTime utcNow,
+        DateTime? departureDate,
+        bool? requiresLuggage,
+        int requiredSeats,
+        CancellationToken cancellationToken = default)
+    {
+        var query = context.Trips
+            .AsNoTracking()
+            .Include(t => t.Driver)
+                .ThenInclude(d => d.Profile)
+            .Include(t => t.Vehicle)
+                .ThenInclude(v => v.Images)
+            .Where(t => t.Status == TripStatus.Scheduled
+                && t.DepartureTime > utcNow
+                && t.DepartureTime.AddHours(-t.BookingWindowHours) > utcNow
+                && t.AvailableSeats >= requiredSeats);
+
+        if (departureDate.HasValue)
+        {
+            var start = DateTime.SpecifyKind(departureDate.Value.Date, DateTimeKind.Utc);
+            var end = start.AddDays(1);
+            query = query.Where(t => t.DepartureTime >= start && t.DepartureTime < end);
+        }
+
+        if (requiresLuggage == true)
+            query = query.Where(t => t.AllowLuggage);
+
+        return await query
+            .OrderBy(t => t.DepartureTime)
             .ToListAsync(cancellationToken);
     }
 

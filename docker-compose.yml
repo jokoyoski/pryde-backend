@@ -23,6 +23,16 @@ services:
       EmailSettings__ApiKey: ${RESEND_API_KEY}
       EmailSettings__FromAddress: ${EMAIL_FROM_ADDRESS}
       EmailSettings__FromName: Pryde
+      EmailSettings__OtpExpiryMinutes: ${EMAIL_OTP_EXPIRY_MINUTES}
+
+
+      Dojah__Enabled: ${Dojah__Enabled:-false}
+      Dojah__BaseUrl: ${Dojah__BaseUrl}
+      Dojah__AppId: ${Dojah__AppId}
+      Dojah__ApiToken: ${Dojah__ApiToken}
+      Dojah__PublicKey: ${Dojah__PublicKey}
+      Dojah__PrivateKey: ${Dojah__PrivateKey}
+      Dojah__ShareableLink: ${Dojah__ShareableLink}
 
 
 
@@ -61,6 +71,14 @@ services:
       EmailSettings__FromAddress: ${EMAIL_FROM_ADDRESS}
       EmailSettings__FromName: ${EMAIL_FROM_NAME}
       EmailSettings__OtpExpiryMinutes: ${EMAIL_OTP_EXPIRY_MINUTES}
+
+      Dojah__Enabled: ${Dojah__Enabled:-false}
+      Dojah__BaseUrl: ${Dojah__BaseUrl}
+      Dojah__AppId: ${Dojah__AppId}
+      Dojah__ApiToken: ${Dojah__ApiToken}
+      Dojah__PublicKey: ${Dojah__PublicKey}
+      Dojah__PrivateKey: ${Dojah__PrivateKey}
+      Dojah__ShareableLink: ${Dojah__ShareableLink}
 
     ports:
       - "8080:8080"

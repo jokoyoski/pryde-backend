@@ -14,8 +14,28 @@ namespace Pryde.Api.Controllers.V1;
 [Authorize]
 public class ProfileController(
     IProfileService profileService,
-    IFileStorageService fileStorageService) : ControllerBase
+    IFileStorageService fileStorageService,
+    IUserService userService,
+    IAdminListingService adminListingService) : ControllerBase
 {
+    [HttpGet("~/api/v{version:apiVersion}/admin/users")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> GetAllUsers(CancellationToken cancellationToken)
+    {
+        var users = await userService.GetAllAsync(cancellationToken);
+        return Ok(users);
+    }
+
+    [HttpGet("~/api/v{version:apiVersion}/admin/users/paged")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> GetPagedUsers(
+        [FromQuery] AdminUsersRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var users = await adminListingService.GetUsersAsync(request, cancellationToken);
+        return Ok(users);
+    }
+
     [HttpGet("mine")]
     public async Task<IActionResult> GetMine(CancellationToken cancellationToken)
     {

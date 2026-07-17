@@ -10,6 +10,7 @@ public class TripBookingConfiguration : IEntityTypeConfiguration<TripBooking>
         builder.Property(x => x.SeatPrice).HasPrecision(18, 2);
         builder.Property(x => x.ServiceCharge).HasPrecision(18, 2);
         builder.Property(x => x.TotalAmount).HasPrecision(18, 2);
+        builder.Property(x => x.Status).IsConcurrencyToken();
 
         builder.HasOne(x => x.Trip)
             .WithMany(t => t.Bookings)
@@ -21,6 +22,8 @@ public class TripBookingConfiguration : IEntityTypeConfiguration<TripBooking>
             .HasForeignKey(x => x.PassengerId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        builder.HasIndex(x => new { x.TripId, x.PassengerId });
+        builder.HasIndex(x => new { x.TripId, x.PassengerId })
+            .IsUnique()
+            .HasFilter("\"Status\" IN (1, 2)");
     }
 }

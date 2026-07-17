@@ -57,6 +57,7 @@ public class KycService(
 
         kyc.Status = KycStatus.Pending;
         kyc.VerifiedAt = null;
+        kyc.RejectionReason = null;
 
         unitOfWork.KycVerifications.Update(kyc);
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -173,6 +174,7 @@ public class KycService(
 
         kyc.Status = KycStatus.Approved;
         kyc.VerifiedAt = DateTime.UtcNow;
+        kyc.RejectionReason = null;
 
         unitOfWork.KycVerifications.Update(kyc);
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -188,10 +190,24 @@ public class KycService(
 
         kyc.Status = KycStatus.Rejected;
         kyc.VerifiedAt = null;
+        kyc.RejectionReason = SanitizeReason(reason);
 
         unitOfWork.KycVerifications.Update(kyc);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return kyc.Adapt<KycVerificationResponseDto>();
+    }
+
+    private static string SanitizeReason(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ValidationException("A rejection reason is required.");
+        }
+
+        var sanitized = string.Join(' ', reason.Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return sanitized.Length <= 500 ? sanitized : sanitized[..500];
     }
 }

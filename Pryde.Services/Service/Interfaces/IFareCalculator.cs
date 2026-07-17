@@ -1,10 +1,11 @@
-﻿namespace Pryde.Services.Trips.Interface;
+namespace Pryde.Services.Service.Interface;
 
 public class FareBreakdown
 {
     public decimal TotalTripCost { get; set; }
     public decimal SeatPrice { get; set; }
     public decimal ServiceCharge { get; set; }
+    public decimal ServiceChargePercentage { get; set; }
     public decimal PassengerTotal { get; set; }
 }
 

@@ -16,8 +16,35 @@ namespace Pryde.Api.Controllers.V1;
 [Authorize]
 public class VehicleController(
     IVehicleService vehicleService,
-    IFileStorageService fileStorageService) : ControllerBase
+    IFileStorageService fileStorageService,
+    IAdminListingService adminListingService) : ControllerBase
 {
+    [HttpGet("~/api/v{version:apiVersion}/admin/vehicles")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> GetAdminVehicles(
+        [FromQuery] AdminVehiclesRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var result = await adminListingService.GetVehiclesAsync(request, cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("~/api/v{version:apiVersion}/admin/vehicles/{id:guid}/activate")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> ActivateVehicle(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await vehicleService.ActivateAsync(id, cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("~/api/v{version:apiVersion}/admin/vehicles/{id:guid}/deactivate")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> DeactivateVehicle(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await vehicleService.DeactivateAsync(id, cancellationToken);
+        return Ok(result);
+    }
+
     [HttpPost]
     [Consumes("multipart/form-data")]
     public async Task<IActionResult> Create([FromForm] VehicleCreateRequestDto request, CancellationToken cancellationToken)

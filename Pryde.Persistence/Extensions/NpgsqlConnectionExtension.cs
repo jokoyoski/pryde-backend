@@ -15,23 +15,59 @@ public static class NpgsqlConnectionExtension
             ?? throw new InvalidOperationException(
                 "PrydeConnection configuration is missing.");
 
+        var host = GetRequiredTrimmedValue(settings.Host, "Host");
+        var database = GetRequiredTrimmedValue(settings.Database, "Database");
+        var username = GetRequiredTrimmedValue(settings.Username, "Username");
+        var sslMode = GetRequiredTrimmedValue(settings.SslMode, "SslMode");
+
+        if (Uri.CheckHostName(host) == UriHostNameType.Unknown)
+        {
+            throw new InvalidOperationException(
+                "PrydeConnection Host must be a hostname without a scheme, port, quotes, or path.");
+        }
+
+        if (settings.Port is < 1 or > 65535)
+        {
+            throw new InvalidOperationException(
+                "PrydeConnection Port must be between 1 and 65535.");
+        }
+
+        if (string.IsNullOrEmpty(settings.Password))
+        {
+            throw new InvalidOperationException(
+                "PrydeConnection Password is required.");
+        }
+
+        if (!Enum.TryParse<SslMode>(sslMode, true, out var parsedSslMode))
+        {
+            throw new InvalidOperationException(
+                "PrydeConnection SslMode is invalid.");
+        }
+
         return new NpgsqlConnectionStringBuilder
         {
-            Host = settings.Host,
-            Database = settings.Database,
+            Host = host,
+            Database = database,
             Password = settings.Password,
-            Username = settings.Username,
+            Username = username,
             Port = settings.Port,
 
             IncludeErrorDetail = true,
             Pooling = true,
 
-            SslMode = Enum.TryParse<SslMode>(
-                settings.SslMode,
-                true,
-                out var parsedSslMode)
-                ? parsedSslMode
-                : SslMode.Require
+            SslMode = parsedSslMode
         };
+    }
+
+    private static string GetRequiredTrimmedValue(string? value, string name)
+    {
+        var trimmedValue = value?.Trim();
+        if (string.IsNullOrEmpty(trimmedValue))
+        {
+            throw new InvalidOperationException(
+                $"PrydeConnection {name} is required.");
+        }
+
+        return trimmedValue;
     }
 }

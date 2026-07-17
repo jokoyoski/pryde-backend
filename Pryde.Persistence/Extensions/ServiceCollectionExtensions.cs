@@ -52,6 +52,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IWalletTransactionRepository, WalletTransactionRepository>();
         services.AddScoped<IVirtualAccountRepository, VirtualAccountRepository>();
         services.AddScoped<IVehicleImageRepository, VehicleImageRepository>();
+        services.AddScoped<IAdminListingRepository, AdminListingRepository>();
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         return services;

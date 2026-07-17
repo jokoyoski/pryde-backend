@@ -1,4 +1,4 @@
-﻿namespace Pryde.Services.Trips.Interface;
+namespace Pryde.Services.Service.Interface;
 
 public interface IRouteMatchingService
 {

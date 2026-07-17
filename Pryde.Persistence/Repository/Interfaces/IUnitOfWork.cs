@@ -21,6 +21,7 @@ public interface IUnitOfWork
     IWalletTransactionRepository WalletTransactions { get; }
     IVirtualAccountRepository VirtualAccounts { get; }
     IVehicleImageRepository VehicleImages { get; }
+    IAdminListingRepository AdminListings { get; }
 
     Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default);

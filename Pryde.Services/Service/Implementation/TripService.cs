@@ -1,0 +1,325 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Pryde.Contracts.RequestModels;
+using Pryde.Contracts.ResponseModels;
+using Pryde.Domain.Common.Exceptions;
+using Pryde.Domain.Entities;
+using Pryde.Domain.Enums;
+using Pryde.Persistence.Repository.Interfaces;
+using Pryde.Services.Service.Interface;
+using Pryde.Services.Settings;
+
+namespace Pryde.Services.Service.Implementation;
+
+public class TripService(
+    IUnitOfWork unitOfWork,
+    IFareCalculator fareCalculator,
+    IRouteMatchingService routeMatchingService,
+    IOptions<PricingSettings> pricingSettings) : ITripService
+{
+    private readonly PricingSettings _pricingSettings = pricingSettings.Value;
+
+    public async Task<TripDetailsResponseDto> CreateAsync(
+        Guid driverId,
+        CreateTripRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTrip(request.OriginLatitude, request.OriginLongitude,
+            request.DestinationLatitude, request.DestinationLongitude,
+            request.OriginAddress, request.DestinationAddress,
+            request.DistanceKm, request.EstimatedDurationMinutes,
+            request.DepartureTime, request.AvailableSeats, request.BookingWindowHours);
+
+        await EnsureDriverAsync(driverId, cancellationToken);
+        var vehicle = await GetOwnedActiveVehicleAsync(request.VehicleId, driverId, cancellationToken);
+        if (request.AvailableSeats > vehicle.Capacity)
+            throw new ValidationException("Available seats cannot exceed vehicle capacity.");
+
+        var fare = fareCalculator.Calculate(request.DistanceKm, request.EstimatedDurationMinutes, vehicle.Capacity);
+        var trip = new Trip
+        {
+            DriverId = driverId,
+            VehicleId = vehicle.Id,
+            OriginLatitude = request.OriginLatitude,
+            OriginLongitude = request.OriginLongitude,
+            OriginAddress = request.OriginAddress.Trim(),
+            DestinationLatitude = request.DestinationLatitude,
+            DestinationLongitude = request.DestinationLongitude,
+            DestinationAddress = request.DestinationAddress.Trim(),
+            RoutePolyline = string.IsNullOrWhiteSpace(request.RoutePolyline) ? null : request.RoutePolyline.Trim(),
+            DistanceKm = request.DistanceKm,
+            EstimatedDurationMinutes = request.EstimatedDurationMinutes,
+            DepartureTime = request.DepartureTime.ToUniversalTime(),
+            AvailableSeats = request.AvailableSeats,
+            AllowLuggage = request.AllowLuggage,
+            BookingWindowHours = request.BookingWindowHours,
+            TripFare = fare.TotalTripCost,
+            SeatPrice = fare.SeatPrice,
+            ServiceChargePercentage = fare.ServiceChargePercentage,
+            Status = TripStatus.Scheduled
+        };
+
+        await unitOfWork.Trips.CreateAsync(trip, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return await GetByIdAsync(trip.Id, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<TripSummaryResponseDto>> SearchAsync(
+        SearchTripsRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        request ??= new SearchTripsRequestDto();
+        var hasAnyCoordinate = request.OriginLatitude.HasValue || request.OriginLongitude.HasValue
+            || request.DestinationLatitude.HasValue || request.DestinationLongitude.HasValue;
+        var hasAllCoordinates = request.OriginLatitude.HasValue && request.OriginLongitude.HasValue
+            && request.DestinationLatitude.HasValue && request.DestinationLongitude.HasValue;
+
+        if (hasAnyCoordinate && !hasAllCoordinates)
+            throw new ValidationException("Origin and destination coordinates must all be supplied for route matching.");
+        if (hasAllCoordinates)
+            ValidateCoordinates(request.OriginLatitude!.Value, request.OriginLongitude!.Value,
+                request.DestinationLatitude!.Value, request.DestinationLongitude!.Value);
+
+        var requiredSeats = request.RequiredSeats ?? 1;
+        if (requiredSeats <= 0)
+            throw new ValidationException("Required seats must be greater than zero.");
+
+        var radius = request.PickupRadiusKm ?? _pricingSettings.PickupRadiusKm;
+        if (radius <= 0)
+            throw new ValidationException("Pickup radius must be greater than zero.");
+
+        var trips = await unitOfWork.Trips.SearchAsync(
+            DateTime.UtcNow, request.DepartureDate, request.RequiresLuggage,
+            requiredSeats, cancellationToken);
+
+        if (hasAllCoordinates)
+        {
+            trips = trips.Where(t => routeMatchingService.IsPassengerOnRoute(
+                t.OriginLatitude, t.OriginLongitude,
+                t.DestinationLatitude, t.DestinationLongitude,
+                request.OriginLatitude!.Value, request.OriginLongitude!.Value,
+                request.DestinationLatitude!.Value, request.DestinationLongitude!.Value,
+                radius)).ToList();
+        }
+
+        return trips.Select(MapSummary).ToList();
+    }
+
+    public async Task<TripDetailsResponseDto> GetByIdAsync(Guid tripId, CancellationToken cancellationToken = default)
+    {
+        var trip = await unitOfWork.Trips.GetByIdWithDetailsAsync(tripId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Trip), tripId);
+        return MapDetails(trip);
+    }
+
+    public async Task<IReadOnlyList<TripSummaryResponseDto>> GetMineAsync(Guid driverId, CancellationToken cancellationToken = default)
+    {
+        var trips = await unitOfWork.Trips.GetByDriverIdAsync(driverId, cancellationToken);
+        return trips.Select(MapSummary).ToList();
+    }
+
+    public async Task<TripDetailsResponseDto> UpdateAsync(
+        Guid tripId,
+        Guid driverId,
+        UpdateTripRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTrip(request.OriginLatitude, request.OriginLongitude,
+            request.DestinationLatitude, request.DestinationLongitude,
+            request.OriginAddress, request.DestinationAddress,
+            request.DistanceKm, request.EstimatedDurationMinutes,
+            request.DepartureTime, request.AvailableSeats, request.BookingWindowHours);
+
+        var trip = await unitOfWork.Trips.GetByIdForUpdateAsync(tripId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Trip), tripId);
+        if (trip.DriverId != driverId)
+            throw new ForbiddenException("Only the trip owner can update this trip.");
+        if (trip.Status != TripStatus.Scheduled || trip.DepartureTime <= DateTime.UtcNow)
+            throw new ConflictException("Only a scheduled trip that has not departed can be updated.");
+
+        var vehicle = await GetOwnedActiveVehicleAsync(request.VehicleId, driverId, cancellationToken);
+        var approvedCount = trip.Bookings.Count(b => b.Status == BookingStatus.Approved);
+        if (request.AvailableSeats + approvedCount > vehicle.Capacity)
+            throw new ValidationException("Available seats plus approved bookings cannot exceed vehicle capacity.");
+
+        var fare = fareCalculator.Calculate(request.DistanceKm, request.EstimatedDurationMinutes, vehicle.Capacity);
+        trip.VehicleId = vehicle.Id;
+        trip.OriginLatitude = request.OriginLatitude;
+        trip.OriginLongitude = request.OriginLongitude;
+        trip.OriginAddress = request.OriginAddress.Trim();
+        trip.DestinationLatitude = request.DestinationLatitude;
+        trip.DestinationLongitude = request.DestinationLongitude;
+        trip.DestinationAddress = request.DestinationAddress.Trim();
+        trip.RoutePolyline = string.IsNullOrWhiteSpace(request.RoutePolyline) ? null : request.RoutePolyline.Trim();
+        trip.DistanceKm = request.DistanceKm;
+        trip.EstimatedDurationMinutes = request.EstimatedDurationMinutes;
+        trip.DepartureTime = request.DepartureTime.ToUniversalTime();
+        trip.AvailableSeats = request.AvailableSeats;
+        trip.AllowLuggage = request.AllowLuggage;
+        trip.BookingWindowHours = request.BookingWindowHours;
+        trip.TripFare = fare.TotalTripCost;
+        trip.SeatPrice = fare.SeatPrice;
+        trip.ServiceChargePercentage = fare.ServiceChargePercentage;
+
+        unitOfWork.Trips.Update(trip);
+        await SaveWithConcurrencyHandlingAsync(cancellationToken);
+        return await GetByIdAsync(trip.Id, cancellationToken);
+    }
+
+    public async Task CancelAsync(Guid tripId, Guid driverId, CancellationToken cancellationToken = default)
+    {
+        var trip = await unitOfWork.Trips.GetByIdForUpdateAsync(tripId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Trip), tripId);
+        if (trip.DriverId != driverId)
+            throw new ForbiddenException("Only the trip owner can cancel this trip.");
+        if (trip.Status is TripStatus.InProgress or TripStatus.Completed or TripStatus.Cancelled
+            || trip.DepartureTime <= DateTime.UtcNow)
+            throw new ConflictException("This trip can no longer be cancelled.");
+
+        var approvedCount = 0;
+        foreach (var booking in trip.Bookings.Where(b => b.Status is BookingStatus.Pending or BookingStatus.Approved))
+        {
+            if (booking.Status == BookingStatus.Approved)
+                approvedCount++;
+            booking.Status = BookingStatus.Cancelled;
+            unitOfWork.TripBookings.Update(booking);
+        }
+
+        trip.AvailableSeats = Math.Min(trip.Vehicle.Capacity, trip.AvailableSeats + approvedCount);
+        trip.Status = TripStatus.Cancelled;
+        unitOfWork.Trips.Update(trip);
+        await SaveWithConcurrencyHandlingAsync(cancellationToken);
+    }
+
+    private async Task EnsureDriverAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var roles = await unitOfWork.UserRoles.GetByUserIdAsync(userId, cancellationToken);
+        if (!roles.Any(r => r.Role.Name == RoleType.Driver.ToString()))
+            throw new ForbiddenException("Only users with the Driver role can create trips.");
+    }
+
+    private async Task<Vehicle> GetOwnedActiveVehicleAsync(Guid vehicleId, Guid driverId, CancellationToken cancellationToken)
+    {
+        var vehicle = await unitOfWork.Vehicles.GetByIdAsync(vehicleId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Vehicle), vehicleId);
+        if (vehicle.UserId != driverId)
+            throw new ForbiddenException("The selected vehicle does not belong to the authenticated driver.");
+        if (!vehicle.IsActive)
+            throw new ConflictException("The selected vehicle is not active.");
+        if (vehicle.Capacity <= 0)
+            throw new ConflictException("The selected vehicle has an invalid passenger capacity.");
+        return vehicle;
+    }
+
+    private async Task SaveWithConcurrencyHandlingAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ConflictException("The trip changed while this request was being processed. Please try again.");
+        }
+    }
+
+    private static void ValidateTrip(
+        double originLatitude, double originLongitude,
+        double destinationLatitude, double destinationLongitude,
+        string originAddress, string destinationAddress,
+        double distanceKm, int durationMinutes, DateTime departureTime,
+        int availableSeats, int bookingWindowHours)
+    {
+        ValidateCoordinates(originLatitude, originLongitude, destinationLatitude, destinationLongitude);
+        if (string.IsNullOrWhiteSpace(originAddress) || string.IsNullOrWhiteSpace(destinationAddress))
+            throw new ValidationException("Origin and destination addresses are required.");
+        if (distanceKm <= 0) throw new ValidationException("Distance must be greater than zero.");
+        if (durationMinutes <= 0) throw new ValidationException("Estimated duration must be greater than zero.");
+        if (availableSeats <= 0) throw new ValidationException("Available seats must be greater than zero.");
+        if (bookingWindowHours <= 0) throw new ValidationException("Booking window must be greater than zero.");
+        if (departureTime.ToUniversalTime() <= DateTime.UtcNow)
+            throw new ValidationException("Departure time must be in the future.");
+    }
+
+    private static void ValidateCoordinates(
+        double originLatitude, double originLongitude,
+        double destinationLatitude, double destinationLongitude)
+    {
+        if (originLatitude is < -90 or > 90 || destinationLatitude is < -90 or > 90)
+            throw new ValidationException("Latitude must be between -90 and 90.");
+        if (originLongitude is < -180 or > 180 || destinationLongitude is < -180 or > 180)
+            throw new ValidationException("Longitude must be between -180 and 180.");
+    }
+
+    private static TripSummaryResponseDto MapSummary(Trip trip)
+    {
+        var serviceCharge = Math.Round(trip.SeatPrice * trip.ServiceChargePercentage / 100m, 2);
+        return new TripSummaryResponseDto
+        {
+            TripId = trip.Id,
+            DriverId = trip.DriverId,
+            DriverName = trip.Driver?.Profile is null ? string.Empty : $"{trip.Driver.Profile.FirstName} {trip.Driver.Profile.LastName}".Trim(),
+            VehicleId = trip.VehicleId,
+            VehicleLicensePlateNumber = trip.Vehicle?.LicensePlateNumber ?? string.Empty,
+            VehicleCapacity = trip.Vehicle?.Capacity ?? 0,
+            VehicleImageUrls = trip.Vehicle?.Images.OrderByDescending(i => i.IsPrimary).Select(i => i.ImageUrl).ToList() ?? [],
+            OriginAddress = trip.OriginAddress,
+            OriginLatitude = trip.OriginLatitude,
+            OriginLongitude = trip.OriginLongitude,
+            DestinationAddress = trip.DestinationAddress,
+            DestinationLatitude = trip.DestinationLatitude,
+            DestinationLongitude = trip.DestinationLongitude,
+            RoutePolyline = trip.RoutePolyline,
+            DepartureTime = trip.DepartureTime,
+            AvailableSeats = trip.AvailableSeats,
+            AllowLuggage = trip.AllowLuggage,
+            DistanceKm = trip.DistanceKm,
+            EstimatedDurationMinutes = trip.EstimatedDurationMinutes,
+            TripFare = trip.TripFare,
+            SeatPrice = trip.SeatPrice,
+            ServiceChargePercentage = trip.ServiceChargePercentage,
+            PassengerServiceCharge = serviceCharge,
+            PassengerTotal = trip.SeatPrice + serviceCharge,
+            BookingWindowHours = trip.BookingWindowHours,
+            Status = trip.Status,
+            CreatedAt = trip.CreatedAt
+        };
+    }
+
+    private static TripDetailsResponseDto MapDetails(Trip trip)
+    {
+        var summary = MapSummary(trip);
+        return new TripDetailsResponseDto
+        {
+            TripId = summary.TripId,
+            DriverId = summary.DriverId,
+            DriverName = summary.DriverName,
+            VehicleId = summary.VehicleId,
+            VehicleLicensePlateNumber = summary.VehicleLicensePlateNumber,
+            VehicleCapacity = summary.VehicleCapacity,
+            VehicleImageUrls = summary.VehicleImageUrls,
+            OriginAddress = summary.OriginAddress,
+            OriginLatitude = summary.OriginLatitude,
+            OriginLongitude = summary.OriginLongitude,
+            DestinationAddress = summary.DestinationAddress,
+            DestinationLatitude = summary.DestinationLatitude,
+            DestinationLongitude = summary.DestinationLongitude,
+            RoutePolyline = summary.RoutePolyline,
+            DepartureTime = summary.DepartureTime,
+            AvailableSeats = summary.AvailableSeats,
+            AllowLuggage = summary.AllowLuggage,
+            DistanceKm = summary.DistanceKm,
+            EstimatedDurationMinutes = summary.EstimatedDurationMinutes,
+            TripFare = summary.TripFare,
+            SeatPrice = summary.SeatPrice,
+            ServiceChargePercentage = summary.ServiceChargePercentage,
+            PassengerServiceCharge = summary.PassengerServiceCharge,
+            PassengerTotal = summary.PassengerTotal,
+            BookingWindowHours = summary.BookingWindowHours,
+            Status = summary.Status,
+            CreatedAt = summary.CreatedAt,
+            PendingBookingCount = trip.Bookings.Count(b => b.Status == BookingStatus.Pending),
+            ApprovedBookingCount = trip.Bookings.Count(b => b.Status == BookingStatus.Approved)
+        };
+    }
+}

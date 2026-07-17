@@ -22,7 +22,8 @@ public class UnitOfWork(
     IWalletRepository wallet,
     IWalletTransactionRepository walletTransaction,
     IVirtualAccountRepository virtualAccount,
-    IVehicleImageRepository vehicleImage)
+    IVehicleImageRepository vehicleImage,
+    IAdminListingRepository adminListings)
     : IUnitOfWork
 {
     public IUserRepository Users { get; } = users;
@@ -42,6 +43,7 @@ public class UnitOfWork(
     public IWalletTransactionRepository WalletTransactions { get; } = walletTransaction;
     public IVirtualAccountRepository VirtualAccounts { get; } = virtualAccount;
     public IVehicleImageRepository VehicleImages { get; } = vehicleImage;
+    public IAdminListingRepository AdminListings { get; } = adminListings;
 
 
     public async Task<int> SaveChangesAsync(

@@ -14,8 +14,19 @@ namespace Pryde.Api.Controllers.V1;
 [Authorize]
 public class VehicleDocumentController(
     IVehicleDocumentService vehicleDocumentService,
-    IFileStorageService fileStorageService) : ControllerBase
+    IFileStorageService fileStorageService,
+    IAdminListingService adminListingService) : ControllerBase
 {
+    [HttpGet("~/api/v{version:apiVersion}/admin/vehicle-documents")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> GetAdminVehicleDocuments(
+        [FromQuery] AdminVehicleDocumentsRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var result = await adminListingService.GetVehicleDocumentsAsync(request, cancellationToken);
+        return Ok(result);
+    }
+
     [HttpPost]
     [Consumes("multipart/form-data")]
     public async Task<IActionResult> Upload(Guid vehicleId, [FromForm] VehicleDocumentUploadRequestDto request, CancellationToken cancellationToken)
