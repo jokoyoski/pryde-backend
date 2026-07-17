@@ -38,6 +38,7 @@ public class ExceptionMiddleware(
             NotFoundException => StatusCodes.Status404NotFound,
             ConflictException => StatusCodes.Status409Conflict,
             BadRequestException => StatusCodes.Status400BadRequest,
+            ServiceUnavailableException => StatusCodes.Status503ServiceUnavailable,
             _ => StatusCodes.Status500InternalServerError
         };
 

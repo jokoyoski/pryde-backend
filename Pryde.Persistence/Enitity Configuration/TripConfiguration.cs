@@ -20,6 +20,9 @@ public class TripConfiguration : IEntityTypeConfiguration<Trip>
         builder.Property(x => x.ServiceChargePercentage)
             .HasPrecision(5, 2);
 
+        builder.Property(x => x.AvailableSeats)
+            .IsConcurrencyToken();
+
         builder.HasOne(x => x.Driver).WithMany()
             .HasForeignKey(x => x.DriverId)
             .OnDelete(DeleteBehavior.Restrict);

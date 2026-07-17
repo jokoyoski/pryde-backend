@@ -11,8 +11,40 @@ namespace Pryde.Api.Controllers.V1;
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/kyc")]
 [Authorize]
-public class KycController(IKycService kycService) : ControllerBase
+public class KycController(
+    IKycService kycService,
+    IDojahKycService dojahKycService,
+    IAdminListingService adminListingService) : ControllerBase
 {
+    [HttpGet("~/api/v{version:apiVersion}/admin/kyc")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> GetAdminKyc(
+        [FromQuery] AdminKycRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var result = await adminListingService.GetKycAsync(request, cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("~/api/v{version:apiVersion}/admin/kyc/{userId:guid}/approve")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> ApproveKyc(Guid userId, CancellationToken cancellationToken)
+    {
+        var result = await kycService.ApproveAsync(userId, cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("~/api/v{version:apiVersion}/admin/kyc/{userId:guid}/reject")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> RejectKyc(
+        Guid userId,
+        [FromBody] string reason,
+        CancellationToken cancellationToken)
+    {
+        var result = await kycService.RejectAsync(userId, reason, cancellationToken);
+        return Ok(result);
+    }
+
     [HttpPost("documents")]
     [Consumes("multipart/form-data")]
     public async Task<IActionResult> UploadDocuments(
@@ -36,6 +68,68 @@ public class KycController(IKycService kycService) : ControllerBase
             cancellationToken);
 
         return Ok(result);
+    }
+
+    [HttpGet("dojah/config")]
+    public async Task<IActionResult> GetDojahConfig(
+        CancellationToken cancellationToken)
+    {
+        var result = await dojahKycService.GetConfigAsync(
+            GetUserId(),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpPost("dojah/webhook")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ProcessDojahWebhook(
+        CancellationToken cancellationToken)
+    {
+        const int maximumPayloadBytes = 1_048_576;
+        if (Request.ContentLength > maximumPayloadBytes)
+        {
+            throw new Pryde.Domain.Common.Exceptions.ValidationException(
+                "Webhook payload is too large.");
+        }
+
+        var payload = await ReadWebhookPayloadAsync(
+            Request.Body,
+            maximumPayloadBytes,
+            cancellationToken);
+
+        await dojahKycService.ProcessWebhookAsync(
+            payload,
+            Request.Headers["x-dojah-signature"].FirstOrDefault(),
+            cancellationToken);
+
+        return Ok();
+    }
+
+    private static async Task<byte[]> ReadWebhookPayloadAsync(
+        Stream body,
+        int maximumPayloadBytes,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = new MemoryStream();
+        var buffer = new byte[81920];
+
+        while (true)
+        {
+            var read = await body.ReadAsync(buffer, cancellationToken);
+            if (read == 0)
+            {
+                return stream.ToArray();
+            }
+
+            if (stream.Length + read > maximumPayloadBytes)
+            {
+                throw new Pryde.Domain.Common.Exceptions.ValidationException(
+                    "Webhook payload is too large.");
+            }
+
+            await stream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
     }
 
     private Guid GetUserId() =>

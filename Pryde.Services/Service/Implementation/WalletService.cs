@@ -51,6 +51,7 @@ public class WalletService(IUnitOfWork unitOfWork) : IWalletService
     }
 
     public async Task<FundVirtualAccountResponseDto> FundVirtualAccountAsync(
+        Guid userId,
         FundVirtualAccountRequestDto request,
         CancellationToken cancellationToken = default)
     {
@@ -69,6 +70,11 @@ public class WalletService(IUnitOfWork unitOfWork) : IWalletService
         }
 
         var wallet = virtualAccount.Wallet;
+        if (wallet.UserId != userId)
+        {
+            throw new ForbiddenException("You can fund only your own virtual account.");
+        }
+
         wallet.Balance += request.Amount;
         unitOfWork.Wallets.Update(wallet);
 
@@ -92,6 +98,60 @@ public class WalletService(IUnitOfWork unitOfWork) : IWalletService
             TransactionId = transaction.Id,
             Reference = transaction.Reference!
         };
+    }
+
+    public async Task<WalletResponseDto> GetMineAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var wallet = await GetWalletAsync(userId, cancellationToken);
+        return new WalletResponseDto
+        {
+            Id = wallet.Id,
+            Balance = wallet.Balance,
+            EscrowBalance = wallet.EscrowBalance
+        };
+    }
+
+    public async Task<IReadOnlyList<WalletTransactionResponseDto>> GetTransactionsAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var wallet = await GetWalletAsync(userId, cancellationToken);
+        var transactions = await unitOfWork.WalletTransactions.GetByWalletIdAsync(wallet.Id, cancellationToken);
+
+        return transactions.Select(transaction => new WalletTransactionResponseDto
+        {
+            Id = transaction.Id,
+            Amount = transaction.Amount,
+            Type = transaction.Type,
+            Reference = transaction.Reference,
+            CreatedAt = transaction.CreatedAt
+        }).ToList();
+    }
+
+    public async Task<VirtualAccountResponseDto> GetVirtualAccountAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var wallet = await GetWalletAsync(userId, cancellationToken);
+        var account = await unitOfWork.VirtualAccounts.GetByWalletIdAsync(wallet.Id, cancellationToken)
+            ?? throw new NotFoundException(nameof(VirtualAccount), wallet.Id);
+
+        return new VirtualAccountResponseDto
+        {
+            Id = account.Id,
+            BankName = account.BankName,
+            AccountName = account.AccountName,
+            AccountNumber = account.AccountNumber,
+            IsActive = account.IsActive
+        };
+    }
+
+    private async Task<Wallet> GetWalletAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        return await unitOfWork.Wallets.GetByUserIdAsync(userId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Wallet), userId);
     }
 
     private async Task<string> GenerateAccountNumberAsync(

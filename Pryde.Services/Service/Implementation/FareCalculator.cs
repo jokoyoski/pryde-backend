@@ -1,8 +1,8 @@
-﻿using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Options;
+using Pryde.Services.Service.Interface;
 using Pryde.Services.Settings;
-using Pryde.Services.Trips.Interface;
 
-namespace Pryde.Services.Trips.Implementation;
+namespace Pryde.Services.Service.Implementation;
 
 public class FareCalculator(IOptions<PricingSettings> pricingSettings) : IFareCalculator
 {
@@ -15,17 +15,16 @@ public class FareCalculator(IOptions<PricingSettings> pricingSettings) : IFareCa
             + (_settings.PerMinuteRate * durationMinutes);
 
         var totalTripCost = Math.Max(rawCost, _settings.MinimumFare);
-
         var seatPrice = Math.Round(totalTripCost / vehicleCapacity, 2);
         var serviceCharge = Math.Round(seatPrice * (_settings.ServiceChargePercent / 100m), 2);
-        var passengerTotal = seatPrice + serviceCharge;
 
         return new FareBreakdown
         {
             TotalTripCost = totalTripCost,
             SeatPrice = seatPrice,
             ServiceCharge = serviceCharge,
-            PassengerTotal = passengerTotal
+            ServiceChargePercentage = _settings.ServiceChargePercent,
+            PassengerTotal = seatPrice + serviceCharge
         };
     }
 }

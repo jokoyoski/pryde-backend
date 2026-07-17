@@ -4,6 +4,7 @@ using Pryde.Api.Extension;
 using Pryde.Api.Extensions;
 using Pryde.Api.Middleware;
 using Pryde.Persistence.Context;
+using Pryde.Persistence.Settings;
 using Pryde.Services.DependencyInjection;
 using Pryde.Services.Notifications.Implementation;
 using Pryde.Services.Notifications.Interface;
@@ -23,6 +24,7 @@ builder.Services.AddSwaggerConfiguration();
 
 builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddServices();
+builder.Services.AddDojahIntegration(builder.Configuration);
 
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection(EmailSettings.SectionName));
 builder.Services.AddHttpClient<IEmailService, ResendEmailService>();
@@ -40,6 +42,10 @@ builder.Services.AddCors(options =>
               .AllowAnyMethod());
 });
 
+builder.Services.Configure<BootstrapUsersSettings>(
+    builder.Configuration.GetSection(
+        BootstrapUsersSettings.SectionName));
+
 var app = builder.Build();
 
 if (app.Configuration.GetValue<bool>("RunMigrationsOnStartup"))
@@ -48,7 +54,11 @@ if (app.Configuration.GetValue<bool>("RunMigrationsOnStartup"))
     var dbContext = scope.ServiceProvider.GetRequiredService<PrydeDbContext>();
     await dbContext.Database.MigrateAsync();
 }
-await app.SeedDatabaseAsync();
+
+if (app.Configuration.GetValue<bool>("SeedDatabaseOnStartup"))
+{
+    await app.SeedDatabaseAsync();
+}
 
 app.UseSwagger();
 app.UseSwaggerUI();

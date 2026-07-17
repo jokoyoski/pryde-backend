@@ -27,6 +27,16 @@ public class KycVerificationRepository(PrydeDbContext context)
             .FirstOrDefaultAsync(kyc => kyc.UserId == userId, cancellationToken);
     }
 
+    public async Task<KycVerification?> GetByProviderReferenceAsync(
+        string providerReference,
+        CancellationToken cancellationToken = default)
+    {
+        return await context.KycVerifications
+            .FirstOrDefaultAsync(
+                kyc => kyc.ProviderReference == providerReference,
+                cancellationToken);
+    }
+
     public async Task<IReadOnlyList<KycVerification>> GetAllAsync(
         CancellationToken cancellationToken = default)
     {
