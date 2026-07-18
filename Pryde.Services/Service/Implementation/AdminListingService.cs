@@ -28,7 +28,9 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
 
     public async Task<PagedResponseDto<AdminKycResponseDto>> GetKycAsync(AdminKycRequestDto request, CancellationToken cancellationToken = default)
     {
-        var result = await unitOfWork.AdminListings.GetKycAsync(request.Status, request.Role, request.Search, request.PageNumber, request.PageSize, cancellationToken);
+        if (request.DateFrom.HasValue && request.DateTo.HasValue && request.DateFrom.Value > request.DateTo.Value)
+            throw new Pryde.Domain.Common.Exceptions.ValidationException("DateFrom cannot be later than DateTo.");
+        var result = await unitOfWork.AdminListings.GetKycAsync(request.Status, request.Role, request.Provider, request.Search, request.DateFrom, request.DateTo, request.PageNumber, request.PageSize, cancellationToken);
         return Page(result.Items.Select(kyc => new AdminKycResponseDto
         {
             Id = kyc.Id,
@@ -41,7 +43,12 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
             DriverLicenseUrl = kyc.DriverLicenseUrl,
             SecondaryIdentificationUrl = kyc.SecondaryIdentificationUrl,
             Status = kyc.Status,
-            VerifiedAt = kyc.VerifiedAt
+            VerifiedAt = kyc.VerifiedAt,
+            ProviderName = kyc.ProviderName,
+            ProviderReference = kyc.ProviderReference,
+            ProviderStatus = kyc.ProviderStatus,
+            RejectionReason = kyc.RejectionReason,
+            LastProviderUpdatedAt = kyc.LastProviderUpdatedAt
         }).ToList(), request, result.TotalCount);
     }
 
@@ -57,7 +64,19 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
             LicensePlateNumber = vehicle.LicensePlateNumber,
             Capacity = vehicle.Capacity,
             IsActive = vehicle.IsActive,
-            ImageUrls = vehicle.Images.Select(image => image.ImageUrl).ToList()
+            ImageUrls = vehicle.Images.Select(image => image.ImageUrl).ToList(),
+            Documents = vehicle.Documents.Select(document => new VehicleDocumentResponseDto
+            {
+                Id = document.Id,
+                VehicleId = document.VehicleId,
+                DocumentType = document.DocumentType,
+                DocumentUrl = document.DocumentUrl,
+                ExpiryDate = document.ExpiryDate,
+                ReviewStatus = document.ReviewStatus,
+                ReviewedBy = document.ReviewedBy,
+                ReviewedAt = document.ReviewedAt,
+                RejectionReason = document.RejectionReason
+            }).ToList()
         }).ToList(), request, result.TotalCount);
     }
 
@@ -73,7 +92,11 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
             LicensePlateNumber = document.Vehicle.LicensePlateNumber,
             DocumentType = document.DocumentType,
             DocumentUrl = document.DocumentUrl,
-            ExpiryDate = document.ExpiryDate
+            ExpiryDate = document.ExpiryDate,
+            ReviewStatus = document.ReviewStatus,
+            ReviewedBy = document.ReviewedBy,
+            ReviewedAt = document.ReviewedAt,
+            RejectionReason = document.RejectionReason
         }).ToList(), request, result.TotalCount);
     }
 

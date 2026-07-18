@@ -14,6 +14,12 @@ public class VehicleDocumentConfiguration : IEntityTypeConfiguration<VehicleDocu
         builder.Property(x => x.DocumentType)
             .IsRequired();
 
+        builder.Property(x => x.ReviewStatus)
+            .IsRequired();
+
+        builder.Property(x => x.RejectionReason)
+            .HasMaxLength(500);
+
         builder.HasOne(x => x.Vehicle)
             .WithMany(x => x.Documents)
             .HasForeignKey(x => x.VehicleId);

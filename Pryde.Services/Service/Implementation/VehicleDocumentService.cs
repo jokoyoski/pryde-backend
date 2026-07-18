@@ -54,6 +54,47 @@ public class VehicleDocumentService(IUnitOfWork unitOfWork) : IVehicleDocumentSe
         return documents.Adapt<List<VehicleDocumentResponseDto>>();
     }
 
+    public async Task<VehicleDocumentResponseDto> GetForAdminAsync(
+        Guid documentId, CancellationToken cancellationToken = default)
+    {
+        var document = await unitOfWork.VehicleDocuments.GetByIdAsync(documentId, cancellationToken)
+            ?? throw new NotFoundException(nameof(VehicleDocument), documentId);
+        return document.Adapt<VehicleDocumentResponseDto>();
+    }
+
+    public async Task<VehicleDocumentResponseDto> ApproveAsync(
+        Guid documentId, Guid reviewedBy, CancellationToken cancellationToken = default)
+    {
+        var document = await GetPendingDocumentAsync(documentId, cancellationToken);
+        document.ReviewStatus = VehicleDocumentReviewStatus.Approved;
+        document.ReviewedBy = reviewedBy;
+        document.ReviewedAt = DateTime.UtcNow;
+        document.RejectionReason = null;
+        unitOfWork.VehicleDocuments.Update(document);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return document.Adapt<VehicleDocumentResponseDto>();
+    }
+
+    public async Task<VehicleDocumentResponseDto> RejectAsync(
+        Guid documentId, Guid reviewedBy, string reason,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new ValidationException("A rejection reason is required.");
+        var document = await GetPendingDocumentAsync(documentId, cancellationToken);
+        document.ReviewStatus = VehicleDocumentReviewStatus.Rejected;
+        document.ReviewedBy = reviewedBy;
+        document.ReviewedAt = DateTime.UtcNow;
+        document.RejectionReason = string.Join(' ', reason.Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        if (document.RejectionReason.Length > 500)
+            document.RejectionReason = document.RejectionReason[..500];
+        unitOfWork.VehicleDocuments.Update(document);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return document.Adapt<VehicleDocumentResponseDto>();
+    }
+
     public async Task DeleteAsync(Guid documentId, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
         var document = await unitOfWork.VehicleDocuments.GetByIdAsync(documentId, cancellationToken)
@@ -67,5 +108,15 @@ public class VehicleDocumentService(IUnitOfWork unitOfWork) : IVehicleDocumentSe
 
         unitOfWork.VehicleDocuments.Delete(document);
         await unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<VehicleDocument> GetPendingDocumentAsync(
+        Guid documentId, CancellationToken cancellationToken)
+    {
+        var document = await unitOfWork.VehicleDocuments.GetByIdAsync(documentId, cancellationToken)
+            ?? throw new NotFoundException(nameof(VehicleDocument), documentId);
+        if (document.ReviewStatus != VehicleDocumentReviewStatus.Pending)
+            throw new ConflictException("This vehicle document has already been finalized.");
+        return document;
     }
 }

@@ -53,6 +53,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IVirtualAccountRepository, VirtualAccountRepository>();
         services.AddScoped<IVehicleImageRepository, VehicleImageRepository>();
         services.AddScoped<IAdminListingRepository, AdminListingRepository>();
+        services.AddScoped<IEscrowRepository, EscrowRepository>();
+        services.AddScoped<ILedgerRepository, LedgerRepository>();
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         return services;

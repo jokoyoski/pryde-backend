@@ -27,6 +27,33 @@ public class VehicleDocumentController(
         return Ok(result);
     }
 
+    [HttpGet("~/api/v{version:apiVersion}/admin/vehicle-documents/{documentId:guid}")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> GetAdminVehicleDocument(
+        Guid documentId, CancellationToken cancellationToken)
+    {
+        return Ok(await vehicleDocumentService.GetForAdminAsync(documentId, cancellationToken));
+    }
+
+    [HttpPatch("~/api/v{version:apiVersion}/admin/vehicle-documents/{documentId:guid}/approve")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> Approve(
+        Guid documentId, CancellationToken cancellationToken)
+    {
+        return Ok(await vehicleDocumentService.ApproveAsync(
+            documentId, GetUserId(), cancellationToken));
+    }
+
+    [HttpPatch("~/api/v{version:apiVersion}/admin/vehicle-documents/{documentId:guid}/reject")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> Reject(
+        Guid documentId, [FromBody] RejectionRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await vehicleDocumentService.RejectAsync(
+            documentId, GetUserId(), request.Reason, cancellationToken));
+    }
+
     [HttpPost]
     [Consumes("multipart/form-data")]
     public async Task<IActionResult> Upload(Guid vehicleId, [FromForm] VehicleDocumentUploadRequestDto request, CancellationToken cancellationToken)

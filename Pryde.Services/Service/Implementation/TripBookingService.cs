@@ -9,8 +9,15 @@ using Pryde.Services.Service.Interface;
 
 namespace Pryde.Services.Service.Implementation;
 
-public class TripBookingService(IUnitOfWork unitOfWork) : ITripBookingService
+public class TripBookingService(
+    IUnitOfWork unitOfWork,
+    IFinancialService financialService) : ITripBookingService
 {
+    public TripBookingService(IUnitOfWork unitOfWork)
+        : this(unitOfWork, new FinancialService(unitOfWork))
+    {
+    }
+
     public async Task<TripBookingResponseDto> CreateAsync(
         Guid passengerId,
         Guid tripId,
@@ -119,6 +126,12 @@ public class TripBookingService(IUnitOfWork unitOfWork) : ITripBookingService
         return MapResponse(booking, booking.Trip, GetPassengerName(booking));
     }
 
+    public Task<EscrowResponseDto> PayAsync(
+        Guid bookingId, Guid passengerId, string idempotencyKey,
+        CancellationToken cancellationToken = default) =>
+        financialService.HoldBookingPaymentAsync(
+            passengerId, bookingId, idempotencyKey, cancellationToken);
+
     public async Task<TripBookingResponseDto> CancelAsync(
         Guid bookingId,
         Guid passengerId,
@@ -145,7 +158,10 @@ public class TripBookingService(IUnitOfWork unitOfWork) : ITripBookingService
 
         booking.Status = BookingStatus.Cancelled;
         unitOfWork.TripBookings.Update(booking);
-        await SaveWithConcurrencyHandlingAsync(cancellationToken);
+        if (booking.PaidAt.HasValue)
+            await financialService.RefundBookingAsync(booking.Id, cancellationToken);
+        else
+            await SaveWithConcurrencyHandlingAsync(cancellationToken);
         return MapResponse(booking, booking.Trip, GetPassengerName(booking));
     }
 
