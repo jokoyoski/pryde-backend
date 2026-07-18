@@ -63,5 +63,12 @@ public class TripsController(ITripService tripService) : ControllerBase
         return NoContent();
     }
 
+    [HttpPatch("{tripId:guid}/complete")]
+    [Authorize(Roles = "Driver")]
+    public async Task<IActionResult> Complete(Guid tripId, CancellationToken cancellationToken)
+    {
+        return Ok(await tripService.CompleteAsync(tripId, GetUserId(), cancellationToken));
+    }
+
     private Guid GetUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }

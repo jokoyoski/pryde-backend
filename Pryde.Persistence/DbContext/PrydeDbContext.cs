@@ -25,6 +25,10 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     public DbSet<WalletTransaction> WalletTransactions { get; set; }
     public DbSet<VirtualAccount> VirtualAccounts { get; set; }
     public DbSet<VehicleImage> VehicleImages { get; set; }
+    public DbSet<Escrow> Escrows { get; set; }
+    public DbSet<LedgerAccount> LedgerAccounts { get; set; }
+    public DbSet<LedgerTransaction> LedgerTransactions { get; set; }
+    public DbSet<LedgerEntry> LedgerEntries { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -49,6 +53,12 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     private void ApplyAuditInformation()
     {
         var now = DateTime.UtcNow;
+
+        if (ChangeTracker.Entries<LedgerEntry>().Any(entry =>
+                entry.State is EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException("Posted ledger entries are immutable.");
+        }
 
         foreach (var entry in ChangeTracker.Entries<BaseEntity>())
         {

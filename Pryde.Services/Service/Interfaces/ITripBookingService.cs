@@ -10,5 +10,6 @@ public interface ITripBookingService
     Task<IReadOnlyList<TripBookingResponseDto>> GetConfirmedPassengersAsync(Guid tripId, Guid driverId, CancellationToken cancellationToken = default);
     Task<TripBookingResponseDto> ApproveAsync(Guid bookingId, Guid driverId, CancellationToken cancellationToken = default);
     Task<TripBookingResponseDto> DeclineAsync(Guid bookingId, Guid driverId, CancellationToken cancellationToken = default);
+    Task<EscrowResponseDto> PayAsync(Guid bookingId, Guid passengerId, string idempotencyKey, CancellationToken cancellationToken = default);
     Task<TripBookingResponseDto> CancelAsync(Guid bookingId, Guid passengerId, CancellationToken cancellationToken = default);
 }

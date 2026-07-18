@@ -14,6 +14,7 @@ public class AdminVehicleResponseDto : VehicleResponseDto
 {
     public string OwnerEmail { get; set; } = string.Empty;
     public string OwnerName { get; set; } = string.Empty;
+    public IReadOnlyList<VehicleDocumentResponseDto> Documents { get; set; } = [];
 }
 
 public class AdminVehicleDocumentResponseDto : VehicleDocumentResponseDto

@@ -15,9 +15,19 @@ public class TripService(
     IUnitOfWork unitOfWork,
     IFareCalculator fareCalculator,
     IRouteMatchingService routeMatchingService,
-    IOptions<PricingSettings> pricingSettings) : ITripService
+    IOptions<PricingSettings> pricingSettings,
+    IFinancialService financialService) : ITripService
 {
     private readonly PricingSettings _pricingSettings = pricingSettings.Value;
+
+    public TripService(
+        IUnitOfWork unitOfWork,
+        IFareCalculator fareCalculator,
+        IRouteMatchingService routeMatchingService,
+        IOptions<PricingSettings> pricingSettings)
+        : this(unitOfWork, fareCalculator, routeMatchingService, pricingSettings, new FinancialService(unitOfWork))
+    {
+    }
 
     public async Task<TripDetailsResponseDto> CreateAsync(
         Guid driverId,
@@ -188,7 +198,17 @@ public class TripService(
         trip.AvailableSeats = Math.Min(trip.Vehicle.Capacity, trip.AvailableSeats + approvedCount);
         trip.Status = TripStatus.Cancelled;
         unitOfWork.Trips.Update(trip);
-        await SaveWithConcurrencyHandlingAsync(cancellationToken);
+        if (trip.Bookings.Any(booking => booking.PaidAt.HasValue))
+            await financialService.RefundTripAsync(trip.Id, cancellationToken);
+        else
+            await SaveWithConcurrencyHandlingAsync(cancellationToken);
+    }
+
+    public async Task<TripDetailsResponseDto> CompleteAsync(
+        Guid tripId, Guid driverId, CancellationToken cancellationToken = default)
+    {
+        await financialService.CompleteTripAsync(tripId, driverId, cancellationToken);
+        return await GetByIdAsync(tripId, cancellationToken);
     }
 
     private async Task EnsureDriverAsync(Guid userId, CancellationToken cancellationToken)

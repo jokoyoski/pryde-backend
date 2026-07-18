@@ -22,7 +22,10 @@ public class AdminKycRequestDto : PaginationRequestDto
 {
     public KycStatus? Status { get; set; }
     public string? Role { get; set; }
+    public string? Provider { get; set; }
     public string? Search { get; set; }
+    public DateTime? DateFrom { get; set; }
+    public DateTime? DateTo { get; set; }
 }
 
 public class AdminVehiclesRequestDto : PaginationRequestDto

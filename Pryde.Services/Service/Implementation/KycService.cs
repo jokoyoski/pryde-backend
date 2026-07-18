@@ -172,6 +172,9 @@ public class KycService(
         var kyc = await unitOfWork.KycVerifications.GetByUserIdAsync(userId, cancellationToken)
             ?? throw new NotFoundException(nameof(KycVerification), userId);
 
+        if (kyc.Status is KycStatus.Approved or KycStatus.Rejected)
+            throw new ConflictException("This KYC request has already been finalized.");
+
         kyc.Status = KycStatus.Approved;
         kyc.VerifiedAt = DateTime.UtcNow;
         kyc.RejectionReason = null;
@@ -185,12 +188,16 @@ public class KycService(
     public async Task<KycVerificationResponseDto> RejectAsync(
         Guid userId, string reason, CancellationToken cancellationToken = default)
     {
+        var sanitizedReason = SanitizeReason(reason);
         var kyc = await unitOfWork.KycVerifications.GetByUserIdAsync(userId, cancellationToken)
             ?? throw new NotFoundException(nameof(KycVerification), userId);
 
+        if (kyc.Status is KycStatus.Approved or KycStatus.Rejected)
+            throw new ConflictException("This KYC request has already been finalized.");
+
         kyc.Status = KycStatus.Rejected;
         kyc.VerifiedAt = null;
-        kyc.RejectionReason = SanitizeReason(reason);
+        kyc.RejectionReason = sanitizedReason;
 
         unitOfWork.KycVerifications.Update(kyc);
         await unitOfWork.SaveChangesAsync(cancellationToken);

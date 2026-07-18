@@ -165,6 +165,9 @@ public class AuthService(
 
         var response = await IssueTokensAsync(user, roleNames, cancellationToken);
 
+        user.LastLoginAt = DateTime.UtcNow;
+        unitOfWork.Users.Update(user);
+
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return response;
@@ -324,6 +327,13 @@ public class AuthService(
 
         unitOfWork.PasswordResetCodes.MarkUsed(code);
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
+        var roles = await unitOfWork.UserRoles.GetByUserIdAsync(user.Id, cancellationToken);
+        if (user.Status == UserStatus.Pending && roles.Any(userRole =>
+                userRole.Role.Name is "Admin" or "SuperAdmin"))
+        {
+            user.Status = UserStatus.Active;
+            user.IsEmailVerified = true;
+        }
         unitOfWork.Users.Update(user);
 
         await unitOfWork.SaveChangesAsync(cancellationToken);

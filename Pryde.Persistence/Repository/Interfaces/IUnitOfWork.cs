@@ -22,7 +22,12 @@ public interface IUnitOfWork
     IVirtualAccountRepository VirtualAccounts { get; }
     IVehicleImageRepository VehicleImages { get; }
     IAdminListingRepository AdminListings { get; }
+    IEscrowRepository Escrows { get; }
+    ILedgerRepository Ledger { get; }
 
     Task<int> SaveChangesAsync(
+        CancellationToken cancellationToken = default);
+    Task<T> ExecuteInTransactionAsync<T>(
+        Func<CancellationToken, Task<T>> action,
         CancellationToken cancellationToken = default);
 }

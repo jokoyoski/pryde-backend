@@ -17,7 +17,8 @@ namespace Pryde.Api.Controllers.V1;
 public class VehicleController(
     IVehicleService vehicleService,
     IFileStorageService fileStorageService,
-    IAdminListingService adminListingService) : ControllerBase
+    IAdminListingService adminListingService,
+    IAdminPortalService adminPortalService) : ControllerBase
 {
     [HttpGet("~/api/v{version:apiVersion}/admin/vehicles")]
     [Authorize(Roles = "Admin,SuperAdmin")]
@@ -27,6 +28,13 @@ public class VehicleController(
     {
         var result = await adminListingService.GetVehiclesAsync(request, cancellationToken);
         return Ok(result);
+    }
+
+    [HttpGet("~/api/v{version:apiVersion}/admin/vehicles/{id:guid}")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> GetAdminVehicle(Guid id, CancellationToken cancellationToken)
+    {
+        return Ok(await adminPortalService.GetVehicleAsync(id, cancellationToken));
     }
 
     [HttpPost("~/api/v{version:apiVersion}/admin/vehicles/{id:guid}/activate")]

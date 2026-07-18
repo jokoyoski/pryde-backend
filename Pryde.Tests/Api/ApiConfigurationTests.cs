@@ -71,6 +71,49 @@ public class ApiConfigurationTests
         Assert.Equal(expected, result.Succeeded);
     }
 
+    [Theory]
+    [InlineData("SuperAdmin", true)]
+    [InlineData("Admin", false)]
+    [InlineData("Passenger", false)]
+    public async Task StaffManagementAllowsOnlySuperAdmin(string role, bool expected)
+    {
+        var authorizeData = typeof(AdminStaffController)
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<IAuthorizeData>();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAuthorizationCore();
+        using var provider = services.BuildServiceProvider();
+        var policy = await AuthorizationPolicy.CombineAsync(
+            provider.GetRequiredService<IAuthorizationPolicyProvider>(), authorizeData);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()), new Claim(ClaimTypes.Role, role)],
+            "Test"));
+
+        var result = await provider.GetRequiredService<IAuthorizationService>()
+            .AuthorizeAsync(principal, null, policy!);
+
+        Assert.Equal(expected, result.Succeeded);
+    }
+
+    [Fact]
+    public void FinancialReportingControllersExposeOnlyGetActions()
+    {
+        var controllerTypes = new[]
+        {
+            typeof(AdminFinanceController), typeof(AdminEscrowsController), typeof(AdminLedgerController)
+        };
+
+        foreach (var method in controllerTypes.SelectMany(type => type.GetMethods()
+                     .Where(method => method.DeclaringType == type)))
+        {
+            var httpAttributes = method.GetCustomAttributes(true)
+                .Where(attribute => attribute.GetType().Name.StartsWith("Http", StringComparison.Ordinal))
+                .ToList();
+            Assert.All(httpAttributes, attribute => Assert.Equal("HttpGetAttribute", attribute.GetType().Name));
+        }
+    }
+
     [Fact]
     public void DojahConfigRequiresAuthenticationAndWebhookAllowsProviderCalls()
     {
@@ -129,6 +172,8 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/trip-bookings/{bookingId}/approve", paths);
         Assert.Contains("/api/v1/trip-bookings/{bookingId}/decline", paths);
         Assert.Contains("/api/v1/trip-bookings/{bookingId}/cancel", paths);
+        Assert.Contains("/api/v1/trip-bookings/{bookingId}/pay", paths);
+        Assert.Contains("/api/v1/trips/{tripId}/complete", paths);
         Assert.Contains("/api/v1/wallet/mine", paths);
         Assert.Contains("/api/v1/wallet/mine/transactions", paths);
         Assert.Contains("/api/v1/virtual-accounts/mine", paths);
@@ -137,6 +182,20 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/admin/kyc", paths);
         Assert.Contains("/api/v1/admin/vehicles", paths);
         Assert.Contains("/api/v1/admin/vehicle-documents", paths);
+        Assert.Contains("/api/v1/admin/staff", paths);
+        Assert.Contains("/api/v1/admin/staff/invite", paths);
+        Assert.Contains("/api/v1/admin/staff/{staffId}", paths);
+        Assert.Contains("/api/v1/admin/staff/{staffId}/activate", paths);
+        Assert.Contains("/api/v1/admin/staff/{staffId}/deactivate", paths);
+        Assert.Contains("/api/v1/admin/dashboard", paths);
+        Assert.Contains("/api/v1/admin/drivers", paths);
+        Assert.Contains("/api/v1/admin/drivers/{driverId}", paths);
+        Assert.Contains("/api/v1/admin/finance/summary", paths);
+        Assert.Contains("/api/v1/admin/wallet-transactions", paths);
+        Assert.Contains("/api/v1/admin/escrows", paths);
+        Assert.Contains("/api/v1/admin/escrows/{escrowId}", paths);
+        Assert.Contains("/api/v1/admin/ledger/transactions", paths);
+        Assert.Contains("/api/v1/admin/ledger/transactions/{transactionId}", paths);
         Assert.Contains("/api/v1/kyc/documents", paths);
         Assert.Contains("/api/v1/kyc/mine", paths);
         Assert.Contains("/api/v1/kyc/dojah/config", paths);

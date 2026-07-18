@@ -11,4 +11,5 @@ public interface ITripService
     Task<IReadOnlyList<TripSummaryResponseDto>> GetMineAsync(Guid driverId, CancellationToken cancellationToken = default);
     Task<TripDetailsResponseDto> UpdateAsync(Guid tripId, Guid driverId, UpdateTripRequestDto request, CancellationToken cancellationToken = default);
     Task CancelAsync(Guid tripId, Guid driverId, CancellationToken cancellationToken = default);
+    Task<TripDetailsResponseDto> CompleteAsync(Guid tripId, Guid driverId, CancellationToken cancellationToken = default);
 }

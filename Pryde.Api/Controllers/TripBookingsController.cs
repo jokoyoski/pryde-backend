@@ -62,5 +62,15 @@ public class TripBookingsController(ITripBookingService tripBookingService) : Co
         return Ok(await tripBookingService.CancelAsync(bookingId, GetUserId(), cancellationToken));
     }
 
+    [HttpPost("trip-bookings/{bookingId:guid}/pay")]
+    public async Task<IActionResult> Pay(
+        Guid bookingId,
+        [FromBody] BookingPaymentRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await tripBookingService.PayAsync(
+            bookingId, GetUserId(), request.IdempotencyKey, cancellationToken));
+    }
+
     private Guid GetUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }

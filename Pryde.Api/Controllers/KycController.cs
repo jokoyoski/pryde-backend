@@ -14,7 +14,8 @@ namespace Pryde.Api.Controllers.V1;
 public class KycController(
     IKycService kycService,
     IDojahKycService dojahKycService,
-    IAdminListingService adminListingService) : ControllerBase
+    IAdminListingService adminListingService,
+    IAdminPortalService adminPortalService) : ControllerBase
 {
     [HttpGet("~/api/v{version:apiVersion}/admin/kyc")]
     [Authorize(Roles = "Admin,SuperAdmin")]
@@ -24,6 +25,14 @@ public class KycController(
     {
         var result = await adminListingService.GetKycAsync(request, cancellationToken);
         return Ok(result);
+    }
+
+    [HttpGet("~/api/v{version:apiVersion}/admin/kyc/{kycId:guid}")]
+    [Authorize(Roles = "Admin,SuperAdmin")]
+    public async Task<IActionResult> GetAdminKycById(
+        Guid kycId, CancellationToken cancellationToken)
+    {
+        return Ok(await adminPortalService.GetKycAsync(kycId, cancellationToken));
     }
 
     [HttpPost("~/api/v{version:apiVersion}/admin/kyc/{userId:guid}/approve")]

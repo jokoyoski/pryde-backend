@@ -1,5 +1,6 @@
 ﻿using Pryde.Domain.Entities;
 using Pryde.Persistence.Context;
+using Microsoft.EntityFrameworkCore;
 using Pryde.Persistence.Repository.Interfaces;
 
 namespace Pryde.Persistence.Repository.Implementations;
@@ -23,7 +24,9 @@ public class UnitOfWork(
     IWalletTransactionRepository walletTransaction,
     IVirtualAccountRepository virtualAccount,
     IVehicleImageRepository vehicleImage,
-    IAdminListingRepository adminListings)
+    IAdminListingRepository adminListings,
+    IEscrowRepository escrows,
+    ILedgerRepository ledger)
     : IUnitOfWork
 {
     public IUserRepository Users { get; } = users;
@@ -44,11 +47,37 @@ public class UnitOfWork(
     public IVirtualAccountRepository VirtualAccounts { get; } = virtualAccount;
     public IVehicleImageRepository VehicleImages { get; } = vehicleImage;
     public IAdminListingRepository AdminListings { get; } = adminListings;
+    public IEscrowRepository Escrows { get; } = escrows;
+    public ILedgerRepository Ledger { get; } = ledger;
 
 
     public async Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default)
     {
         return await context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<T> ExecuteInTransactionAsync<T>(
+        Func<CancellationToken, Task<T>> action,
+        CancellationToken cancellationToken = default)
+    {
+        var strategy = context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await context.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable,
+                cancellationToken);
+            try
+            {
+                var result = await action(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        });
     }
 }
