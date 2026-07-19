@@ -10,6 +10,7 @@ public interface IDojahKycService
 
     Task ProcessWebhookAsync(
         ReadOnlyMemory<byte> payload,
-        string? signature,
+        string? signatureV1,
+        string? signatureV2,
         CancellationToken cancellationToken = default);
 }

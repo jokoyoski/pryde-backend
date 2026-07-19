@@ -110,6 +110,7 @@ public class KycController(
         await dojahKycService.ProcessWebhookAsync(
             payload,
             Request.Headers["x-dojah-signature"].FirstOrDefault(),
+            Request.Headers["x-dojah-signature-v2"].FirstOrDefault(),
             cancellationToken);
 
         return Ok();

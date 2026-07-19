@@ -112,7 +112,7 @@ public class DojahKycServiceTests
         var config = await service.GetConfigAsync(Guid.NewGuid());
         var payload = Payload(config.ReferenceId, providerStatus, "  provider   check failed  ");
 
-        await service.ProcessWebhookAsync(payload, Sign(payload));
+        await service.ProcessWebhookAsync(payload, SignV1(payload), null);
 
         var kyc = Assert.Single(unitOfWork.KycVerificationRepository.Items);
         Assert.Equal(expectedStatus, kyc.Status);
@@ -122,7 +122,33 @@ public class DojahKycServiceTests
     }
 
     [Fact]
-    public async Task InvalidWebhookSignatureIsRejectedWithoutChangingStatus()
+    public async Task ValidV1SignatureIsAccepted()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Payload(config.ReferenceId, "Completed");
+
+        await service.ProcessWebhookAsync(payload, SignV1(payload), null);
+
+        Assert.Equal(KycStatus.Approved, unitOfWork.KycVerificationRepository.Items[0].Status);
+    }
+
+    [Fact]
+    public async Task ValidV2SignatureIsAccepted()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Payload(config.ReferenceId, "Completed");
+
+        await service.ProcessWebhookAsync(payload, null, SignV2());
+
+        Assert.Equal(KycStatus.Approved, unitOfWork.KycVerificationRepository.Items[0].Status);
+    }
+
+    [Fact]
+    public async Task InvalidV1SignatureIsRejectedWithoutChangingStatus()
     {
         var unitOfWork = new TestUnitOfWork();
         var service = Service(unitOfWork);
@@ -130,7 +156,48 @@ public class DojahKycServiceTests
         var payload = Payload(config.ReferenceId, "Completed");
 
         await Assert.ThrowsAsync<UnauthorizedException>(() =>
-            service.ProcessWebhookAsync(payload, new string('0', 64)));
+            service.ProcessWebhookAsync(payload, new string('0', 64), null));
+
+        Assert.Equal(KycStatus.Pending, unitOfWork.KycVerificationRepository.Items[0].Status);
+    }
+
+    [Fact]
+    public async Task InvalidV2SignatureIsRejectedWithoutChangingStatus()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Payload(config.ReferenceId, "Completed");
+
+        await Assert.ThrowsAsync<UnauthorizedException>(() =>
+            service.ProcessWebhookAsync(payload, null, new string('0', 64)));
+
+        Assert.Equal(KycStatus.Pending, unitOfWork.KycVerificationRepository.Items[0].Status);
+    }
+
+    [Fact]
+    public async Task V2IsPreferredWhenBothSignatureHeadersArePresent()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Payload(config.ReferenceId, "Completed");
+
+        await service.ProcessWebhookAsync(payload, new string('0', 64), SignV2());
+
+        Assert.Equal(KycStatus.Approved, unitOfWork.KycVerificationRepository.Items[0].Status);
+    }
+
+    [Fact]
+    public async Task NeitherSignatureHeaderIsRejected()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Payload(config.ReferenceId, "Completed");
+
+        await Assert.ThrowsAsync<UnauthorizedException>(() =>
+            service.ProcessWebhookAsync(payload, null, null));
 
         Assert.Equal(KycStatus.Pending, unitOfWork.KycVerificationRepository.Items[0].Status);
     }
@@ -143,7 +210,10 @@ public class DojahKycServiceTests
         var config = await service.GetConfigAsync(Guid.NewGuid());
         var payload = Payload(config.ReferenceId, "Completed");
 
-        await service.ProcessWebhookAsync(payload, $"  sha256={Sign(payload).ToUpperInvariant()}  ");
+        await service.ProcessWebhookAsync(
+            payload,
+            $"  sha256={SignV1(payload).ToUpperInvariant()}  ",
+            null);
 
         Assert.Equal(KycStatus.Approved, unitOfWork.KycVerificationRepository.Items[0].Status);
     }
@@ -157,7 +227,7 @@ public class DojahKycServiceTests
         var payload = Encoding.UTF8.GetBytes(
             $"{{\n  \"reference_id\": \"{config.ReferenceId}\",\n  \"verification_status\": \"Completed\"\n}}");
 
-        await service.ProcessWebhookAsync(payload, Sign(payload));
+        await service.ProcessWebhookAsync(payload, SignV1(payload), null);
 
         Assert.Equal(KycStatus.Approved, unitOfWork.KycVerificationRepository.Items[0].Status);
     }
@@ -169,11 +239,11 @@ public class DojahKycServiceTests
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
         var payload = Payload(config.ReferenceId, "Completed");
-        var signature = Sign(payload);
+        var signature = SignV1(payload);
 
-        await service.ProcessWebhookAsync(payload, signature);
+        await service.ProcessWebhookAsync(payload, signature, null);
         var saveCount = unitOfWork.SaveChangesCount;
-        await service.ProcessWebhookAsync(payload, signature);
+        await service.ProcessWebhookAsync(payload, signature, null);
 
         Assert.Equal(saveCount, unitOfWork.SaveChangesCount);
     }
@@ -185,10 +255,10 @@ public class DojahKycServiceTests
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
         var completed = Payload(config.ReferenceId, "Completed");
-        await service.ProcessWebhookAsync(completed, Sign(completed));
+        await service.ProcessWebhookAsync(completed, SignV1(completed), null);
         var oldPending = Payload(config.ReferenceId, "Ongoing");
 
-        await service.ProcessWebhookAsync(oldPending, Sign(oldPending));
+        await service.ProcessWebhookAsync(oldPending, SignV1(oldPending), null);
 
         Assert.Equal(KycStatus.Approved, unitOfWork.KycVerificationRepository.Items[0].Status);
     }
@@ -208,9 +278,13 @@ public class DojahKycServiceTests
     private static byte[] Payload(string referenceId, string status, string message = "") =>
         Encoding.UTF8.GetBytes($"{{\"reference_id\":\"{referenceId}\",\"verification_status\":\"{status}\",\"message\":\"{message}\"}}");
 
-    private static string Sign(byte[] payload)
+    private static string SignV1(byte[] payload)
     {
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(Settings().PrivateKey));
         return Convert.ToHexString(hmac.ComputeHash(payload)).ToLowerInvariant();
     }
+
+    private static string SignV2() =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Settings().PrivateKey)))
+            .ToLowerInvariant();
 }
