@@ -72,11 +72,12 @@ public class DojahKycService(
 
     public async Task ProcessWebhookAsync(
         ReadOnlyMemory<byte> payload,
-        string? signature,
+        string? signatureV1,
+        string? signatureV2,
         CancellationToken cancellationToken = default)
     {
         EnsureEnabled();
-        ValidateSignature(payload.Span, signature);
+        ValidateSignature(payload.Span, signatureV1, signatureV2);
 
         DojahWebhookData webhook;
         try
@@ -131,22 +132,45 @@ public class DojahKycService(
         }
     }
 
-    private void ValidateSignature(ReadOnlySpan<byte> payload, string? signature)
+    private void ValidateSignature(
+        ReadOnlySpan<byte> payload,
+        string? signatureV1,
+        string? signatureV2)
     {
         var privateKey = _settings.PrivateKey ?? string.Empty;
         logger.LogInformation(
-            "Dojah webhook signature diagnostic: SignatureHeaderPresent={SignatureHeaderPresent}, SignatureLength={SignatureLength}, PrivateKeyPresent={PrivateKeyPresent}, PrivateKeyLength={PrivateKeyLength}, PayloadLength={PayloadLength}.",
-            !string.IsNullOrWhiteSpace(signature),
-            signature?.Length ?? 0,
+            "Dojah webhook signature diagnostic: SignatureV1Present={SignatureV1Present}, SignatureV1Length={SignatureV1Length}, SignatureV2Present={SignatureV2Present}, SignatureV2Length={SignatureV2Length}, PrivateKeyPresent={PrivateKeyPresent}, PrivateKeyLength={PrivateKeyLength}, PayloadLength={PayloadLength}.",
+            !string.IsNullOrWhiteSpace(signatureV1),
+            signatureV1?.Length ?? 0,
+            !string.IsNullOrWhiteSpace(signatureV2),
+            signatureV2?.Length ?? 0,
             !string.IsNullOrWhiteSpace(privateKey),
             privateKey.Length,
             payload.Length);
 
-        if (string.IsNullOrWhiteSpace(signature))
+        if (!string.IsNullOrWhiteSpace(signatureV2))
         {
-            throw new UnauthorizedException("Invalid webhook signature.");
+            var expectedV2 = Convert.ToHexString(
+                    SHA256.HashData(Encoding.UTF8.GetBytes(privateKey)))
+                .ToLowerInvariant();
+            ValidateHexSignature(signatureV2, expectedV2);
+            return;
         }
 
+        if (!string.IsNullOrWhiteSpace(signatureV1))
+        {
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(privateKey));
+            var expectedV1 = Convert.ToHexString(hmac.ComputeHash(payload.ToArray()))
+                .ToLowerInvariant();
+            ValidateHexSignature(signatureV1, expectedV1);
+            return;
+        }
+
+        throw new UnauthorizedException("Invalid webhook signature.");
+    }
+
+    private static void ValidateHexSignature(string signature, string expected)
+    {
         var supplied = signature.Trim();
         const string signaturePrefix = "sha256=";
         if (supplied.StartsWith(signaturePrefix, StringComparison.OrdinalIgnoreCase))
@@ -159,9 +183,6 @@ public class DojahKycService(
             throw new UnauthorizedException("Invalid webhook signature.");
         }
 
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(privateKey));
-        var expected = Convert.ToHexString(hmac.ComputeHash(payload.ToArray()))
-            .ToLowerInvariant();
         var suppliedBytes = Encoding.ASCII.GetBytes(supplied.ToLowerInvariant());
         var expectedBytes = Encoding.ASCII.GetBytes(expected);
 
