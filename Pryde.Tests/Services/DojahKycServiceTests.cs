@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
@@ -21,7 +22,8 @@ public class DojahKycServiceTests
         {
             ["Dojah:Enabled"] = "true",
             ["Dojah:AppId"] = "bound-app",
-            ["Dojah:PublicKey"] = "bound-public"
+            ["Dojah:PublicKey"] = "bound-public",
+            ["Dojah:PrivateKey"] = "bound-private"
         };
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(values)
@@ -33,6 +35,7 @@ public class DojahKycServiceTests
         Assert.True(settings.Enabled);
         Assert.Equal("bound-app", settings.AppId);
         Assert.Equal("bound-public", settings.PublicKey);
+        Assert.Equal("bound-private", settings.PrivateKey);
     }
 
     [Fact]
@@ -86,7 +89,10 @@ public class DojahKycServiceTests
     public async Task DisabledDojahReturnsServiceUnavailableWithoutChangingKyc()
     {
         var unitOfWork = new TestUnitOfWork();
-        var service = new DojahKycService(unitOfWork, Options.Create(new DojahSettings()));
+        var service = new DojahKycService(
+            unitOfWork,
+            Options.Create(new DojahSettings()),
+            NullLogger<DojahKycService>.Instance);
 
         await Assert.ThrowsAsync<ServiceUnavailableException>(() => service.GetConfigAsync(Guid.NewGuid()));
         Assert.Empty(unitOfWork.KycVerificationRepository.Items);
@@ -130,6 +136,33 @@ public class DojahKycServiceTests
     }
 
     [Fact]
+    public async Task SignatureWithSha256PrefixAndWhitespaceIsAccepted()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Payload(config.ReferenceId, "Completed");
+
+        await service.ProcessWebhookAsync(payload, $"  sha256={Sign(payload).ToUpperInvariant()}  ");
+
+        Assert.Equal(KycStatus.Approved, unitOfWork.KycVerificationRepository.Items[0].Status);
+    }
+
+    [Fact]
+    public async Task SignatureIsCalculatedFromExactPayloadBytes()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Encoding.UTF8.GetBytes(
+            $"{{\n  \"reference_id\": \"{config.ReferenceId}\",\n  \"verification_status\": \"Completed\"\n}}");
+
+        await service.ProcessWebhookAsync(payload, Sign(payload));
+
+        Assert.Equal(KycStatus.Approved, unitOfWork.KycVerificationRepository.Items[0].Status);
+    }
+
+    [Fact]
     public async Task DuplicateWebhookIsIdempotent()
     {
         var unitOfWork = new TestUnitOfWork();
@@ -161,7 +194,7 @@ public class DojahKycServiceTests
     }
 
     private static DojahKycService Service(TestUnitOfWork unitOfWork) =>
-        new(unitOfWork, Options.Create(Settings()));
+        new(unitOfWork, Options.Create(Settings()), NullLogger<DojahKycService>.Instance);
 
     private static DojahSettings Settings() => new()
     {

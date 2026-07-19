@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
@@ -14,7 +15,8 @@ namespace Pryde.Services.Service.Implementation;
 
 public class DojahKycService(
     IUnitOfWork unitOfWork,
-    IOptions<DojahSettings> options) : IDojahKycService
+    IOptions<DojahSettings> options,
+    ILogger<DojahKycService> logger) : IDojahKycService
 {
     private const string ProviderName = "Dojah";
     private readonly DojahSettings _settings = options.Value;
@@ -131,26 +133,39 @@ public class DojahKycService(
 
     private void ValidateSignature(ReadOnlySpan<byte> payload, string? signature)
     {
+        var privateKey = _settings.PrivateKey ?? string.Empty;
+        logger.LogInformation(
+            "Dojah webhook signature diagnostic: SignatureHeaderPresent={SignatureHeaderPresent}, SignatureLength={SignatureLength}, PrivateKeyPresent={PrivateKeyPresent}, PrivateKeyLength={PrivateKeyLength}, PayloadLength={PayloadLength}.",
+            !string.IsNullOrWhiteSpace(signature),
+            signature?.Length ?? 0,
+            !string.IsNullOrWhiteSpace(privateKey),
+            privateKey.Length,
+            payload.Length);
+
         if (string.IsNullOrWhiteSpace(signature))
         {
             throw new UnauthorizedException("Invalid webhook signature.");
         }
 
-        byte[] supplied;
-        try
+        var supplied = signature.Trim();
+        const string signaturePrefix = "sha256=";
+        if (supplied.StartsWith(signaturePrefix, StringComparison.OrdinalIgnoreCase))
         {
-            supplied = Convert.FromHexString(signature.Trim());
+            supplied = supplied[signaturePrefix.Length..].Trim();
         }
-        catch (FormatException)
+
+        if (supplied.Length != 64 || !supplied.All(Uri.IsHexDigit))
         {
             throw new UnauthorizedException("Invalid webhook signature.");
         }
 
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_settings.PrivateKey));
-        var expected = hmac.ComputeHash(payload.ToArray());
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(privateKey));
+        var expected = Convert.ToHexString(hmac.ComputeHash(payload.ToArray()))
+            .ToLowerInvariant();
+        var suppliedBytes = Encoding.ASCII.GetBytes(supplied.ToLowerInvariant());
+        var expectedBytes = Encoding.ASCII.GetBytes(expected);
 
-        if (supplied.Length != expected.Length ||
-            !CryptographicOperations.FixedTimeEquals(supplied, expected))
+        if (!CryptographicOperations.FixedTimeEquals(suppliedBytes, expectedBytes))
         {
             throw new UnauthorizedException("Invalid webhook signature.");
         }
