@@ -55,9 +55,15 @@ public class KycService(
             kyc.SecondaryIdentificationUrl,
             cancellationToken);
 
-        kyc.Status = KycStatus.Pending;
-        kyc.VerifiedAt = null;
-        kyc.RejectionReason = null;
+        if (kyc.Status != KycStatus.Approved)
+        {
+            kyc.Status = KycStatus.Pending;
+            kyc.VerifiedAt = null;
+            kyc.RejectionReason = null;
+            kyc.ProviderReference = null;
+            kyc.ProviderStatus = null;
+            kyc.LastProviderUpdatedAt = null;
+        }
 
         unitOfWork.KycVerifications.Update(kyc);
         await unitOfWork.SaveChangesAsync(cancellationToken);
