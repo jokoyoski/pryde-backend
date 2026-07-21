@@ -13,6 +13,7 @@ public interface IUnitOfWork
     IVehicleDocumentRepository VehicleDocuments { get; }
     IRefreshTokenRepository RefreshTokens { get; }
     IPasswordResetCodeRepository PasswordResetCodes { get; }
+    IVerificationCodeRepository VerificationCodes { get; }
     ITripRepository Trips { get; }
     ITripBookingRepository TripBookings { get; }
     IRecurringTripRepository RecurringTrips { get; }

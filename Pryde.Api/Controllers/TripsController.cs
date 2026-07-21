@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pryde.Contracts.RequestModels;
 using Pryde.Services.Service.Interface;
+using Pryde.Api.Authorization;
 
 namespace Pryde.Api.Controllers.V1;
 
@@ -13,7 +14,7 @@ namespace Pryde.Api.Controllers.V1;
 public class TripsController(ITripService tripService) : ControllerBase
 {
     [HttpPost]
-    [Authorize(Roles = "Driver")]
+    [Authorize(Roles = "Driver", Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> Create(
         [FromBody] CreateTripRequestDto request,
         CancellationToken cancellationToken)
@@ -39,14 +40,14 @@ public class TripsController(ITripService tripService) : ControllerBase
     }
 
     [HttpGet("mine")]
-    [Authorize(Roles = "Driver")]
+    [Authorize(Roles = "Driver", Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> GetMine(CancellationToken cancellationToken)
     {
         return Ok(await tripService.GetMineAsync(GetUserId(), cancellationToken));
     }
 
     [HttpPut("{tripId:guid}")]
-    [Authorize(Roles = "Driver")]
+    [Authorize(Roles = "Driver", Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> Update(
         Guid tripId,
         [FromBody] UpdateTripRequestDto request,
@@ -56,7 +57,7 @@ public class TripsController(ITripService tripService) : ControllerBase
     }
 
     [HttpPatch("{tripId:guid}/cancel")]
-    [Authorize(Roles = "Driver")]
+    [Authorize(Roles = "Driver", Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> Cancel(Guid tripId, CancellationToken cancellationToken)
     {
         await tripService.CancelAsync(tripId, GetUserId(), cancellationToken);
@@ -64,7 +65,7 @@ public class TripsController(ITripService tripService) : ControllerBase
     }
 
     [HttpPatch("{tripId:guid}/complete")]
-    [Authorize(Roles = "Driver")]
+    [Authorize(Roles = "Driver", Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> Complete(Guid tripId, CancellationToken cancellationToken)
     {
         return Ok(await tripService.CompleteAsync(tripId, GetUserId(), cancellationToken));

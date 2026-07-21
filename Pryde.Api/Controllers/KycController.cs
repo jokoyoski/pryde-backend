@@ -4,13 +4,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pryde.Contracts.RequestModels;
 using Pryde.Services.Service.Interface;
+using Pryde.Api.Authorization;
 
 namespace Pryde.Api.Controllers.V1;
 
 [ApiController]
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/kyc")]
-[Authorize]
+[Authorize(Policy = AuthorizationPolicies.EmailVerified)]
 public class KycController(
     IKycService kycService,
     IDojahKycService dojahKycService,

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pryde.Contracts.RequestModels;
 using Pryde.Services.Service.Interface;
+using Pryde.Api.Authorization;
 
 namespace Pryde.Api.Controllers.V1;
 
@@ -14,6 +15,7 @@ namespace Pryde.Api.Controllers.V1;
 public class TripBookingsController(ITripBookingService tripBookingService) : ControllerBase
 {
     [HttpPost("trip-bookings")]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> Create(
         [FromBody] CreateTripBookingRequestDto request,
         CancellationToken cancellationToken)
@@ -44,6 +46,7 @@ public class TripBookingsController(ITripBookingService tripBookingService) : Co
 
     [HttpPatch("trip-bookings/{bookingId:guid}/approve")]
     [Authorize(Roles = "Driver")]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> Approve(Guid bookingId, CancellationToken cancellationToken)
     {
         return Ok(await tripBookingService.ApproveAsync(bookingId, GetUserId(), cancellationToken));
@@ -51,18 +54,21 @@ public class TripBookingsController(ITripBookingService tripBookingService) : Co
 
     [HttpPatch("trip-bookings/{bookingId:guid}/decline")]
     [Authorize(Roles = "Driver")]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> Decline(Guid bookingId, CancellationToken cancellationToken)
     {
         return Ok(await tripBookingService.DeclineAsync(bookingId, GetUserId(), cancellationToken));
     }
 
     [HttpPatch("trip-bookings/{bookingId:guid}/cancel")]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> Cancel(Guid bookingId, CancellationToken cancellationToken)
     {
         return Ok(await tripBookingService.CancelAsync(bookingId, GetUserId(), cancellationToken));
     }
 
     [HttpPost("trip-bookings/{bookingId:guid}/pay")]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> Pay(
         Guid bookingId,
         [FromBody] BookingPaymentRequestDto request,

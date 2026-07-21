@@ -16,6 +16,7 @@ public class UnitOfWork(
     IVehicleDocumentRepository vehicleDocuments,
     IRefreshTokenRepository refreshTokenRepository,
     IPasswordResetCodeRepository passwordResetCodes,
+    IVerificationCodeRepository verificationCodes,
     ITripBookingRepository tripBooking,
     ITripRepository trip,
     IRecurringTripRepository recurringTrip,
@@ -38,6 +39,7 @@ public class UnitOfWork(
     public IVehicleDocumentRepository VehicleDocuments { get; } = vehicleDocuments;
     public IRefreshTokenRepository RefreshTokens { get; } = refreshTokenRepository;
     public IPasswordResetCodeRepository PasswordResetCodes { get; } = passwordResetCodes;
+    public IVerificationCodeRepository VerificationCodes { get; } = verificationCodes;
     public ITripBookingRepository TripBookings { get; } = tripBooking;
     public ITripRepository Trips { get; } = trip;
     public IRecurringTripRepository RecurringTrips { get; } = recurringTrip;

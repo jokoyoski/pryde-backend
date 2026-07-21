@@ -1,5 +1,7 @@
 ﻿using Asp.Versioning;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 using Pryde.Contracts.RequestModels;
 using Pryde.Services.Service.Interface;
 
@@ -63,6 +65,30 @@ public class AuthController(IAuthService authService) : ControllerBase
         await authService.ResetPasswordAsync(request, cancellationToken);
         return Ok(new { message = "Password reset successfully." });
     }
+    [HttpPost("email-verification/resend")]
+    public async Task<IActionResult> ResendEmailVerification(
+        [FromBody] EmailVerificationResendRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await authService.ResendEmailVerificationAsync(
+            request, cancellationToken));
+    }
 
+    [HttpPost("email-verification/verify")]
+    public async Task<IActionResult> VerifyEmail(
+        [FromBody] EmailVerificationVerifyRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await authService.VerifyEmailAsync(request, cancellationToken));
+    }
 
+    [HttpGet("verification-status")]
+    [Authorize]
+    public async Task<IActionResult> GetVerificationStatus(
+        CancellationToken cancellationToken)
+    {
+        return Ok(await authService.GetVerificationStatusAsync(
+            Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!),
+            cancellationToken));
+    }
 }

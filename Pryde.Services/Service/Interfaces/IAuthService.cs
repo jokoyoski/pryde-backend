@@ -23,4 +23,13 @@ public interface IAuthService
     Task ResetPasswordAsync(
         ResetPasswordRequestDto request, 
         CancellationToken cancellationToken = default);
+    Task<EmailVerificationResendResponseDto> ResendEmailVerificationAsync(
+        EmailVerificationResendRequestDto request,
+        CancellationToken cancellationToken = default);
+    Task<VerificationStatusResponseDto> VerifyEmailAsync(
+        EmailVerificationVerifyRequestDto request,
+        CancellationToken cancellationToken = default);
+    Task<VerificationStatusResponseDto> GetVerificationStatusAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
 }

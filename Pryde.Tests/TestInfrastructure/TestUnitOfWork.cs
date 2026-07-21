@@ -22,6 +22,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         VirtualAccounts = new TestVirtualAccountRepository();
         KycVerifications = new TestKycVerificationRepository();
         PasswordResetCodes = new TestPasswordResetCodeRepository();
+        VerificationCodes = new TestVerificationCodeRepository();
+        RefreshTokens = new TestRefreshTokenRepository();
         Escrows = new TestEscrowRepository((TestTripBookingRepository)TripBookings);
         Ledger = new TestLedgerRepository();
     }
@@ -38,6 +40,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public TestKycVerificationRepository KycVerificationRepository => (TestKycVerificationRepository)KycVerifications;
     public TestEscrowRepository EscrowRepository => (TestEscrowRepository)Escrows;
     public TestLedgerRepository LedgerRepository => (TestLedgerRepository)Ledger;
+    public TestVerificationCodeRepository VerificationCodeRepository =>
+        (TestVerificationCodeRepository)VerificationCodes;
     public int SaveChangesCount { get; private set; }
 
     public IUserRepository Users { get; }
@@ -47,8 +51,9 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public IKycVerificationRepository KycVerifications { get; }
     public IVehicleRepository Vehicles { get; }
     public IVehicleDocumentRepository VehicleDocuments { get; }
-    public IRefreshTokenRepository RefreshTokens { get; } = null!;
+    public IRefreshTokenRepository RefreshTokens { get; }
     public IPasswordResetCodeRepository PasswordResetCodes { get; }
+    public IVerificationCodeRepository VerificationCodes { get; }
     public ITripRepository Trips { get; }
     public ITripBookingRepository TripBookings { get; }
     public IRecurringTripRepository RecurringTrips { get; } = null!;
@@ -119,6 +124,74 @@ internal sealed class TestPasswordResetCodeRepository : IPasswordResetCodeReposi
     public Task<PasswordResetCode> CreateAsync(PasswordResetCode code, CancellationToken cancellationToken = default) { Items.Add(code); return Task.FromResult(code); }
     public void MarkUsed(PasswordResetCode code) => code.UsedAt = DateTime.UtcNow;
     public Task InvalidateAllForUserAsync(Guid userId, CancellationToken cancellationToken = default) { foreach (var code in Items.Where(code => code.UserId == userId && code.UsedAt == null)) code.UsedAt = DateTime.UtcNow; return Task.CompletedTask; }
+}
+
+internal sealed class TestRefreshTokenRepository : IRefreshTokenRepository
+{
+    public List<RefreshToken> Items { get; } = [];
+    public Task<RefreshToken?> GetByTokenHashAsync(
+        string tokenHash, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Items.FirstOrDefault(token => token.TokenHash == tokenHash));
+    public Task<RefreshToken> CreateAsync(
+        RefreshToken refreshToken, CancellationToken cancellationToken = default)
+    {
+        Items.Add(refreshToken);
+        return Task.FromResult(refreshToken);
+    }
+    public void Revoke(RefreshToken refreshToken) => refreshToken.RevokedAt = DateTime.UtcNow;
+    public Task RevokeAllActiveForUserAsync(
+        Guid userId, CancellationToken cancellationToken = default)
+    {
+        foreach (var token in Items.Where(token => token.UserId == userId && token.IsActive))
+            token.RevokedAt = DateTime.UtcNow;
+        return Task.CompletedTask;
+    }
+}
+
+internal sealed class TestVerificationCodeRepository : IVerificationCodeRepository
+{
+    public List<VerificationCode> Items { get; } = [];
+
+    public Task<VerificationCode?> GetLatestAsync(
+        Guid userId, VerificationCodePurpose purpose, VerificationChannel channel,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Items.Where(code => code.UserId == userId &&
+                                           code.Purpose == purpose &&
+                                           code.Channel == channel)
+            .OrderByDescending(code => code.CreatedAt)
+            .FirstOrDefault());
+
+    public Task<int> CountCreatedSinceAsync(
+        Guid userId, VerificationCodePurpose purpose, VerificationChannel channel,
+        DateTime createdSince, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Items.Count(code => code.UserId == userId &&
+                                           code.Purpose == purpose &&
+                                           code.Channel == channel &&
+                                           code.CreatedAt >= createdSince));
+
+    public Task InvalidateUnusedAsync(
+        Guid userId, VerificationCodePurpose purpose, VerificationChannel channel,
+        DateTime consumedAt, CancellationToken cancellationToken = default)
+    {
+        foreach (var code in Items.Where(code => code.UserId == userId &&
+                                                 code.Purpose == purpose &&
+                                                 code.Channel == channel &&
+                                                 code.ConsumedAt == null))
+        {
+            code.ConsumedAt = consumedAt;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task<VerificationCode> CreateAsync(
+        VerificationCode verificationCode, CancellationToken cancellationToken = default)
+    {
+        Items.Add(verificationCode);
+        return Task.FromResult(verificationCode);
+    }
+
+    public void Update(VerificationCode verificationCode) { }
 }
 
 internal sealed class TestVehicleDocumentRepository : IVehicleDocumentRepository
