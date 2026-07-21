@@ -26,7 +26,17 @@ builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddServices();
 builder.Services.AddDojahIntegration(builder.Configuration);
 
-builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection(EmailSettings.SectionName));
+builder.Services.AddOptions<EmailSettings>()
+    .Bind(builder.Configuration.GetSection(EmailSettings.SectionName))
+    .Validate(settings => !string.IsNullOrWhiteSpace(settings.ApiKey),
+        "EmailSettings:ApiKey is required.")
+    .Validate(settings => !string.IsNullOrWhiteSpace(settings.FromAddress),
+        "EmailSettings:FromAddress is required.")
+    .Validate(settings => !string.IsNullOrWhiteSpace(settings.FromName),
+        "EmailSettings:FromName is required.")
+    .Validate(settings => settings.OtpExpiryMinutes > 0,
+        "EmailSettings:OtpExpiryMinutes must be greater than zero.")
+    .ValidateOnStart();
 builder.Services.AddHttpClient<IEmailService, ResendEmailService>();
 
 builder.Services.Configure<PricingSettings>(

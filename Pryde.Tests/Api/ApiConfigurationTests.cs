@@ -200,6 +200,9 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/kyc/mine", paths);
         Assert.Contains("/api/v1/kyc/dojah/config", paths);
         Assert.Contains("/api/v1/kyc/dojah/webhook", paths);
+        Assert.Contains("/api/v1/auth/email-verification/resend", paths);
+        Assert.Contains("/api/v1/auth/email-verification/verify", paths);
+        Assert.Contains("/api/v1/auth/verification-status", paths);
         Assert.Contains("/api/v1/admin/kyc/{userId}/approve", paths);
         Assert.Contains("/api/v1/admin/kyc/{userId}/reject", paths);
         Assert.Contains("/api/v1/admin/vehicles/{id}/activate", paths);

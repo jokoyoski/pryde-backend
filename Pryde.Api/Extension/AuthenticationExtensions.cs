@@ -1,6 +1,8 @@
 ﻿using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Authorization;
+using Pryde.Api.Authorization;
 using Pryde.Services.Settings;
 
 namespace Pryde.Api.Extension;
@@ -50,7 +52,15 @@ public static class AuthenticationExtensions
                     };
             });
 
-        services.AddAuthorization();
+        services.AddHttpContextAccessor();
+        services.AddScoped<IAuthorizationHandler, EmailVerifiedHandler>();
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy(
+                AuthorizationPolicies.EmailVerified,
+                policy => policy.RequireAuthenticatedUser()
+                    .AddRequirements(new EmailVerifiedRequirement()));
+        });
 
         return services;
     }

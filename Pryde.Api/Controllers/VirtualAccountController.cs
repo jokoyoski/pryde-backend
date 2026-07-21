@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pryde.Contracts.RequestModels;
 using Pryde.Services.Service.Interface;
+using Pryde.Api.Authorization;
 
 namespace Pryde.Api.Controllers.V1;
 
@@ -15,14 +16,14 @@ public class VirtualAccountController(
     IHostEnvironment environment) : ControllerBase
 {
     [HttpGet("mine")]
-    [Authorize]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> GetMine(CancellationToken cancellationToken)
     {
         return Ok(await walletService.GetVirtualAccountAsync(GetUserId(), cancellationToken));
     }
 
     [HttpPost("fund")]
-    [Authorize]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> Fund(
         [FromBody] FundVirtualAccountRequestDto request,
         CancellationToken cancellationToken)

@@ -2,12 +2,16 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 using Pryde.Services.Notifications.Interface;
 using Pryde.Services.Settings;
 
 namespace Pryde.Services.Notifications.Implementation;
 
-public class ResendEmailService(HttpClient httpClient, IOptions<EmailSettings> emailSettings)
+public class ResendEmailService(
+    HttpClient httpClient,
+    IOptions<EmailSettings> emailSettings,
+    ILogger<ResendEmailService> logger)
     : IEmailService
 {
     private readonly EmailSettings _settings = emailSettings.Value;
@@ -32,7 +36,22 @@ public class ResendEmailService(HttpClient httpClient, IOptions<EmailSettings> e
         var content = new StringContent(
             JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
-        var response = await httpClient.PostAsync("emails", content, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        try
+        {
+            var response = await httpClient.PostAsync("emails", content, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogError(
+                    "Resend rejected an email request with status code {StatusCode}.",
+                    (int)response.StatusCode);
+            }
+
+            response.EnsureSuccessStatusCode();
+        }
+        catch (HttpRequestException exception)
+        {
+            logger.LogError(exception, "Resend email delivery failed.");
+            throw;
+        }
     }
 }

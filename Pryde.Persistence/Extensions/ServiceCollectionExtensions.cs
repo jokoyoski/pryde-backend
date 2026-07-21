@@ -44,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IVehicleDocumentRepository, VehicleDocumentRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IPasswordResetCodeRepository, PasswordResetCodeRepository>();
+        services.AddScoped<IVerificationCodeRepository, VerificationCodeRepository>();
         services.AddScoped<ITripRepository, TripRepository>();
         services.AddScoped<ITripBookingRepository, TripBookingRepository>();
         services.AddScoped<IRecurringTripRepository, RecurringTripRepository>();

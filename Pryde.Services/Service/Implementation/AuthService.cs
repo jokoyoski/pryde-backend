@@ -1,5 +1,8 @@
 ﻿using Mapster;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using System.Security.Cryptography;
+using System.Text;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
@@ -9,14 +12,23 @@ using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Notifications.Interface;
 using Pryde.Services.Security.Interface;
 using Pryde.Services.Service.Interface;
+using Pryde.Services.Settings;
 
 namespace Pryde.Services.Service.Implementation;
 
 
 public class AuthService(
     IUnitOfWork unitOfWork,IPasswordHasher passwordHasher,IJwtService jwtService,
-    IEmailService emailService, IWalletService walletService, ILogger<AuthService> logger) : IAuthService
+    IEmailService emailService, IWalletService walletService, ILogger<AuthService> logger,
+    IOptions<EmailSettings> emailOptions) : IAuthService
 {
+    private const int ResendCooldownSeconds = 60;
+    private const int MaximumVerificationAttempts = 5;
+    private const int MaximumResendsPerHour = 5;
+    private const string GenericResendMessage =
+        "If the account requires email verification, a verification code has been sent.";
+    private readonly EmailSettings _emailSettings = emailOptions.Value;
+
     public async Task<RegisterResponseDto> RegisterAsync(
         RegisterRequestDto request,
         CancellationToken cancellationToken = default)
@@ -92,18 +104,28 @@ public class AuthService(
             $"{profile.FirstName} {profile.LastName}",
             cancellationToken);
 
+        var (verificationCode, rawVerificationCode) = await CreateEmailVerificationCodeAsync(
+            user.Id,
+            cancellationToken);
+
         await unitOfWork.SaveChangesAsync(cancellationToken);
         try
         {
-            await emailService.SendAsync(
+            await SendEmailVerificationCodeAsync(
                 user.Email,
-                "Welcome to Pryde!",
-                $"<p>Hello {profile.FirstName},</p><p>Thank you for registering with Pryde.</p>",
+                profile.FirstName,
+                rawVerificationCode,
                 cancellationToken);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to send welcome email to {Email}", user.Email);
+            verificationCode.ConsumedAt = DateTime.UtcNow;
+            unitOfWork.VerificationCodes.Update(verificationCode);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            logger.LogError(
+                ex,
+                "Failed to send an email verification code for user {UserId}.",
+                user.Id);
         }
 
         var roleNames = assignedRoles.Select(r => r.ToString()).ToList();
@@ -115,6 +137,7 @@ public class AuthService(
         response.Roles = assignedRoles;
         response.AccessToken = tokens.AccessToken;
         response.RefreshToken = tokens.RefreshToken;
+        response.EmailVerificationRequired = !user.IsEmailVerified;
         return response;
     }
 
@@ -337,6 +360,262 @@ public class AuthService(
         unitOfWork.Users.Update(user);
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<EmailVerificationResendResponseDto> ResendEmailVerificationAsync(
+        EmailVerificationResendRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request?.Email) || !request.Email.Contains('@'))
+            throw new ValidationException("A valid email is required.");
+
+        var now = DateTime.UtcNow;
+        var user = await unitOfWork.Users.GetByEmailAsync(
+            request.Email.Trim().ToLowerInvariant(), cancellationToken);
+
+        if (user is null || user.IsEmailVerified)
+            return ResendResponse(now.AddSeconds(ResendCooldownSeconds), now);
+
+        var latest = await unitOfWork.VerificationCodes.GetLatestAsync(
+            user.Id,
+            VerificationCodePurpose.EmailAccountVerification,
+            VerificationChannel.Email,
+            cancellationToken);
+
+        if (latest is not null)
+        {
+            var cooldownEndsAt = latest.LastSentAt.AddSeconds(ResendCooldownSeconds);
+            if (cooldownEndsAt > now)
+                return ResendResponse(cooldownEndsAt, now);
+        }
+
+        var recentCount = await unitOfWork.VerificationCodes.CountCreatedSinceAsync(
+            user.Id,
+            VerificationCodePurpose.EmailAccountVerification,
+            VerificationChannel.Email,
+            now.AddHours(-1),
+            cancellationToken);
+
+        if (recentCount >= MaximumResendsPerHour)
+        {
+            var resendAvailableAt = (latest?.LastSentAt ?? now).AddHours(1);
+            return ResendResponse(resendAvailableAt, now);
+        }
+
+        var (verificationCode, rawCode) = await CreateEmailVerificationCodeAsync(
+            user.Id, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await SendEmailVerificationCodeAsync(
+                user.Email, null, rawCode, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            verificationCode.ConsumedAt = DateTime.UtcNow;
+            unitOfWork.VerificationCodes.Update(verificationCode);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            logger.LogError(
+                exception,
+                "Failed to resend an email verification code for user {UserId}.",
+                user.Id);
+            throw new ServiceUnavailableException(
+                "Email verification is temporarily unavailable. Please try again later.");
+        }
+
+        return ResendResponse(
+            verificationCode.LastSentAt.AddSeconds(ResendCooldownSeconds), now);
+    }
+
+    public async Task<VerificationStatusResponseDto> VerifyEmailAsync(
+        EmailVerificationVerifyRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateEmailVerificationRequest(request);
+        var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+
+        var result = await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
+        {
+            var user = await unitOfWork.Users.GetByEmailAsync(
+                normalizedEmail, transactionToken);
+            if (user is null)
+                return (Succeeded: false, UserId: Guid.Empty);
+
+            if (user.IsEmailVerified)
+                return (Succeeded: true, UserId: user.Id);
+
+            var verificationCode = await unitOfWork.VerificationCodes.GetLatestAsync(
+                user.Id,
+                VerificationCodePurpose.EmailAccountVerification,
+                VerificationChannel.Email,
+                transactionToken);
+
+            var now = DateTime.UtcNow;
+            if (verificationCode is null ||
+                verificationCode.ConsumedAt.HasValue ||
+                verificationCode.ExpiresAt <= now ||
+                verificationCode.AttemptCount >= MaximumVerificationAttempts)
+            {
+                return (Succeeded: false, UserId: user.Id);
+            }
+
+            if (!VerificationCodeMatches(user.Id, request.Code, verificationCode.CodeHash))
+            {
+                verificationCode.AttemptCount++;
+                if (verificationCode.AttemptCount >= MaximumVerificationAttempts)
+                    verificationCode.ConsumedAt = now;
+
+                unitOfWork.VerificationCodes.Update(verificationCode);
+                await unitOfWork.SaveChangesAsync(transactionToken);
+                return (Succeeded: false, UserId: user.Id);
+            }
+
+            verificationCode.ConsumedAt = now;
+            user.IsEmailVerified = true;
+            unitOfWork.VerificationCodes.Update(verificationCode);
+            unitOfWork.Users.Update(user);
+            await unitOfWork.SaveChangesAsync(transactionToken);
+            return (Succeeded: true, UserId: user.Id);
+        }, cancellationToken);
+
+        if (!result.Succeeded)
+            throw new ValidationException("Invalid or expired verification code.");
+
+        return await GetVerificationStatusAsync(result.UserId, cancellationToken);
+    }
+
+    public async Task<VerificationStatusResponseDto> GetVerificationStatusAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await unitOfWork.Users.GetByIdAsync(userId, cancellationToken)
+            ?? throw new NotFoundException(nameof(User), userId);
+        var latest = await unitOfWork.VerificationCodes.GetLatestAsync(
+            user.Id,
+            VerificationCodePurpose.EmailAccountVerification,
+            VerificationChannel.Email,
+            cancellationToken);
+
+        var now = DateTime.UtcNow;
+        DateTime? resendAvailableAt = user.IsEmailVerified || latest is null
+            ? null
+            : latest.LastSentAt.AddSeconds(ResendCooldownSeconds);
+        var activeCode = latest is not null &&
+                         latest.ConsumedAt is null &&
+                         latest.ExpiresAt > now;
+
+        return new VerificationStatusResponseDto
+        {
+            IsEmailVerified = user.IsEmailVerified,
+            IsPhoneNumberVerified = user.IsPhoneNumberVerified,
+            EmailVerificationRequired = !user.IsEmailVerified,
+            ResendAvailableAt = resendAvailableAt,
+            ResendCooldownSeconds = resendAvailableAt.HasValue
+                ? RemainingSeconds(resendAvailableAt.Value, now)
+                : 0,
+            VerificationCodeExpiresAt = activeCode ? latest!.ExpiresAt : null
+        };
+    }
+
+    private async Task<(VerificationCode VerificationCode, string RawCode)>
+        CreateEmailVerificationCodeAsync(
+            Guid userId,
+            CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        await unitOfWork.VerificationCodes.InvalidateUnusedAsync(
+            userId,
+            VerificationCodePurpose.EmailAccountVerification,
+            VerificationChannel.Email,
+            now,
+            cancellationToken);
+
+        var rawCode = RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+        var verificationCode = new VerificationCode
+        {
+            UserId = userId,
+            Purpose = VerificationCodePurpose.EmailAccountVerification,
+            Channel = VerificationChannel.Email,
+            CodeHash = HashVerificationCode(userId, rawCode),
+            ExpiresAt = now.AddMinutes(_emailSettings.OtpExpiryMinutes),
+            LastSentAt = now,
+            CreatedAt = now
+        };
+
+        await unitOfWork.VerificationCodes.CreateAsync(
+            verificationCode, cancellationToken);
+        return (verificationCode, rawCode);
+    }
+
+    private Task SendEmailVerificationCodeAsync(
+        string email,
+        string? firstName,
+        string code,
+        CancellationToken cancellationToken)
+    {
+        var greeting = string.IsNullOrWhiteSpace(firstName)
+            ? string.Empty
+            : $"<p>Hello {firstName},</p>";
+        return emailService.SendAsync(
+            email,
+            "Verify your Pryde email",
+            $"{greeting}<p>Welcome to Pryde. Your email verification code is <strong>{code}</strong>. " +
+            $"It expires in {_emailSettings.OtpExpiryMinutes} minutes.</p>",
+            cancellationToken);
+    }
+
+    private static EmailVerificationResendResponseDto ResendResponse(
+        DateTime resendAvailableAt,
+        DateTime now) => new()
+    {
+        Message = GenericResendMessage,
+        ResendAvailableAt = resendAvailableAt,
+        ResendCooldownSeconds = RemainingSeconds(resendAvailableAt, now)
+    };
+
+    private static int RemainingSeconds(DateTime availableAt, DateTime now) =>
+        Math.Max(0, (int)Math.Ceiling((availableAt - now).TotalSeconds));
+
+    private static string HashVerificationCode(Guid userId, string code)
+    {
+        var value = $"{userId:N}:{VerificationCodePurpose.EmailAccountVerification}:{code}";
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    }
+
+    private static bool VerificationCodeMatches(
+        Guid userId,
+        string suppliedCode,
+        string storedHash)
+    {
+        var suppliedHash = Convert.FromHexString(
+            HashVerificationCode(userId, suppliedCode));
+        byte[] storedHashBytes;
+        try
+        {
+            storedHashBytes = Convert.FromHexString(storedHash);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+
+        return CryptographicOperations.FixedTimeEquals(
+            suppliedHash, storedHashBytes);
+    }
+
+    private static void ValidateEmailVerificationRequest(
+        EmailVerificationVerifyRequestDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request?.Email) || !request.Email.Contains('@'))
+            throw new ValidationException("A valid email is required.");
+
+        if (request.Code is null ||
+            request.Code.Length != 6 ||
+            !request.Code.All(char.IsDigit))
+        {
+            throw new ValidationException("A six-digit verification code is required.");
+        }
     }
 
     private static string HashCode(string code)
