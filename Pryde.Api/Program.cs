@@ -26,55 +26,72 @@ builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddServices();
 builder.Services.AddDojahIntegration(builder.Configuration);
 
-builder.Services.AddOptions<EmailSettings>()
+builder.Services
+    .AddOptions<EmailSettings>()
     .Bind(builder.Configuration.GetSection(EmailSettings.SectionName))
-    .Validate(settings => !string.IsNullOrWhiteSpace(settings.ApiKey),
+    .Validate(
+        settings => !string.IsNullOrWhiteSpace(settings.ApiKey),
         "EmailSettings:ApiKey is required.")
-    .Validate(settings => !string.IsNullOrWhiteSpace(settings.FromAddress),
+    .Validate(
+        settings => !string.IsNullOrWhiteSpace(settings.FromAddress),
         "EmailSettings:FromAddress is required.")
-    .Validate(settings => !string.IsNullOrWhiteSpace(settings.FromName),
+    .Validate(
+        settings => !string.IsNullOrWhiteSpace(settings.FromName),
         "EmailSettings:FromName is required.")
-    .Validate(settings => settings.OtpExpiryMinutes > 0,
+    .Validate(
+        settings => settings.OtpExpiryMinutes > 0,
         "EmailSettings:OtpExpiryMinutes must be greater than zero.")
     .ValidateOnStart();
+
 builder.Services.AddHttpClient<IEmailService, ResendEmailService>();
 
-builder.Services.AddAuthenticationConfiguration(builder.Configuration);
+builder.Services.AddAuthenticationConfiguration(
+    builder.Configuration);
 
 builder.Services.Configure<PricingSettings>(
     builder.Configuration.GetSection("PricingSettings"));
-
-var frontendUrl =
-    builder.Configuration["FrontendUrl"]
-    ?? "http://localhost:3000";
-
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("Frontend", policy =>
-    {
-        policy
-            .WithOrigins(
-                frontendUrl,
-                "http://localhost:5173")
-            .AllowAnyHeader()
-            .AllowAnyMethod();
-    });
-});
 
 builder.Services.Configure<BootstrapUsersSettings>(
     builder.Configuration.GetSection(
         BootstrapUsersSettings.SectionName));
 
+var allowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>()
+    ?? [];
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("Frontend", policy =>
+    {
+        var origins = allowedOrigins
+            .Append("http://localhost:5173")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        policy
+            .WithOrigins(origins)
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
+
 var app = builder.Build();
 
-if (app.Configuration.GetValue<bool>("RunMigrationsOnStartup"))
+if (app.Configuration.GetValue<bool>(
+        "RunMigrationsOnStartup"))
 {
     using var scope = app.Services.CreateScope();
-    var dbContext = scope.ServiceProvider.GetRequiredService<PrydeDbContext>();
+
+    var dbContext = scope.ServiceProvider
+        .GetRequiredService<PrydeDbContext>();
+
     await dbContext.Database.MigrateAsync();
 }
 
-if (app.Configuration.GetValue<bool>("SeedDatabaseOnStartup"))
+if (app.Configuration.GetValue<bool>(
+        "SeedDatabaseOnStartup"))
 {
     await app.SeedDatabaseAsync();
 }
