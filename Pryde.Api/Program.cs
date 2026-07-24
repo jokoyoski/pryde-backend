@@ -55,25 +55,14 @@ builder.Services.Configure<BootstrapUsersSettings>(
     builder.Configuration.GetSection(
         BootstrapUsersSettings.SectionName));
 
-var allowedOrigins = builder.Configuration
-    .GetSection("Cors:AllowedOrigins")
-    .Get<string[]>()
-    ?? [];
-
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
     {
-        var origins = allowedOrigins
-            .Append("http://localhost:5173")
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
         policy
-            .WithOrigins(origins)
+            .AllowAnyOrigin()
             .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
+            .AllowAnyMethod();
     });
 });
 
