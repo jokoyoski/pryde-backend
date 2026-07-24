@@ -39,17 +39,26 @@ builder.Services.AddOptions<EmailSettings>()
     .ValidateOnStart();
 builder.Services.AddHttpClient<IEmailService, ResendEmailService>();
 
+builder.Services.AddAuthenticationConfiguration(builder.Configuration);
+
 builder.Services.Configure<PricingSettings>(
     builder.Configuration.GetSection("PricingSettings"));
 
-builder.Services.AddAuthenticationConfiguration(builder.Configuration);
+var frontendUrl =
+    builder.Configuration["FrontendUrl"]
+    ?? "http://localhost:3000";
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
-        policy.WithOrigins(builder.Configuration["FrontendUrl"] ?? "http://localhost:3000")
-              .AllowAnyHeader()
-              .AllowAnyMethod());
+    {
+        policy
+            .WithOrigins(
+                frontendUrl,
+                "http://localhost:5173")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
 });
 
 builder.Services.Configure<BootstrapUsersSettings>(
