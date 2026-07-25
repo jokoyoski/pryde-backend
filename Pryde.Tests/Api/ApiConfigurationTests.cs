@@ -1,12 +1,20 @@
 using System.Security.Claims;
+using System.Text.Json;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.OpenApi.Models;
+using Pryde.Api.Authorization;
 using Pryde.Api.Controllers.V1;
 using Pryde.Api.Extension;
 using Pryde.Api.Extensions;
+using Pryde.Contracts.ResponseModels;
+using Pryde.Domain.Entities;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.DependencyInjection;
 using Pryde.Services.Service.Interface;
@@ -117,11 +125,120 @@ public class ApiConfigurationTests
     [Fact]
     public void DojahConfigRequiresAuthenticationAndWebhookAllowsProviderCalls()
     {
-        Assert.NotEmpty(typeof(KycController).GetCustomAttributes(typeof(AuthorizeAttribute), true));
+        var controllerAuthorize = typeof(KycController)
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>()
+            .Single();
+        Assert.Null(controllerAuthorize.Policy);
+
+        var config = typeof(KycController).GetMethod(nameof(KycController.GetDojahConfig));
+        Assert.NotNull(config);
+        Assert.Contains(
+            config.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+                .Cast<AuthorizeAttribute>(),
+            attribute => attribute.Policy == AuthorizationPolicies.EmailVerified);
 
         var webhook = typeof(KycController).GetMethod(nameof(KycController.ProcessDojahWebhook));
         Assert.NotNull(webhook);
         Assert.NotEmpty(webhook.GetCustomAttributes(typeof(AllowAnonymousAttribute), true));
+    }
+
+    [Theory]
+    [InlineData(nameof(KycController.UploadDocuments))]
+    [InlineData(nameof(KycController.GetMine))]
+    [InlineData(nameof(KycController.GetDojahConfig))]
+    public void CustomerKycActionsRequireEmailVerification(string actionName)
+    {
+        var action = typeof(KycController).GetMethod(actionName);
+        Assert.NotNull(action);
+        Assert.Contains(
+            action.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+                .Cast<AuthorizeAttribute>(),
+            attribute => attribute.Policy == AuthorizationPolicies.EmailVerified);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task DojahConfigRequiresVerifiedEmail(
+        bool isEmailVerified,
+        bool expected)
+    {
+        var result = await AuthorizeKycActionAsync(
+            nameof(KycController.GetDojahConfig),
+            isEmailVerified,
+            "Passenger");
+
+        Assert.Equal(expected, result.Succeeded);
+    }
+
+    [Theory]
+    [InlineData("Admin", true)]
+    [InlineData("SuperAdmin", true)]
+    [InlineData("Passenger", false)]
+    public async Task AdminKycEndpointUsesRolesWithoutCustomerEmailVerification(
+        string role,
+        bool expected)
+    {
+        var result = await AuthorizeKycActionAsync(
+            nameof(KycController.GetAdminKyc),
+            isEmailVerified: false,
+            role);
+
+        Assert.Equal(expected, result.Succeeded);
+    }
+
+    [Fact]
+    public async Task UnauthenticatedRequestReturnsUnauthorizedApiError()
+    {
+        using var provider = CreateAuthenticationServices();
+        var options = provider
+            .GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(JwtBearerDefaults.AuthenticationScheme);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = new MemoryStream();
+        var scheme = new AuthenticationScheme(
+            JwtBearerDefaults.AuthenticationScheme,
+            JwtBearerDefaults.AuthenticationScheme,
+            typeof(JwtBearerHandler));
+        var challengeContext = new JwtBearerChallengeContext(
+            httpContext,
+            scheme,
+            options,
+            new AuthenticationProperties());
+
+        await options.Events.OnChallenge(challengeContext);
+
+        Assert.Equal(StatusCodes.Status401Unauthorized, httpContext.Response.StatusCode);
+        var response = await ReadErrorResponseAsync(httpContext.Response);
+        Assert.Equal(StatusCodes.Status401Unauthorized, response.StatusCode);
+        Assert.Equal("Unauthorized.", response.Message);
+    }
+
+    [Fact]
+    public async Task ForbiddenResponseUsesGenericApiError()
+    {
+        using var provider = CreateAuthenticationServices();
+        var options = provider
+            .GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(JwtBearerDefaults.AuthenticationScheme);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = new MemoryStream();
+        var scheme = new AuthenticationScheme(
+            JwtBearerDefaults.AuthenticationScheme,
+            JwtBearerDefaults.AuthenticationScheme,
+            typeof(JwtBearerHandler));
+        var forbiddenContext = new ForbiddenContext(
+            httpContext,
+            scheme,
+            options);
+
+        await options.Events.OnForbidden(forbiddenContext);
+
+        Assert.Equal(StatusCodes.Status403Forbidden, httpContext.Response.StatusCode);
+        var response = await ReadErrorResponseAsync(httpContext.Response);
+        Assert.Equal(StatusCodes.Status403Forbidden, response.StatusCode);
+        Assert.Equal("Forbidden.", response.Message);
     }
 
     [Fact]
@@ -217,5 +334,73 @@ public class ApiConfigurationTests
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/vehicles/{id}/activate"].Operations.Single().Key);
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/vehicles/{id}/deactivate"].Operations.Single().Key);
         Assert.Equal(OperationType.Get, document.Paths["/api/v1/admin/vehicle-documents"].Operations.Single().Key);
+    }
+
+    private static async Task<AuthorizationResult> AuthorizeKycActionAsync(
+        string actionName,
+        bool isEmailVerified,
+        string role)
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var user = new User
+        {
+            Email = "kyc-policy@test.local",
+            PhoneNumber = "08000000000",
+            IsEmailVerified = isEmailVerified
+        };
+        ((TestUserRepository)unitOfWork.Users).Items.Add(user);
+
+        using var provider = CreateAuthenticationServices(unitOfWork);
+        using var scope = provider.CreateScope();
+        var authorizeData = typeof(KycController)
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<IAuthorizeData>()
+            .Concat(typeof(KycController)
+                .GetMethod(actionName)!
+                .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+                .Cast<IAuthorizeData>());
+        var policy = await AuthorizationPolicy.CombineAsync(
+            scope.ServiceProvider.GetRequiredService<IAuthorizationPolicyProvider>(),
+            authorizeData);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Role, role)
+            ],
+            "Test"));
+
+        return await scope.ServiceProvider
+            .GetRequiredService<IAuthorizationService>()
+            .AuthorizeAsync(principal, null, policy!);
+    }
+
+    private static ServiceProvider CreateAuthenticationServices(
+        IUnitOfWork? unitOfWork = null)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["JwtSettings:Key"] = "test-signing-key-that-is-long-enough-for-hmac",
+                ["JwtSettings:Issuer"] = "test-issuer",
+                ["JwtSettings:Audience"] = "test-audience"
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        if (unitOfWork is not null)
+        {
+            services.AddSingleton(unitOfWork);
+        }
+        services.AddAuthenticationConfiguration(configuration);
+
+        return services.BuildServiceProvider();
+    }
+
+    private static async Task<ErrorResponseDto> ReadErrorResponseAsync(
+        HttpResponse response)
+    {
+        response.Body.Position = 0;
+        return (await JsonSerializer.DeserializeAsync<ErrorResponseDto>(
+            response.Body))!;
     }
 }

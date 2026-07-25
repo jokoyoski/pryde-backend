@@ -1,8 +1,10 @@
 ﻿using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Authorization;
 using Pryde.Api.Authorization;
+using Pryde.Contracts.ResponseModels;
 using Pryde.Services.Settings;
 
 namespace Pryde.Api.Extension;
@@ -50,6 +52,22 @@ public static class AuthenticationExtensions
                             new SymmetricSecurityKey(
                                 Encoding.UTF8.GetBytes(jwtSettings.Key))
                     };
+
+                options.Events = new JwtBearerEvents
+                {
+                    OnChallenge = async context =>
+                    {
+                        context.HandleResponse();
+                        await WriteErrorResponseAsync(
+                            context.Response,
+                            StatusCodes.Status401Unauthorized,
+                            "Unauthorized.");
+                    },
+                    OnForbidden = context => WriteErrorResponseAsync(
+                        context.Response,
+                        StatusCodes.Status403Forbidden,
+                        "Forbidden.")
+                };
             });
 
         services.AddHttpContextAccessor();
@@ -63,5 +81,21 @@ public static class AuthenticationExtensions
         });
 
         return services;
+    }
+
+    private static async Task WriteErrorResponseAsync(
+        HttpResponse response,
+        int statusCode,
+        string message)
+    {
+        response.StatusCode = statusCode;
+        response.ContentType = "application/json";
+
+        await response.WriteAsync(JsonSerializer.Serialize(
+            new ErrorResponseDto
+            {
+                StatusCode = statusCode,
+                Message = message
+            }));
     }
 }

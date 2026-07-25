@@ -11,7 +11,7 @@ namespace Pryde.Api.Controllers.V1;
 [ApiController]
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/kyc")]
-[Authorize(Policy = AuthorizationPolicies.EmailVerified)]
+[Authorize]
 public class KycController(
     IKycService kycService,
     IDojahKycService dojahKycService,
@@ -57,6 +57,7 @@ public class KycController(
 
     [HttpPost("documents")]
     [Consumes("multipart/form-data")]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> UploadDocuments(
         [FromForm] KycDocumentUploadRequest request,
         CancellationToken cancellationToken)
@@ -70,6 +71,7 @@ public class KycController(
     }
 
     [HttpGet("mine")]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> GetMine(
         CancellationToken cancellationToken)
     {
@@ -81,6 +83,7 @@ public class KycController(
     }
 
     [HttpGet("dojah/config")]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> GetDojahConfig(
         CancellationToken cancellationToken)
     {
