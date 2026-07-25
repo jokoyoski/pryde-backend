@@ -10,6 +10,10 @@ public interface IKycService
         KycDocumentUploadRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<KycVerificationResponseDto> SubmitAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
     Task<KycVerificationResponseDto> GetMineAsync(
         Guid userId,
         CancellationToken cancellationToken = default);

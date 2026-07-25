@@ -26,6 +26,7 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     public DbSet<WalletTransaction> WalletTransactions { get; set; }
     public DbSet<VirtualAccount> VirtualAccounts { get; set; }
     public DbSet<VehicleImage> VehicleImages { get; set; }
+    public DbSet<VehicleAmenity> VehicleAmenities { get; set; }
     public DbSet<Escrow> Escrows { get; set; }
     public DbSet<LedgerAccount> LedgerAccounts { get; set; }
     public DbSet<LedgerTransaction> LedgerTransactions { get; set; }

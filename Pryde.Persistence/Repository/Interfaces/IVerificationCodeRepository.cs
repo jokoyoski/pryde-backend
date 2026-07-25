@@ -5,7 +5,7 @@ namespace Pryde.Persistence.Repository.Interfaces;
 
 public interface IVerificationCodeRepository
 {
-    Task<VerificationCode?> GetLatestAsync(
+    Task<VerificationCode?> GetLatestActiveAsync(
         Guid userId,
         VerificationCodePurpose purpose,
         VerificationChannel channel,

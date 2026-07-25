@@ -15,21 +15,35 @@ public class VehicleDocumentService(IUnitOfWork unitOfWork) : IVehicleDocumentSe
 
         if (vehicle.UserId != requestingUserId)
             throw new ForbiddenException("You do not have access to this vehicle.");
+        EnsureVehicleCanBeEdited(vehicle);
 
         if (string.IsNullOrWhiteSpace(documentUrl))
             throw new ValidationException("A document file is required.");
         if (expiryDate <= DateTime.UtcNow)
             throw new ValidationException("Expiry date must be in the future.");
 
-        var document = new VehicleDocument
+        var documents = await unitOfWork.VehicleDocuments
+            .GetByVehicleIdAsync(vehicleId, cancellationToken);
+        var document = documents.FirstOrDefault(x => x.DocumentType == documentType);
+        var isNew = document is null;
+        if (document is null)
         {
-            VehicleId = vehicleId,
-            DocumentType = documentType,
-            DocumentUrl = documentUrl.Trim(),
-            ExpiryDate = expiryDate
-        };
+            document = new VehicleDocument
+            {
+                VehicleId = vehicleId,
+                DocumentType = documentType
+            };
+            await unitOfWork.VehicleDocuments.CreateAsync(document, cancellationToken);
+        }
 
-        await unitOfWork.VehicleDocuments.CreateAsync(document, cancellationToken);
+        document.DocumentUrl = documentUrl.Trim();
+        document.ExpiryDate = expiryDate;
+        document.ReviewStatus = VehicleDocumentReviewStatus.Pending;
+        document.ReviewedBy = null;
+        document.ReviewedAt = null;
+        document.RejectionReason = null;
+        if (!isNew)
+            unitOfWork.VehicleDocuments.Update(document);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return document.Adapt<VehicleDocumentResponseDto>();
@@ -105,6 +119,7 @@ public class VehicleDocumentService(IUnitOfWork unitOfWork) : IVehicleDocumentSe
 
         if (vehicle.UserId != requestingUserId)
             throw new ForbiddenException("You do not have access to this document.");
+        EnsureVehicleCanBeEdited(vehicle);
 
         unitOfWork.VehicleDocuments.Delete(document);
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -118,5 +133,11 @@ public class VehicleDocumentService(IUnitOfWork unitOfWork) : IVehicleDocumentSe
         if (document.ReviewStatus != VehicleDocumentReviewStatus.Pending)
             throw new ConflictException("This vehicle document has already been finalized.");
         return document;
+    }
+
+    private static void EnsureVehicleCanBeEdited(Vehicle vehicle)
+    {
+        if (vehicle.OnboardingStatus == VehicleOnboardingStatus.Approved)
+            throw new ConflictException("An approved vehicle cannot be edited by the driver.");
     }
 }

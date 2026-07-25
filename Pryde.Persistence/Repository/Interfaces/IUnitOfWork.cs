@@ -22,6 +22,7 @@ public interface IUnitOfWork
     IWalletTransactionRepository WalletTransactions { get; }
     IVirtualAccountRepository VirtualAccounts { get; }
     IVehicleImageRepository VehicleImages { get; }
+    IVehicleAmenityRepository VehicleAmenities { get; }
     IAdminListingRepository AdminListings { get; }
     IEscrowRepository Escrows { get; }
     ILedgerRepository Ledger { get; }

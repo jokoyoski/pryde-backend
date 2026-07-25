@@ -16,6 +16,14 @@ public class AdminUsersRequestDto : PaginationRequestDto
     public string? Role { get; set; }
     public UserStatus? Status { get; set; }
     public string? Search { get; set; }
+    public bool? IsActive { get; set; }
+    public bool? IsEmailVerified { get; set; }
+    public bool? IsPhoneVerified { get; set; }
+    public KycStatus? KycStatus { get; set; }
+    public DateTime? CreatedFrom { get; set; }
+    public DateTime? CreatedTo { get; set; }
+    public string? SortBy { get; set; }
+    public string? SortDirection { get; set; }
 }
 
 public class AdminKycRequestDto : PaginationRequestDto
@@ -30,8 +38,10 @@ public class AdminKycRequestDto : PaginationRequestDto
 
 public class AdminVehiclesRequestDto : PaginationRequestDto
 {
+    public VehicleOnboardingStatus? OnboardingStatus { get; set; }
     public bool? IsActive { get; set; }
     public Guid? OwnerId { get; set; }
+    public VehicleRegistrationType? RegistrationType { get; set; }
     public string? Search { get; set; }
 }
 
@@ -40,4 +50,28 @@ public class AdminVehicleDocumentsRequestDto : PaginationRequestDto
     public Guid? VehicleId { get; set; }
     public Guid? OwnerId { get; set; }
     public VehicleDocumentType? DocumentType { get; set; }
+    public VehicleDocumentReviewStatus? ReviewStatus { get; set; }
+    public DateTime? ExpiryFrom { get; set; }
+    public DateTime? ExpiryTo { get; set; }
+}
+
+public class AdminTripsRequestDto : PaginationRequestDto
+{
+    public string? Search { get; set; }
+    public Guid? DriverId { get; set; }
+    public TripStatus? Status { get; set; }
+    public DateTime? DepartureFrom { get; set; }
+    public DateTime? DepartureTo { get; set; }
+    public bool? IsRecurring { get; set; }
+    public bool? IsActive { get; set; }
+}
+
+public class AdminBookingsRequestDto : PaginationRequestDto
+{
+    public Guid? UserId { get; set; }
+    public Guid? DriverId { get; set; }
+    public Guid? TripId { get; set; }
+    public BookingStatus? Status { get; set; }
+    public DateTime? DateFrom { get; set; }
+    public DateTime? DateTo { get; set; }
 }

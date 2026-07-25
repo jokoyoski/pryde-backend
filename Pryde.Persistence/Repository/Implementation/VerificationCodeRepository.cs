@@ -9,17 +9,22 @@ namespace Pryde.Persistence.Repository.Implementations;
 public class VerificationCodeRepository(PrydeDbContext context)
     : IVerificationCodeRepository
 {
-    public Task<VerificationCode?> GetLatestAsync(
+    public Task<VerificationCode?> GetLatestActiveAsync(
         Guid userId,
         VerificationCodePurpose purpose,
         VerificationChannel channel,
-        CancellationToken cancellationToken = default) =>
-        context.VerificationCodes
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        return context.VerificationCodes
             .Where(code => code.UserId == userId &&
                            code.Purpose == purpose &&
-                           code.Channel == channel)
+                           code.Channel == channel &&
+                           code.ConsumedAt == null &&
+                           code.ExpiresAt > now)
             .OrderByDescending(code => code.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
+    }
 
     public Task<int> CountCreatedSinceAsync(
         Guid userId,

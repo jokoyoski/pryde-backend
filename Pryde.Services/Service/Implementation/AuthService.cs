@@ -71,39 +71,6 @@ public class AuthService(
 
         await unitOfWork.Profiles.CreateAsync(profile, cancellationToken);
 
-        var assignedRoles = request.Roles
-            .Distinct()
-            .ToList();
-
-        foreach (var roleType in assignedRoles)
-        {
-            var role = await unitOfWork.Roles.GetByNameAsync(
-                roleType.ToString(),
-                cancellationToken)
-                ?? throw new NotFoundException(nameof(Role), roleType);
-
-            await unitOfWork.UserRoles.CreateAsync(
-                new UserRole
-                {
-                    UserId = user.Id,
-                    RoleId = role.Id
-                },
-                cancellationToken);
-        }
-
-        await unitOfWork.KycVerifications.CreateAsync(
-            new KycVerification
-            {
-                UserId = user.Id,
-                Status = KycStatus.Pending
-            },
-            cancellationToken);
-
-        await walletService.CreateWalletForUserAsync(
-            user,
-            $"{profile.FirstName} {profile.LastName}",
-            cancellationToken);
-
         var (verificationCode, rawVerificationCode) = await CreateEmailVerificationCodeAsync(
             user.Id,
             cancellationToken);
@@ -126,17 +93,11 @@ public class AuthService(
                 ex,
                 "Failed to send an email verification code for user {UserId}.",
                 user.Id);
+            throw new ServiceUnavailableException(
+                "Email verification is temporarily unavailable. Please try again later.");
         }
 
-        var roleNames = assignedRoles.Select(r => r.ToString()).ToList();
-        var tokens = await IssueTokensAsync(user, roleNames, cancellationToken);
-
-        await unitOfWork.SaveChangesAsync(cancellationToken);
-
         var response = user.Adapt<RegisterResponseDto>();
-        response.Roles = assignedRoles;
-        response.AccessToken = tokens.AccessToken;
-        response.RefreshToken = tokens.RefreshToken;
         response.EmailVerificationRequired = !user.IsEmailVerified;
         return response;
     }
@@ -165,17 +126,7 @@ public class AuthService(
                 "Invalid email/phone number or password.");
         }
 
-        if (user.Status == UserStatus.Suspended)
-        {
-            throw new ForbiddenException(
-                "This account has been suspended.");
-        }
-
-        if (user.Status == UserStatus.Deactivated)
-        {
-            throw new ForbiddenException(
-                "This account has been deactivated.");
-        }
+        EnsureUserCanAuthenticate(user);
 
         var userRoles = await unitOfWork.UserRoles.GetByUserIdAsync(
             user.Id,
@@ -193,6 +144,62 @@ public class AuthService(
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
+        return response;
+    }
+
+    public async Task<LoginResponseDto> SelectRolesAsync(
+        Guid userId,
+        SelectRolesRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateRoleSelectionRequest(request);
+        var user = await unitOfWork.Users.GetByIdAsync(userId, cancellationToken)
+            ?? throw new NotFoundException(nameof(User), userId);
+        EnsureUserCanAuthenticate(user);
+
+        var currentRoles = await unitOfWork.UserRoles.GetByUserIdAsync(
+            user.Id, cancellationToken);
+        var roleNames = currentRoles
+            .Select(userRole => userRole.Role.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var roleType in request.Roles)
+        {
+            var roleName = roleType.ToString();
+            if (roleNames.Contains(roleName))
+                continue;
+
+            var role = await unitOfWork.Roles.GetByNameAsync(
+                roleName, cancellationToken)
+                ?? throw new NotFoundException(nameof(Role), roleName);
+            await unitOfWork.UserRoles.CreateAsync(new UserRole
+            {
+                UserId = user.Id,
+                RoleId = role.Id
+            }, cancellationToken);
+            roleNames.Add(role.Name);
+        }
+
+        if (!await unitOfWork.KycVerifications.ExistsForUserAsync(
+                user.Id, cancellationToken))
+        {
+            await unitOfWork.KycVerifications.CreateAsync(new KycVerification
+            {
+                UserId = user.Id,
+                Status = KycStatus.Pending
+            }, cancellationToken);
+        }
+
+        var profile = await unitOfWork.Profiles.GetByUserIdAsync(
+            user.Id, cancellationToken);
+        var accountName = profile is null
+            ? user.Email
+            : $"{profile.FirstName} {profile.LastName}".Trim();
+        await walletService.CreateWalletForUserAsync(
+            user, accountName, cancellationToken);
+
+        var response = await IssueTokensAsync(user, roleNames, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
         return response;
     }
 
@@ -221,10 +228,7 @@ public class AuthService(
             cancellationToken)
             ?? throw new UnauthorizedException("Refresh token is invalid or has expired.");
 
-        if (user.Status is UserStatus.Suspended or UserStatus.Deactivated)
-        {
-            throw new ForbiddenException("This account is no longer active.");
-        }
+        EnsureUserCanAuthenticate(user);
 
         unitOfWork.RefreshTokens.Revoke(storedToken);
 
@@ -376,7 +380,7 @@ public class AuthService(
         if (user is null || user.IsEmailVerified)
             return ResendResponse(now.AddSeconds(ResendCooldownSeconds), now);
 
-        var latest = await unitOfWork.VerificationCodes.GetLatestAsync(
+        var latest = await unitOfWork.VerificationCodes.GetLatestActiveAsync(
             user.Id,
             VerificationCodePurpose.EmailAccountVerification,
             VerificationChannel.Email,
@@ -445,7 +449,7 @@ public class AuthService(
             if (user.IsEmailVerified)
                 return (Succeeded: true, UserId: user.Id);
 
-            var verificationCode = await unitOfWork.VerificationCodes.GetLatestAsync(
+            var verificationCode = await unitOfWork.VerificationCodes.GetLatestActiveAsync(
                 user.Id,
                 VerificationCodePurpose.EmailAccountVerification,
                 VerificationChannel.Email,
@@ -491,7 +495,7 @@ public class AuthService(
     {
         var user = await unitOfWork.Users.GetByIdAsync(userId, cancellationToken)
             ?? throw new NotFoundException(nameof(User), userId);
-        var latest = await unitOfWork.VerificationCodes.GetLatestAsync(
+        var latest = await unitOfWork.VerificationCodes.GetLatestActiveAsync(
             user.Id,
             VerificationCodePurpose.EmailAccountVerification,
             VerificationChannel.Email,
@@ -644,17 +648,30 @@ public class AuthService(
         if (string.IsNullOrWhiteSpace(request.Password))
             throw new ValidationException("Password cannot be empty.");
 
-        if (request.Roles is null || request.Roles.Count == 0)
+    }
+
+    private static void ValidateRoleSelectionRequest(SelectRolesRequestDto request)
+    {
+        if (request?.Roles is null || request.Roles.Count == 0)
             throw new ValidationException(
                 "At least one role (Passenger or Driver) must be selected.");
-
         if (request.Roles.Distinct().Count() != request.Roles.Count)
+            throw new ValidationException("Duplicate roles are not allowed.");
+        if (request.Roles.Any(role =>
+                role is not (RoleType.Passenger or RoleType.Driver)))
             throw new ValidationException(
-                "Duplicate roles are not allowed.");
+                "Only Passenger or Driver roles may be self-assigned.");
+    }
 
-        if (request.Roles.Contains(RoleType.Admin))
-            throw new ValidationException(
-                "Admin role cannot be self-assigned during registration.");
+    private static void EnsureUserCanAuthenticate(User user)
+    {
+        if (user.Status == UserStatus.Suspended)
+            throw new ForbiddenException("This account has been suspended.");
+        if (user.Status == UserStatus.Deactivated)
+            throw new ForbiddenException("This account has been deactivated.");
+        if (!user.IsEmailVerified)
+            throw new ForbiddenException(
+                "Email verification is required before login.");
     }
 
     private static void ValidateLoginRequest(LoginRequestDto request)

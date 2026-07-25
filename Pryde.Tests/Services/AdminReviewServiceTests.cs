@@ -13,7 +13,12 @@ public class AdminReviewServiceTests
     public async Task KycCannotBeFinalizedTwiceAndRejectionRequiresReason()
     {
         var unitOfWork = new TestUnitOfWork();
-        var kyc = new KycVerification { UserId = Guid.NewGuid(), Status = KycStatus.Pending };
+        var kyc = new KycVerification
+        {
+            UserId = Guid.NewGuid(),
+            Status = KycStatus.Submitted,
+            BiometricVerificationUrl = "https://files.test/selfie.jpg"
+        };
         unitOfWork.KycVerificationRepository.Items.Add(kyc);
         var service = new KycService(unitOfWork, null!);
 

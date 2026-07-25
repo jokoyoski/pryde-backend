@@ -25,6 +25,43 @@ public class AdminListingServiceTests
     }
 
     [Fact]
+    public async Task UserListingCapsPageSizeAndAppliesRequestedFilters()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var matching = User("verified.driver@test.local");
+        matching.IsEmailVerified = true;
+        matching.IsPhoneNumberVerified = true;
+        matching.KycVerification = Kyc(matching, KycStatus.Approved);
+        var driverRole = new Role { Name = "Driver" };
+        matching.UserRoles.Add(new UserRole
+        {
+            User = matching,
+            UserId = matching.Id,
+            Role = driverRole,
+            RoleId = driverRole.Id
+        });
+        unitOfWork.AdminListingRepository.Users.Add(matching);
+        for (var i = 0; i < 120; i++)
+            unitOfWork.AdminListingRepository.Users.Add(User($"other{i}@test.local"));
+
+        var request = new AdminUsersRequestDto
+        {
+            PageSize = 500,
+            Search = "verified.driver",
+            Role = "Driver",
+            IsActive = true,
+            IsEmailVerified = true,
+            IsPhoneVerified = true,
+            KycStatus = KycStatus.Approved
+        };
+        var result = await new AdminListingService(unitOfWork).GetUsersAsync(request);
+
+        Assert.Equal(100, result.PageSize);
+        Assert.Single(result.Items);
+        Assert.Equal(matching.Id, result.Items[0].Id);
+    }
+
+    [Fact]
     public async Task KycStatusFilterWorks()
     {
         var unitOfWork = new TestUnitOfWork();
@@ -65,6 +102,52 @@ public class AdminListingServiceTests
 
         Assert.Single(result.Items);
         Assert.Equal(vehicle.UserId, result.Items[0].OwnerId);
+    }
+
+    [Fact]
+    public async Task TripAndBookingListingsArePagedAndFiltered()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var driver = User("driver@test.local");
+        var vehicle = Vehicle(driver, true);
+        var trip = new Trip
+        {
+            DriverId = driver.Id,
+            Driver = driver,
+            VehicleId = vehicle.Id,
+            Vehicle = vehicle,
+            OriginAddress = "Lagos",
+            DestinationAddress = "Abuja",
+            DepartureTime = DateTime.UtcNow.AddDays(1),
+            Status = TripStatus.Scheduled
+        };
+        var passenger = User("passenger@test.local");
+        var booking = new TripBooking
+        {
+            TripId = trip.Id,
+            Trip = trip,
+            PassengerId = passenger.Id,
+            Passenger = passenger,
+            Status = BookingStatus.Approved,
+            RequestedAt = DateTime.UtcNow
+        };
+        unitOfWork.AdminListingRepository.Trips.Add(trip);
+        unitOfWork.AdminListingRepository.Bookings.Add(booking);
+
+        var trips = await new AdminListingService(unitOfWork).GetTripsAsync(
+            new AdminTripsRequestDto { DriverId = driver.Id, IsActive = true });
+        var bookings = await new AdminListingService(unitOfWork).GetBookingsAsync(
+            new AdminBookingsRequestDto
+            {
+                DriverId = driver.Id,
+                UserId = passenger.Id,
+                Status = BookingStatus.Approved
+            });
+
+        Assert.Single(trips.Items);
+        Assert.Equal(1, trips.TotalCount);
+        Assert.Single(bookings.Items);
+        Assert.Equal(1, bookings.TotalCount);
     }
 
     private static User User(string email) => new() { Id = Guid.NewGuid(), Email = email, PhoneNumber = "08000000000", Status = UserStatus.Active };

@@ -26,5 +26,7 @@ public class VehicleImageRepository(PrydeDbContext context) : IVehicleImageRepos
         return image;
     }
 
+    public void Update(VehicleImage image) => context.VehicleImages.Update(image);
+
     public void Delete(VehicleImage image) => context.VehicleImages.Remove(image);
 }

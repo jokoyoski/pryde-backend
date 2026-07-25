@@ -32,6 +32,19 @@ public class AuthController(IAuthService authService) : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("roles/select")]
+    [Authorize]
+    public async Task<IActionResult> SelectRoles(
+        [FromBody] SelectRolesRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var result = await authService.SelectRolesAsync(
+            Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!),
+            request,
+            cancellationToken);
+        return Ok(result);
+    }
+
     [HttpPost("refresh")]
     public async Task<IActionResult> Refresh(
         [FromBody] RefreshTokenRequestDto request,

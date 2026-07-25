@@ -13,7 +13,9 @@ using Pryde.Api.Authorization;
 using Pryde.Api.Controllers.V1;
 using Pryde.Api.Extension;
 using Pryde.Api.Extensions;
+using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
+using Pryde.Domain.Constants;
 using Pryde.Domain.Entities;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.DependencyInjection;
@@ -26,9 +28,26 @@ namespace Pryde.Tests.Api;
 
 public class ApiConfigurationTests
 {
+    [Fact]
+    public void RoleSelectionRequiresAuthentication()
+    {
+        var action = typeof(AuthController).GetMethod(nameof(AuthController.SelectRoles));
+
+        Assert.NotNull(action);
+        Assert.Contains(
+            action.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+                .Cast<AuthorizeAttribute>(),
+            attribute => string.IsNullOrEmpty(attribute.Roles));
+    }
+
     [Theory]
-    [InlineData(typeof(ProfileController), nameof(ProfileController.GetAllUsers))]
-    [InlineData(typeof(ProfileController), nameof(ProfileController.GetPagedUsers))]
+    [InlineData(typeof(AdminUsersController), nameof(AdminUsersController.GetAll))]
+    [InlineData(typeof(AdminDriversController), nameof(AdminDriversController.GetAll))]
+    [InlineData(typeof(AdminTripsController), nameof(AdminTripsController.GetAll))]
+    [InlineData(typeof(AdminBookingsController), nameof(AdminBookingsController.GetAll))]
+    [InlineData(typeof(AdminFinanceController), nameof(AdminFinanceController.GetWalletTransactions))]
+    [InlineData(typeof(AdminLedgerController), nameof(AdminLedgerController.GetAll))]
+    [InlineData(typeof(AdminEscrowsController), nameof(AdminEscrowsController.GetAll))]
     [InlineData(typeof(KycController), nameof(KycController.GetAdminKyc))]
     [InlineData(typeof(KycController), nameof(KycController.ApproveKyc))]
     [InlineData(typeof(KycController), nameof(KycController.RejectKyc))]
@@ -41,11 +60,14 @@ public class ApiConfigurationTests
         var action = controllerType.GetMethod(actionName);
         Assert.NotNull(action);
 
-        var authorize = action.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+        var authorize = controllerType
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
             .Cast<AuthorizeAttribute>()
-            .Single();
+            .Concat(action.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+                .Cast<AuthorizeAttribute>());
 
-        Assert.Equal("Admin,SuperAdmin", authorize.Roles);
+        Assert.Contains(authorize,
+            attribute => attribute.Roles == RoleNames.AdminOrSuperAdmin);
     }
 
     [Theory]
@@ -54,13 +76,9 @@ public class ApiConfigurationTests
     [InlineData("Driver", false)]
     public async Task AdminResourcePolicyAllowsOnlyAdminRoles(string role, bool expected)
     {
-        var authorizeData = typeof(ProfileController)
+        var authorizeData = typeof(AdminUsersController)
             .GetCustomAttributes(typeof(AuthorizeAttribute), true)
-            .Cast<IAuthorizeData>()
-            .Concat(typeof(ProfileController)
-                .GetMethod(nameof(ProfileController.GetAllUsers))!
-                .GetCustomAttributes(typeof(AuthorizeAttribute), true)
-                .Cast<IAuthorizeData>());
+            .Cast<IAuthorizeData>();
 
         var services = new ServiceCollection();
         services.AddLogging();
@@ -145,11 +163,36 @@ public class ApiConfigurationTests
 
     [Theory]
     [InlineData(nameof(KycController.UploadDocuments))]
+    [InlineData(nameof(KycController.Submit))]
     [InlineData(nameof(KycController.GetMine))]
     [InlineData(nameof(KycController.GetDojahConfig))]
     public void CustomerKycActionsRequireEmailVerification(string actionName)
     {
         var action = typeof(KycController).GetMethod(actionName);
+        Assert.NotNull(action);
+        Assert.Contains(
+            action.GetCustomAttributes(typeof(AuthorizeAttribute), true)
+                .Cast<AuthorizeAttribute>(),
+            attribute => attribute.Policy == AuthorizationPolicies.EmailVerified);
+    }
+
+    [Theory]
+    [InlineData(typeof(VehicleController), nameof(VehicleController.Create))]
+    [InlineData(typeof(VehicleController), nameof(VehicleController.Update))]
+    [InlineData(typeof(VehicleController), nameof(VehicleController.AddImages))]
+    [InlineData(typeof(VehicleController), nameof(VehicleController.DeleteImage))]
+    [InlineData(typeof(VehicleController), nameof(VehicleController.Delete))]
+    [InlineData(typeof(VehicleController), nameof(VehicleController.UpdateDetails))]
+    [InlineData(typeof(VehicleController), nameof(VehicleController.UpdateMedia))]
+    [InlineData(typeof(VehicleController), nameof(VehicleController.UpdateCapacityExtras))]
+    [InlineData(typeof(VehicleController), nameof(VehicleController.Submit))]
+    [InlineData(typeof(VehicleDocumentController), nameof(VehicleDocumentController.Upload))]
+    [InlineData(typeof(VehicleDocumentController), nameof(VehicleDocumentController.Delete))]
+    public void VehicleCustomerMutationsRequireEmailVerification(
+        Type controllerType,
+        string actionName)
+    {
+        var action = controllerType.GetMethod(actionName);
         Assert.NotNull(action);
         Assert.Contains(
             action.GetCustomAttributes(typeof(AuthorizeAttribute), true)
@@ -295,9 +338,13 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/wallet/mine/transactions", paths);
         Assert.Contains("/api/v1/virtual-accounts/mine", paths);
         Assert.Contains("/api/v1/admin/users", paths);
-        Assert.Contains("/api/v1/admin/users/paged", paths);
+        Assert.DoesNotContain("/api/v1/admin/users/paged", paths);
         Assert.Contains("/api/v1/admin/kyc", paths);
         Assert.Contains("/api/v1/admin/vehicles", paths);
+        Assert.Contains("/api/v1/vehicles/{vehicleId}/details", paths);
+        Assert.Contains("/api/v1/vehicles/{vehicleId}/media", paths);
+        Assert.Contains("/api/v1/vehicles/{vehicleId}/capacity-extras", paths);
+        Assert.Contains("/api/v1/vehicles/{vehicleId}/submit", paths);
         Assert.Contains("/api/v1/admin/vehicle-documents", paths);
         Assert.Contains("/api/v1/admin/staff", paths);
         Assert.Contains("/api/v1/admin/staff/invite", paths);
@@ -307,6 +354,10 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/admin/dashboard", paths);
         Assert.Contains("/api/v1/admin/drivers", paths);
         Assert.Contains("/api/v1/admin/drivers/{driverId}", paths);
+        Assert.Contains("/api/v1/admin/trips", paths);
+        Assert.Contains("/api/v1/admin/trips/{tripId}", paths);
+        Assert.Contains("/api/v1/admin/bookings", paths);
+        Assert.Contains("/api/v1/admin/bookings/{bookingId}", paths);
         Assert.Contains("/api/v1/admin/finance/summary", paths);
         Assert.Contains("/api/v1/admin/wallet-transactions", paths);
         Assert.Contains("/api/v1/admin/escrows", paths);
@@ -320,13 +371,15 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/auth/email-verification/resend", paths);
         Assert.Contains("/api/v1/auth/email-verification/verify", paths);
         Assert.Contains("/api/v1/auth/verification-status", paths);
+        Assert.Contains("/api/v1/auth/roles/select", paths);
+        Assert.Contains("/api/v1/kyc/submit", paths);
         Assert.Contains("/api/v1/admin/kyc/{userId}/approve", paths);
         Assert.Contains("/api/v1/admin/kyc/{userId}/reject", paths);
         Assert.Contains("/api/v1/admin/vehicles/{id}/activate", paths);
         Assert.Contains("/api/v1/admin/vehicles/{id}/deactivate", paths);
 
         Assert.Equal(OperationType.Get, document.Paths["/api/v1/admin/users"].Operations.Single().Key);
-        Assert.Equal(OperationType.Get, document.Paths["/api/v1/admin/users/paged"].Operations.Single().Key);
+        Assert.Single(document.Paths["/api/v1/admin/users"].Operations);
         Assert.Equal(OperationType.Get, document.Paths["/api/v1/admin/kyc"].Operations.Single().Key);
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/kyc/{userId}/approve"].Operations.Single().Key);
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/kyc/{userId}/reject"].Operations.Single().Key);
@@ -334,6 +387,15 @@ public class ApiConfigurationTests
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/vehicles/{id}/activate"].Operations.Single().Key);
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/vehicles/{id}/deactivate"].Operations.Single().Key);
         Assert.Equal(OperationType.Get, document.Paths["/api/v1/admin/vehicle-documents"].Operations.Single().Key);
+        Assert.Equal(
+            OperationType.Post,
+            document.Paths["/api/v1/auth/roles/select"].Operations.Single().Key);
+        Assert.Equal(
+            OperationType.Post,
+            document.Paths["/api/v1/kyc/submit"].Operations.Single().Key);
+        Assert.DoesNotContain(
+            "roles",
+            document.Components.Schemas[nameof(RegisterRequestDto)].Properties.Keys);
     }
 
     private static async Task<AuthorizationResult> AuthorizeKycActionAsync(

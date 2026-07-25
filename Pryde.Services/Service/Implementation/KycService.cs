@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
+using Pryde.Domain.Constants;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
@@ -34,6 +35,12 @@ public class KycService(
             userId,
             cancellationToken);
 
+        if (kyc.Status == KycStatus.Approved)
+        {
+            throw new ConflictException(
+                "Approved KYC documents cannot be modified.");
+        }
+
         kyc.BiometricVerificationUrl = await UploadOptionalAsync(
             request.BiometricVerification,
             FileCategory.KycBiometric,
@@ -55,15 +62,48 @@ public class KycService(
             kyc.SecondaryIdentificationUrl,
             cancellationToken);
 
-        if (kyc.Status != KycStatus.Approved)
+        kyc.Status = KycStatus.Pending;
+        kyc.VerifiedAt = null;
+        kyc.RejectionReason = null;
+        kyc.ProviderReference = null;
+        kyc.ProviderStatus = null;
+        kyc.LastProviderUpdatedAt = null;
+
+        unitOfWork.KycVerifications.Update(kyc);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return kyc.Adapt<KycVerificationResponseDto>();
+    }
+
+    public async Task<KycVerificationResponseDto> SubmitAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var kyc = await unitOfWork.KycVerifications.GetByUserIdAsync(
+            userId,
+            cancellationToken)
+            ?? throw new NotFoundException(nameof(KycVerification), userId);
+
+        if (kyc.Status == KycStatus.Approved)
         {
-            kyc.Status = KycStatus.Pending;
-            kyc.VerifiedAt = null;
-            kyc.RejectionReason = null;
-            kyc.ProviderReference = null;
-            kyc.ProviderStatus = null;
-            kyc.LastProviderUpdatedAt = null;
+            throw new ConflictException(
+                "Approved KYC cannot be resubmitted.");
         }
+
+        if (kyc.Status == KycStatus.Submitted)
+        {
+            throw new ConflictException(
+                "KYC has already been submitted.");
+        }
+
+        await ValidateCompletenessAsync(
+            userId,
+            kyc,
+            cancellationToken);
+
+        kyc.Status = KycStatus.Submitted;
+        kyc.VerifiedAt = null;
+        kyc.RejectionReason = null;
 
         unitOfWork.KycVerifications.Update(kyc);
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -114,7 +154,7 @@ public class KycService(
             cancellationToken);
 
         var isDriver = userRoles.Any(role =>
-            role.Role.Name == RoleType.Driver.ToString());
+            role.Role.Name == RoleNames.Driver);
 
         if (!isDriver)
         {
@@ -181,6 +221,17 @@ public class KycService(
         if (kyc.Status is KycStatus.Approved or KycStatus.Rejected)
             throw new ConflictException("This KYC request has already been finalized.");
 
+        await ValidateCompletenessAsync(
+            userId,
+            kyc,
+            cancellationToken);
+
+        if (kyc.Status != KycStatus.Submitted)
+        {
+            throw new ConflictException(
+                "KYC must be submitted before approval.");
+        }
+
         kyc.Status = KycStatus.Approved;
         kyc.VerifiedAt = DateTime.UtcNow;
         kyc.RejectionReason = null;
@@ -189,6 +240,43 @@ public class KycService(
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return kyc.Adapt<KycVerificationResponseDto>();
+    }
+
+    private async Task ValidateCompletenessAsync(
+        Guid userId,
+        KycVerification kyc,
+        CancellationToken cancellationToken)
+    {
+        var missingDocuments = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(kyc.BiometricVerificationUrl))
+        {
+            missingDocuments.Add("biometric verification");
+        }
+
+        var userRoles = await unitOfWork.UserRoles.GetByUserIdAsync(
+            userId,
+            cancellationToken);
+        var requiresDriverDocuments = userRoles.Any(role =>
+            role.Role.Name == RoleNames.Driver);
+
+        if (requiresDriverDocuments &&
+            string.IsNullOrWhiteSpace(kyc.DriverLicenseUrl))
+        {
+            missingDocuments.Add("driver's license");
+        }
+
+        if (requiresDriverDocuments &&
+            string.IsNullOrWhiteSpace(kyc.SecondaryIdentificationUrl))
+        {
+            missingDocuments.Add("secondary identification");
+        }
+
+        if (missingDocuments.Count > 0)
+        {
+            throw new ValidationException(
+                $"Missing required KYC documents: {string.Join(", ", missingDocuments)}.");
+        }
     }
 
     public async Task<KycVerificationResponseDto> RejectAsync(

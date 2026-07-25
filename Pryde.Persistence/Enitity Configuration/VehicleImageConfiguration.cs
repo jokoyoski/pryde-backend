@@ -10,6 +10,9 @@ public class VehicleImageConfiguration : IEntityTypeConfiguration<VehicleImage>
         builder.Property(x => x.ImageUrl)
             .IsRequired();
 
+        builder.HasIndex(x => new { x.VehicleId, x.ImageType })
+            .IsUnique();
+
         builder.HasOne(x => x.Vehicle)
             .WithMany(v => v.Images)
             .HasForeignKey(x => x.VehicleId)

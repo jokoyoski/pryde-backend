@@ -198,7 +198,7 @@ public class AdminPortalService(
         ValidateDateRange(request.DateFrom, request.DateTo);
         var result = await unitOfWork.AdminListings.GetWalletTransactionsAsync(
             request.UserId, request.TransactionType, request.Status, request.DateFrom, request.DateTo,
-            request.Search, request.PageNumber, request.PageSize, cancellationToken);
+            request.Reference, request.Search, request.PageNumber, request.PageSize, cancellationToken);
         return new PagedResponseDto<AdminWalletTransactionResponseDto>
         {
             Items = result.Items.Select(MapWalletTransaction).ToList(),
@@ -432,9 +432,24 @@ public class AdminPortalService(
         OwnerEmail = vehicle.User?.Email ?? string.Empty,
         OwnerName = $"{vehicle.User?.Profile?.FirstName} {vehicle.User?.Profile?.LastName}".Trim(),
         LicensePlateNumber = vehicle.LicensePlateNumber,
+        VehicleOwnerName = vehicle.VehicleOwnerName,
+        RegistrationType = vehicle.RegistrationType,
+        WalkAroundVideoUrl = vehicle.WalkAroundVideoUrl,
+        PassengerSeatCount = vehicle.PassengerSeatCount,
+        LuggageCapacity = vehicle.LuggageCapacity,
+        Amenities = vehicle.Amenities.Select(x => x.AmenityType).Order().ToList(),
+        AdditionalDetails = vehicle.AdditionalDetails,
+        OnboardingStatus = vehicle.OnboardingStatus,
         Capacity = vehicle.Capacity,
         IsActive = vehicle.IsActive,
         ImageUrls = vehicle.Images.Select(image => image.ImageUrl).ToList(),
+        Images = vehicle.Images.Select(image => new VehicleImageResponseDto
+        {
+            Id = image.Id,
+            ImageUrl = image.ImageUrl,
+            ImageType = image.ImageType,
+            IsPrimary = image.IsPrimary
+        }).ToList(),
         Documents = vehicle.Documents.Select(document => new VehicleDocumentResponseDto
         {
             Id = document.Id,
