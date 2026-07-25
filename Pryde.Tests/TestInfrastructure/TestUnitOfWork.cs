@@ -17,6 +17,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         UserRoles = new TestUserRoleRepository(((TestUserRepository)Users).Items, ((TestRoleRepository)Roles).Items);
         Profiles = new TestProfileRepository(((TestUserRepository)Users).Items);
         VehicleDocuments = new TestVehicleDocumentRepository();
+        VehicleImages = new TestVehicleImageRepository();
+        VehicleAmenities = new TestVehicleAmenityRepository();
         Wallets = new TestWalletRepository();
         WalletTransactions = new TestWalletTransactionRepository();
         VirtualAccounts = new TestVirtualAccountRepository();
@@ -31,6 +33,12 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public TestTripRepository TripRepository => (TestTripRepository)Trips;
     public TestTripBookingRepository TripBookingRepository => (TestTripBookingRepository)TripBookings;
     public TestVehicleRepository VehicleRepository => (TestVehicleRepository)Vehicles;
+    public TestVehicleDocumentRepository VehicleDocumentRepository =>
+        (TestVehicleDocumentRepository)VehicleDocuments;
+    public TestVehicleImageRepository VehicleImageRepository =>
+        (TestVehicleImageRepository)VehicleImages;
+    public TestVehicleAmenityRepository VehicleAmenityRepository =>
+        (TestVehicleAmenityRepository)VehicleAmenities;
     public TestUserRoleRepository UserRoleRepository => (TestUserRoleRepository)UserRoles;
     public TestProfileRepository ProfileRepository => (TestProfileRepository)Profiles;
     public TestWalletRepository WalletRepository => (TestWalletRepository)Wallets;
@@ -61,7 +69,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public IWalletRepository Wallets { get; }
     public IWalletTransactionRepository WalletTransactions { get; }
     public IVirtualAccountRepository VirtualAccounts { get; }
-    public IVehicleImageRepository VehicleImages { get; } = null!;
+    public IVehicleImageRepository VehicleImages { get; }
+    public IVehicleAmenityRepository VehicleAmenities { get; }
     public IAdminListingRepository AdminListings { get; }
     public IEscrowRepository Escrows { get; }
     public ILedgerRepository Ledger { get; }
@@ -152,12 +161,14 @@ internal sealed class TestVerificationCodeRepository : IVerificationCodeReposito
 {
     public List<VerificationCode> Items { get; } = [];
 
-    public Task<VerificationCode?> GetLatestAsync(
+    public Task<VerificationCode?> GetLatestActiveAsync(
         Guid userId, VerificationCodePurpose purpose, VerificationChannel channel,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(Items.Where(code => code.UserId == userId &&
                                            code.Purpose == purpose &&
-                                           code.Channel == channel)
+                                           code.Channel == channel &&
+                                           code.ConsumedAt == null &&
+                                           code.ExpiresAt > DateTime.UtcNow)
             .OrderByDescending(code => code.CreatedAt)
             .FirstOrDefault());
 
@@ -236,12 +247,36 @@ internal sealed class TestAdminListingRepository : IAdminListingRepository
     public List<KycVerification> Kyc { get; } = [];
     public List<Vehicle> Vehicles { get; } = [];
     public List<VehicleDocument> VehicleDocuments { get; } = [];
+    public List<Trip> Trips { get; } = [];
+    public List<TripBooking> Bookings { get; } = [];
     public List<WalletTransaction> WalletTransactions { get; } = [];
 
-    public Task<(IReadOnlyList<User> Items, int TotalCount)> GetUsersAsync(string? role, UserStatus? status, string? search, int pageNumber, int pageSize, CancellationToken cancellationToken = default) => Page(Users.Where(user => !status.HasValue || user.Status == status.Value), pageNumber, pageSize);
+    public Task<(IReadOnlyList<User> Items, int TotalCount)> GetUsersAsync(string? role, UserStatus? status, string? search, bool? isActive, bool? isEmailVerified, bool? isPhoneVerified, KycStatus? kycStatus, DateTime? createdFrom, DateTime? createdTo, string? sortBy, string? sortDirection, int pageNumber, int pageSize, CancellationToken cancellationToken = default)
+    {
+        var query = Users.Where(user =>
+            (!status.HasValue || user.Status == status.Value) &&
+            (!isActive.HasValue || (user.Status == UserStatus.Active) == isActive.Value) &&
+            (!isEmailVerified.HasValue || user.IsEmailVerified == isEmailVerified.Value) &&
+            (!isPhoneVerified.HasValue || user.IsPhoneNumberVerified == isPhoneVerified.Value) &&
+            (!kycStatus.HasValue || user.KycVerification?.Status == kycStatus.Value) &&
+            (!createdFrom.HasValue || user.CreatedAt >= createdFrom.Value) &&
+            (!createdTo.HasValue || user.CreatedAt <= createdTo.Value) &&
+            (string.IsNullOrWhiteSpace(role) || user.UserRoles.Any(userRole =>
+                userRole.Role.Name.Equals(role, StringComparison.OrdinalIgnoreCase))) &&
+            (string.IsNullOrWhiteSpace(search) ||
+             user.Email.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+             user.PhoneNumber.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+             (user.Profile?.FirstName.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+             (user.Profile?.LastName.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)));
+        return Page(query, pageNumber, pageSize);
+    }
     public Task<(IReadOnlyList<KycVerification> Items, int TotalCount)> GetKycAsync(KycStatus? status, string? role, string? provider, string? search, DateTime? dateFrom, DateTime? dateTo, int pageNumber, int pageSize, CancellationToken cancellationToken = default) => Page(Kyc.Where(kyc => (!status.HasValue || kyc.Status == status.Value) && (string.IsNullOrWhiteSpace(provider) || kyc.ProviderName == provider)), pageNumber, pageSize);
-    public Task<(IReadOnlyList<Vehicle> Items, int TotalCount)> GetVehiclesAsync(bool? isActive, Guid? ownerId, string? search, int pageNumber, int pageSize, CancellationToken cancellationToken = default) => Page(Vehicles.Where(vehicle => (!isActive.HasValue || vehicle.IsActive == isActive.Value) && (!ownerId.HasValue || vehicle.UserId == ownerId.Value)), pageNumber, pageSize);
-    public Task<(IReadOnlyList<VehicleDocument> Items, int TotalCount)> GetVehicleDocumentsAsync(Guid? vehicleId, Guid? ownerId, VehicleDocumentType? documentType, int pageNumber, int pageSize, CancellationToken cancellationToken = default) => Page(VehicleDocuments.Where(document => (!vehicleId.HasValue || document.VehicleId == vehicleId.Value) && (!ownerId.HasValue || document.Vehicle.UserId == ownerId.Value) && (!documentType.HasValue || document.DocumentType == documentType.Value)), pageNumber, pageSize);
+    public Task<(IReadOnlyList<Vehicle> Items, int TotalCount)> GetVehiclesAsync(VehicleOnboardingStatus? onboardingStatus, bool? isActive, Guid? ownerId, VehicleRegistrationType? registrationType, string? search, int pageNumber, int pageSize, CancellationToken cancellationToken = default) => Page(Vehicles.Where(vehicle => (!onboardingStatus.HasValue || vehicle.OnboardingStatus == onboardingStatus.Value) && (!isActive.HasValue || vehicle.IsActive == isActive.Value) && (!ownerId.HasValue || vehicle.UserId == ownerId.Value) && (!registrationType.HasValue || vehicle.RegistrationType == registrationType.Value)), pageNumber, pageSize);
+    public Task<(IReadOnlyList<VehicleDocument> Items, int TotalCount)> GetVehicleDocumentsAsync(Guid? vehicleId, Guid? ownerId, VehicleDocumentType? documentType, VehicleDocumentReviewStatus? reviewStatus, DateTime? expiryFrom, DateTime? expiryTo, int pageNumber, int pageSize, CancellationToken cancellationToken = default) => Page(VehicleDocuments.Where(document => (!vehicleId.HasValue || document.VehicleId == vehicleId.Value) && (!ownerId.HasValue || document.Vehicle.UserId == ownerId.Value) && (!documentType.HasValue || document.DocumentType == documentType.Value) && (!reviewStatus.HasValue || document.ReviewStatus == reviewStatus.Value) && (!expiryFrom.HasValue || document.ExpiryDate >= expiryFrom.Value) && (!expiryTo.HasValue || document.ExpiryDate <= expiryTo.Value)), pageNumber, pageSize);
+    public Task<(IReadOnlyList<Trip> Items, int TotalCount)> GetTripsAsync(string? search, Guid? driverId, TripStatus? status, DateTime? departureFrom, DateTime? departureTo, bool? isRecurring, bool? isActive, int pageNumber, int pageSize, CancellationToken cancellationToken = default) => Page(Trips.Where(trip => (!driverId.HasValue || trip.DriverId == driverId.Value) && (!status.HasValue || trip.Status == status.Value) && (!departureFrom.HasValue || trip.DepartureTime >= departureFrom.Value) && (!departureTo.HasValue || trip.DepartureTime <= departureTo.Value) && (!isRecurring.HasValue || trip.RecurringTripId.HasValue == isRecurring.Value) && (!isActive.HasValue || (trip.Status is not (TripStatus.Completed or TripStatus.Cancelled)) == isActive.Value)), pageNumber, pageSize);
+    public Task<Trip?> GetTripAsync(Guid tripId, CancellationToken cancellationToken = default) => Task.FromResult(Trips.FirstOrDefault(trip => trip.Id == tripId));
+    public Task<(IReadOnlyList<TripBooking> Items, int TotalCount)> GetBookingsAsync(Guid? userId, Guid? driverId, Guid? tripId, BookingStatus? status, DateTime? dateFrom, DateTime? dateTo, int pageNumber, int pageSize, CancellationToken cancellationToken = default) => Page(Bookings.Where(booking => (!userId.HasValue || booking.PassengerId == userId.Value) && (!driverId.HasValue || booking.Trip.DriverId == driverId.Value) && (!tripId.HasValue || booking.TripId == tripId.Value) && (!status.HasValue || booking.Status == status.Value) && (!dateFrom.HasValue || booking.RequestedAt >= dateFrom.Value) && (!dateTo.HasValue || booking.RequestedAt <= dateTo.Value)), pageNumber, pageSize);
+    public Task<TripBooking?> GetBookingAsync(Guid bookingId, CancellationToken cancellationToken = default) => Task.FromResult(Bookings.FirstOrDefault(booking => booking.Id == bookingId));
     public Task<(IReadOnlyList<User> Items, int TotalCount)> GetStaffAsync(string? search, string? role, UserStatus? status, int pageNumber, int pageSize, CancellationToken cancellationToken = default) => Page(Users.Where(user => user.UserRoles.Any(userRole => userRole.Role.Name is "Admin" or "SuperAdmin") && (!status.HasValue || user.Status == status.Value) && (string.IsNullOrWhiteSpace(role) || user.UserRoles.Any(userRole => userRole.Role.Name.Equals(role, StringComparison.OrdinalIgnoreCase)))), pageNumber, pageSize);
     public Task<AdminStaffSummary> GetStaffSummaryAsync(CancellationToken cancellationToken = default)
     {
@@ -255,7 +290,7 @@ internal sealed class TestAdminListingRepository : IAdminListingRepository
     public Task<Vehicle?> GetVehicleDetailsAsync(Guid vehicleId, CancellationToken cancellationToken = default) => Task.FromResult(Vehicles.FirstOrDefault(vehicle => vehicle.Id == vehicleId));
     public Task<AdminDashboardCounts> GetDashboardCountsAsync(CancellationToken cancellationToken = default) => Task.FromResult(new AdminDashboardCounts(Users.Count(user => !user.UserRoles.Any(role => role.Role.Name is "Admin" or "SuperAdmin")), Users.Count(user => user.UserRoles.Any(role => role.Role.Name == "Driver")), Users.Count(user => user.Status == UserStatus.Active && user.UserRoles.Any(role => role.Role.Name == "Driver")), Users.Count(user => user.Status == UserStatus.Pending && user.UserRoles.Any(role => role.Role.Name == "Driver")), Kyc.Count(kyc => kyc.Status is KycStatus.Pending or KycStatus.Submitted), VehicleDocuments.Count(document => document.ReviewStatus == VehicleDocumentReviewStatus.Pending), WalletTransactions.Count));
     public Task<IReadOnlyList<User>> GetRecentDriverRequestsAsync(int count, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<User>>(Users.Where(user => user.UserRoles.Any(role => role.Role.Name == "Driver")).Take(count).ToList());
-    public Task<(IReadOnlyList<WalletTransaction> Items, int TotalCount)> GetWalletTransactionsAsync(Guid? userId, WalletTransactionType? transactionType, string? status, DateTime? dateFrom, DateTime? dateTo, string? search, int pageNumber, int pageSize, CancellationToken cancellationToken = default) => Page(WalletTransactions.Where(transaction => (!userId.HasValue || transaction.Wallet.UserId == userId.Value) && (!transactionType.HasValue || transaction.Type == transactionType.Value)), pageNumber, pageSize);
+    public Task<(IReadOnlyList<WalletTransaction> Items, int TotalCount)> GetWalletTransactionsAsync(Guid? userId, WalletTransactionType? transactionType, string? status, DateTime? dateFrom, DateTime? dateTo, string? reference, string? search, int pageNumber, int pageSize, CancellationToken cancellationToken = default) => Page(WalletTransactions.Where(transaction => (!userId.HasValue || transaction.Wallet.UserId == userId.Value) && (!transactionType.HasValue || transaction.Type == transactionType.Value) && (string.IsNullOrWhiteSpace(reference) || (transaction.Reference?.Contains(reference, StringComparison.OrdinalIgnoreCase) ?? false))), pageNumber, pageSize);
     public Task<IReadOnlyList<WalletTransaction>> GetRecentWalletTransactionsAsync(int count, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<WalletTransaction>>(WalletTransactions.Take(count).ToList());
 
     private static Task<(IReadOnlyList<T> Items, int TotalCount)> Page<T>(IEnumerable<T> source, int pageNumber, int pageSize)
@@ -408,6 +443,42 @@ internal sealed class TestVehicleRepository : IVehicleRepository
     public Task<Vehicle> CreateAsync(Vehicle vehicle, CancellationToken cancellationToken = default) { Items.Add(vehicle); return Task.FromResult(vehicle); }
     public void Update(Vehicle vehicle) { }
     public void Delete(Vehicle vehicle) => Items.Remove(vehicle);
+}
+
+internal sealed class TestVehicleImageRepository : IVehicleImageRepository
+{
+    public List<VehicleImage> Items { get; } = [];
+    public Task<VehicleImage?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Items.FirstOrDefault(x => x.Id == id));
+    public Task<IReadOnlyList<VehicleImage>> GetByVehicleIdAsync(Guid vehicleId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<VehicleImage>>(Items.Where(x => x.VehicleId == vehicleId).ToList());
+    public Task<VehicleImage> CreateAsync(VehicleImage image, CancellationToken cancellationToken = default)
+    {
+        if (image.ImageType.HasValue &&
+            Items.Any(x => x.VehicleId == image.VehicleId && x.ImageType == image.ImageType))
+        {
+            throw new InvalidOperationException("Duplicate typed vehicle image.");
+        }
+        Items.Add(image);
+        return Task.FromResult(image);
+    }
+    public void Update(VehicleImage image) { }
+    public void Delete(VehicleImage image) => Items.Remove(image);
+}
+
+internal sealed class TestVehicleAmenityRepository : IVehicleAmenityRepository
+{
+    public List<VehicleAmenity> Items { get; } = [];
+    public Task<IReadOnlyList<VehicleAmenity>> GetByVehicleIdAsync(Guid vehicleId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<VehicleAmenity>>(Items.Where(x => x.VehicleId == vehicleId).ToList());
+    public Task<VehicleAmenity> CreateAsync(VehicleAmenity amenity, CancellationToken cancellationToken = default)
+    {
+        if (Items.Any(x => x.VehicleId == amenity.VehicleId && x.AmenityType == amenity.AmenityType))
+            throw new InvalidOperationException("Duplicate vehicle amenity.");
+        Items.Add(amenity);
+        return Task.FromResult(amenity);
+    }
+    public void Delete(VehicleAmenity amenity) => Items.Remove(amenity);
 }
 
 internal sealed class TestUserRoleRepository(List<User> users, List<Role> roles) : IUserRoleRepository

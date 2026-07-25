@@ -27,6 +27,16 @@ builder.Services.AddServices();
 builder.Services.AddDojahIntegration(builder.Configuration);
 
 builder.Services
+    .AddOptions<VehicleUploadSettings>()
+    .Bind(builder.Configuration.GetSection(VehicleUploadSettings.SectionName))
+    .Validate(
+        settings => settings.VehicleImageMaxBytes > 0 &&
+                    settings.WalkAroundVideoMaxBytes > 0 &&
+                    settings.VehicleDocumentMaxBytes > 0,
+        "Vehicle upload limits must be greater than zero.")
+    .ValidateOnStart();
+
+builder.Services
     .AddOptions<EmailSettings>()
     .Bind(builder.Configuration.GetSection(EmailSettings.SectionName))
     .Validate(

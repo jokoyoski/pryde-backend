@@ -25,6 +25,7 @@ public class UnitOfWork(
     IWalletTransactionRepository walletTransaction,
     IVirtualAccountRepository virtualAccount,
     IVehicleImageRepository vehicleImage,
+    IVehicleAmenityRepository vehicleAmenity,
     IAdminListingRepository adminListings,
     IEscrowRepository escrows,
     ILedgerRepository ledger)
@@ -48,6 +49,7 @@ public class UnitOfWork(
     public IWalletTransactionRepository WalletTransactions { get; } = walletTransaction;
     public IVirtualAccountRepository VirtualAccounts { get; } = virtualAccount;
     public IVehicleImageRepository VehicleImages { get; } = vehicleImage;
+    public IVehicleAmenityRepository VehicleAmenities { get; } = vehicleAmenity;
     public IAdminListingRepository AdminListings { get; } = adminListings;
     public IEscrowRepository Escrows { get; } = escrows;
     public ILedgerRepository Ledger { get; } = ledger;

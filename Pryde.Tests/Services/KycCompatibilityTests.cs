@@ -44,6 +44,8 @@ public class KycCompatibilityTests
     public async Task ExistingAdminApprovalStillWorks()
     {
         var unitOfWork = Context(out var kyc);
+        kyc.BiometricVerificationUrl = "https://files.test/selfie.jpg";
+        kyc.Status = KycStatus.Submitted;
 
         var result = await new KycService(unitOfWork, null!).ApproveAsync(kyc.UserId);
 
@@ -118,7 +120,7 @@ public class KycCompatibilityTests
     }
 
     [Fact]
-    public async Task ApprovedKycDocumentReplacementDoesNotReopenFinalizedReview()
+    public async Task ApprovedKycDocumentReplacementIsRejected()
     {
         var unitOfWork = Context(out var kyc);
         var verifiedAt = DateTime.UtcNow.AddDays(-1);
@@ -130,14 +132,13 @@ public class KycCompatibilityTests
         kyc.ProviderStatus = "Completed";
         kyc.LastProviderUpdatedAt = providerUpdatedAt;
 
-        var result = await UploadBiometricAsync(unitOfWork, kyc.UserId);
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            UploadBiometricAsync(unitOfWork, kyc.UserId));
 
-        Assert.Equal(KycStatus.Approved, result.Status);
-        Assert.Equal(verifiedAt, result.VerifiedAt);
-        Assert.Equal("Dojah", result.ProviderName);
-        Assert.Equal("PRYDE-approved-attempt", result.ProviderReference);
-        Assert.Equal("Completed", result.ProviderStatus);
-        Assert.Equal(providerUpdatedAt, result.LastProviderUpdatedAt);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
+        Assert.Equal(verifiedAt, kyc.VerifiedAt);
+        Assert.Equal("PRYDE-approved-attempt", kyc.ProviderReference);
+        Assert.Equal(providerUpdatedAt, kyc.LastProviderUpdatedAt);
     }
 
     [Fact]

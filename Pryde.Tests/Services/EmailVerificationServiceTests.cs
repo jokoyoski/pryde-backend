@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Pryde.Contracts.RequestModels;
+using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
@@ -30,7 +31,17 @@ public class EmailVerificationServiceTests
         Assert.Equal(VerificationChannel.Email, code.Channel);
         Assert.DoesNotContain(sent.Code, code.CodeHash);
         Assert.Equal(64, code.CodeHash.Length);
-        Assert.False(context.UnitOfWork.UserRoleRepository.Items.Single().User.IsPhoneNumberVerified);
+        Assert.Empty(context.UnitOfWork.UserRoleRepository.Items);
+        Assert.Empty(((TestRefreshTokenRepository)context.UnitOfWork.RefreshTokens).Items);
+        Assert.Empty(((TestKycVerificationRepository)
+            context.UnitOfWork.KycVerifications).Items);
+        Assert.Empty(context.UnitOfWork.WalletRepository.Items);
+        Assert.Empty(context.UnitOfWork.VirtualAccountRepository.Items);
+        Assert.Null(typeof(RegisterResponseDto).GetProperty("AccessToken"));
+        Assert.Null(typeof(RegisterResponseDto).GetProperty("RefreshToken"));
+        Assert.Null(typeof(RegisterResponseDto).GetProperty("Roles"));
+        Assert.False(((TestUserRepository)context.UnitOfWork.Users)
+            .Items.Single().IsPhoneNumberVerified);
     }
 
     [Fact]
@@ -46,6 +57,71 @@ public class EmailVerificationServiceTests
         Assert.False(result.IsPhoneNumberVerified);
         Assert.False(result.EmailVerificationRequired);
         Assert.NotNull(context.UnitOfWork.VerificationCodeRepository.Items.Single().ConsumedAt);
+    }
+
+    [Fact]
+    public async Task UnverifiedLoginIsForbiddenAndDoesNotIssueTokens()
+    {
+        var context = TestContextWithUser();
+
+        await Assert.ThrowsAsync<ForbiddenException>(() =>
+            context.Service.LoginAsync(Login(context.User.Email)));
+
+        Assert.Equal(0, context.Jwt.AccessTokensGenerated);
+        Assert.Empty(((TestRefreshTokenRepository)context.UnitOfWork.RefreshTokens).Items);
+    }
+
+    [Fact]
+    public async Task VerifiedLoginSucceedsAsBefore()
+    {
+        var context = TestContextWithUser();
+        context.User.IsEmailVerified = true;
+
+        var response = await context.Service.LoginAsync(Login(context.User.Email));
+
+        Assert.Equal("access-token", response.AccessToken);
+        Assert.NotEmpty(response.RefreshToken);
+        Assert.Equal(1, context.Jwt.AccessTokensGenerated);
+        Assert.Single(((TestRefreshTokenRepository)context.UnitOfWork.RefreshTokens).Items);
+    }
+
+    [Fact]
+    public async Task VerifiedUserSelectsRoleAfterLoginAndReceivesUpdatedTokens()
+    {
+        var context = TestContextWithUser();
+        context.User.IsEmailVerified = true;
+        await context.Service.LoginAsync(Login(context.User.Email));
+
+        var response = await context.Service.SelectRolesAsync(
+            context.User.Id,
+            new SelectRolesRequestDto { Roles = [RoleType.Driver] });
+
+        var assignment = Assert.Single(context.UnitOfWork.UserRoleRepository.Items);
+        Assert.Equal(RoleType.Driver.ToString(), assignment.Role.Name);
+        Assert.Contains(RoleType.Driver.ToString(), context.Jwt.LastRoles);
+        Assert.Equal("access-token", response.AccessToken);
+        Assert.Equal(2, context.Jwt.AccessTokensGenerated);
+        Assert.Single(((TestKycVerificationRepository)
+            context.UnitOfWork.KycVerifications).Items);
+        Assert.Single(context.UnitOfWork.WalletRepository.Items);
+        Assert.Single(context.UnitOfWork.VirtualAccountRepository.Items);
+    }
+
+    [Theory]
+    [InlineData(RoleType.Admin)]
+    [InlineData((RoleType)4)]
+    public async Task RoleSelectionRejectsAdministrativeRoles(RoleType role)
+    {
+        var context = TestContextWithUser();
+        context.User.IsEmailVerified = true;
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            context.Service.SelectRolesAsync(
+                context.User.Id,
+                new SelectRolesRequestDto { Roles = [role] }));
+
+        Assert.Empty(context.UnitOfWork.UserRoleRepository.Items);
+        Assert.Equal(0, context.Jwt.AccessTokensGenerated);
     }
 
     [Fact]
@@ -85,6 +161,30 @@ public class EmailVerificationServiceTests
 
         await Assert.ThrowsAsync<ValidationException>(() =>
             context.Service.VerifyEmailAsync(Verify(context.User.Email, code)));
+    }
+
+    [Fact]
+    public async Task VerificationUsesLatestActiveOtpInsteadOfNewerConsumedCode()
+    {
+        var context = TestContextWithUser();
+        await context.Service.ResendEmailVerificationAsync(Resend(context.User.Email));
+        var activeCode = context.Email.Messages.Single().Code;
+        context.UnitOfWork.VerificationCodeRepository.Items.Add(new VerificationCode
+        {
+            UserId = context.User.Id,
+            Purpose = VerificationCodePurpose.EmailAccountVerification,
+            Channel = VerificationChannel.Email,
+            CodeHash = new string('0', 64),
+            CreatedAt = DateTime.UtcNow.AddSeconds(1),
+            LastSentAt = DateTime.UtcNow.AddSeconds(1),
+            ExpiresAt = DateTime.UtcNow.AddMinutes(10),
+            ConsumedAt = DateTime.UtcNow
+        });
+
+        var result = await context.Service.VerifyEmailAsync(
+            Verify(context.User.Email, activeCode));
+
+        Assert.True(result.IsEmailVerified);
     }
 
     [Fact]
@@ -176,13 +276,13 @@ public class EmailVerificationServiceTests
     }
 
     [Fact]
-    public async Task RegistrationSurvivesProviderFailureWithoutLeavingUsableOtp()
+    public async Task RegistrationReportsProviderFailureAndConsumesUndeliveredOtp()
     {
         var context = TestContext(emailThrows: true);
 
-        var response = await context.Service.RegisterAsync(Registration());
+        await Assert.ThrowsAsync<ServiceUnavailableException>(() =>
+            context.Service.RegisterAsync(Registration()));
 
-        Assert.True(response.EmailVerificationRequired);
         Assert.Single(((TestUserRepository)context.UnitOfWork.Users).Items);
         Assert.NotNull(context.UnitOfWork.VerificationCodeRepository.Items.Single().ConsumedAt);
     }
@@ -231,6 +331,7 @@ public class EmailVerificationServiceTests
             IsEmailVerified = false,
             IsPhoneNumberVerified = false
         };
+        context.User.PasswordHash = new PasswordHasher().Hash("Password123!");
         ((TestUserRepository)context.UnitOfWork.Users).Items.Add(context.User);
         return context;
     }
@@ -239,10 +340,11 @@ public class EmailVerificationServiceTests
     {
         var unitOfWork = new TestUnitOfWork();
         var email = new CapturingEmailService(emailThrows);
+        var jwt = new FakeJwtService();
         var service = new AuthService(
             unitOfWork,
             new PasswordHasher(),
-            new FakeJwtService(),
+            jwt,
             email,
             new WalletService(unitOfWork),
             NullLogger<AuthService>.Instance,
@@ -253,7 +355,7 @@ public class EmailVerificationServiceTests
                 FromName = "Pryde",
                 OtpExpiryMinutes = 10
             }));
-        return new EmailVerificationTestContext(unitOfWork, service, email);
+        return new EmailVerificationTestContext(unitOfWork, service, email, jwt);
     }
 
     private static RegisterRequestDto Registration() => new()
@@ -262,8 +364,13 @@ public class EmailVerificationServiceTests
         PhoneNumber = "08000000001",
         Password = "Password123!",
         FirstName = "New",
-        LastName = "User",
-        Roles = [RoleType.Passenger]
+        LastName = "User"
+    };
+
+    private static LoginRequestDto Login(string email) => new()
+    {
+        EmailOrPhone = email,
+        Password = "Password123!"
     };
 
     private static EmailVerificationResendRequestDto Resend(string email) =>
@@ -275,11 +382,13 @@ public class EmailVerificationServiceTests
     private sealed class EmailVerificationTestContext(
         TestUnitOfWork unitOfWork,
         AuthService service,
-        CapturingEmailService email)
+        CapturingEmailService email,
+        FakeJwtService jwt)
     {
         public TestUnitOfWork UnitOfWork { get; } = unitOfWork;
         public AuthService Service { get; } = service;
         public CapturingEmailService Email { get; } = email;
+        public FakeJwtService Jwt { get; } = jwt;
         public User User { get; set; } = null!;
     }
 
@@ -308,9 +417,16 @@ public class EmailVerificationServiceTests
 
     private sealed class FakeJwtService : IJwtService
     {
+        public int AccessTokensGenerated { get; private set; }
+        public IReadOnlyList<string> LastRoles { get; private set; } = [];
         public int RefreshTokenExpiryDays => 30;
         public string GenerateAccessToken(
-            Guid userId, string email, IEnumerable<string> roles) => "access-token";
+            Guid userId, string email, IEnumerable<string> roles)
+        {
+            AccessTokensGenerated++;
+            LastRoles = roles.ToList();
+            return "access-token";
+        }
         public string GenerateRefreshToken() => Guid.NewGuid().ToString("N");
         public string HashToken(string token) => token;
     }

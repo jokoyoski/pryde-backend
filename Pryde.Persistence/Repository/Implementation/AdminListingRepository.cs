@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Pryde.Domain.Constants;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Context;
@@ -9,19 +10,36 @@ namespace Pryde.Persistence.Repository.Implementations;
 public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepository
 {
     public async Task<(IReadOnlyList<User> Items, int TotalCount)> GetUsersAsync(
-        string? role, UserStatus? status, string? search, int pageNumber, int pageSize,
+        string? role, UserStatus? status, string? search, bool? isActive,
+        bool? isEmailVerified, bool? isPhoneVerified, KycStatus? kycStatus,
+        DateTime? createdFrom, DateTime? createdTo, string? sortBy, string? sortDirection,
+        int pageNumber, int pageSize,
         CancellationToken cancellationToken = default)
     {
         var query = context.Users.AsNoTracking()
             .Where(user => !user.UserRoles.Any(userRole =>
-                userRole.Role.Name == "Admin" || userRole.Role.Name == "SuperAdmin"));
+                userRole.Role.Name == RoleNames.Admin || userRole.Role.Name == RoleNames.SuperAdmin));
         query = ApplyUserFilters(query, role, status, search);
+        if (isActive.HasValue)
+            query = query.Where(user => (user.Status == UserStatus.Active) == isActive.Value);
+        if (isEmailVerified.HasValue)
+            query = query.Where(user => user.IsEmailVerified == isEmailVerified.Value);
+        if (isPhoneVerified.HasValue)
+            query = query.Where(user => user.IsPhoneNumberVerified == isPhoneVerified.Value);
+        if (kycStatus.HasValue)
+            query = query.Where(user =>
+                user.KycVerification != null && user.KycVerification.Status == kycStatus.Value);
+        if (createdFrom.HasValue)
+            query = query.Where(user => user.CreatedAt >= createdFrom.Value.ToUniversalTime());
+        if (createdTo.HasValue)
+            query = query.Where(user => user.CreatedAt <= createdTo.Value.ToUniversalTime());
+
         var totalCount = await query.CountAsync(cancellationToken);
-        var items = await query
+        var sortedQuery = ApplyUserSorting(query, sortBy, sortDirection);
+        var items = await sortedQuery
             .Include(user => user.Profile)
             .Include(user => user.KycVerification)
             .Include(user => user.UserRoles).ThenInclude(userRole => userRole.Role)
-            .OrderByDescending(user => user.CreatedAt).ThenBy(user => user.Id)
             .Skip((pageNumber - 1) * pageSize).Take(pageSize)
             .ToListAsync(cancellationToken);
         return (items, totalCount);
@@ -63,12 +81,17 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
     }
 
     public async Task<(IReadOnlyList<Vehicle> Items, int TotalCount)> GetVehiclesAsync(
-        bool? isActive, Guid? ownerId, string? search, int pageNumber, int pageSize,
+        VehicleOnboardingStatus? onboardingStatus, bool? isActive, Guid? ownerId,
+        VehicleRegistrationType? registrationType, string? search, int pageNumber, int pageSize,
         CancellationToken cancellationToken = default)
     {
         var query = context.Vehicles.AsNoTracking().AsQueryable();
+        if (onboardingStatus.HasValue)
+            query = query.Where(vehicle => vehicle.OnboardingStatus == onboardingStatus.Value);
         if (isActive.HasValue) query = query.Where(vehicle => vehicle.IsActive == isActive.Value);
         if (ownerId.HasValue) query = query.Where(vehicle => vehicle.UserId == ownerId.Value);
+        if (registrationType.HasValue)
+            query = query.Where(vehicle => vehicle.RegistrationType == registrationType.Value);
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim().ToLower();
@@ -83,6 +106,7 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
         var items = await query
             .Include(vehicle => vehicle.User).ThenInclude(user => user.Profile)
             .Include(vehicle => vehicle.Images)
+            .Include(vehicle => vehicle.Amenities)
             .Include(vehicle => vehicle.Documents)
             .OrderByDescending(vehicle => vehicle.CreatedAt).ThenBy(vehicle => vehicle.Id)
             .Skip((pageNumber - 1) * pageSize).Take(pageSize)
@@ -91,13 +115,21 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
     }
 
     public async Task<(IReadOnlyList<VehicleDocument> Items, int TotalCount)> GetVehicleDocumentsAsync(
-        Guid? vehicleId, Guid? ownerId, VehicleDocumentType? documentType, int pageNumber, int pageSize,
+        Guid? vehicleId, Guid? ownerId, VehicleDocumentType? documentType,
+        VehicleDocumentReviewStatus? reviewStatus, DateTime? expiryFrom, DateTime? expiryTo,
+        int pageNumber, int pageSize,
         CancellationToken cancellationToken = default)
     {
         var query = context.VehicleDocuments.AsNoTracking().AsQueryable();
         if (vehicleId.HasValue) query = query.Where(document => document.VehicleId == vehicleId.Value);
         if (ownerId.HasValue) query = query.Where(document => document.Vehicle.UserId == ownerId.Value);
         if (documentType.HasValue) query = query.Where(document => document.DocumentType == documentType.Value);
+        if (reviewStatus.HasValue)
+            query = query.Where(document => document.ReviewStatus == reviewStatus.Value);
+        if (expiryFrom.HasValue)
+            query = query.Where(document => document.ExpiryDate >= expiryFrom.Value.ToUniversalTime());
+        if (expiryTo.HasValue)
+            query = query.Where(document => document.ExpiryDate <= expiryTo.Value.ToUniversalTime());
 
         var totalCount = await query.CountAsync(cancellationToken);
         var items = await query
@@ -107,6 +139,86 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
             .ToListAsync(cancellationToken);
         return (items, totalCount);
     }
+
+    public async Task<(IReadOnlyList<Trip> Items, int TotalCount)> GetTripsAsync(
+        string? search, Guid? driverId, TripStatus? status, DateTime? departureFrom,
+        DateTime? departureTo, bool? isRecurring, bool? isActive, int pageNumber, int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = context.Trips.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim().ToLower();
+            query = query.Where(trip =>
+                trip.OriginAddress.ToLower().Contains(term) ||
+                trip.DestinationAddress.ToLower().Contains(term) ||
+                trip.Vehicle.LicensePlateNumber.ToLower().Contains(term) ||
+                trip.Driver.Email.ToLower().Contains(term) ||
+                (trip.Driver.Profile != null &&
+                 (trip.Driver.Profile.FirstName.ToLower().Contains(term) ||
+                  trip.Driver.Profile.LastName.ToLower().Contains(term))));
+        }
+        if (driverId.HasValue) query = query.Where(trip => trip.DriverId == driverId.Value);
+        if (status.HasValue) query = query.Where(trip => trip.Status == status.Value);
+        if (departureFrom.HasValue)
+            query = query.Where(trip => trip.DepartureTime >= departureFrom.Value.ToUniversalTime());
+        if (departureTo.HasValue)
+            query = query.Where(trip => trip.DepartureTime <= departureTo.Value.ToUniversalTime());
+        if (isRecurring.HasValue)
+            query = query.Where(trip => trip.RecurringTripId.HasValue == isRecurring.Value);
+        if (isActive.HasValue)
+            query = query.Where(trip =>
+                (trip.Status != TripStatus.Completed && trip.Status != TripStatus.Cancelled) == isActive.Value);
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
+            .Include(trip => trip.Driver).ThenInclude(driver => driver.Profile)
+            .Include(trip => trip.Vehicle).ThenInclude(vehicle => vehicle.Images)
+            .OrderByDescending(trip => trip.CreatedAt).ThenBy(trip => trip.Id)
+            .Skip((pageNumber - 1) * pageSize).Take(pageSize)
+            .ToListAsync(cancellationToken);
+        return (items, totalCount);
+    }
+
+    public Task<Trip?> GetTripAsync(
+        Guid tripId, CancellationToken cancellationToken = default) =>
+        context.Trips.AsNoTracking()
+            .Include(trip => trip.Driver).ThenInclude(driver => driver.Profile)
+            .Include(trip => trip.Vehicle).ThenInclude(vehicle => vehicle.Images)
+            .Include(trip => trip.Bookings)
+            .FirstOrDefaultAsync(trip => trip.Id == tripId, cancellationToken);
+
+    public async Task<(IReadOnlyList<TripBooking> Items, int TotalCount)> GetBookingsAsync(
+        Guid? userId, Guid? driverId, Guid? tripId, BookingStatus? status,
+        DateTime? dateFrom, DateTime? dateTo, int pageNumber, int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = context.TripBookings.AsNoTracking().AsQueryable();
+        if (userId.HasValue) query = query.Where(booking => booking.PassengerId == userId.Value);
+        if (driverId.HasValue) query = query.Where(booking => booking.Trip.DriverId == driverId.Value);
+        if (tripId.HasValue) query = query.Where(booking => booking.TripId == tripId.Value);
+        if (status.HasValue) query = query.Where(booking => booking.Status == status.Value);
+        if (dateFrom.HasValue)
+            query = query.Where(booking => booking.RequestedAt >= dateFrom.Value.ToUniversalTime());
+        if (dateTo.HasValue)
+            query = query.Where(booking => booking.RequestedAt <= dateTo.Value.ToUniversalTime());
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
+            .Include(booking => booking.Passenger).ThenInclude(passenger => passenger.Profile)
+            .Include(booking => booking.Trip)
+            .OrderByDescending(booking => booking.CreatedAt).ThenBy(booking => booking.Id)
+            .Skip((pageNumber - 1) * pageSize).Take(pageSize)
+            .ToListAsync(cancellationToken);
+        return (items, totalCount);
+    }
+
+    public Task<TripBooking?> GetBookingAsync(
+        Guid bookingId, CancellationToken cancellationToken = default) =>
+        context.TripBookings.AsNoTracking()
+            .Include(booking => booking.Passenger).ThenInclude(passenger => passenger.Profile)
+            .Include(booking => booking.Trip)
+            .FirstOrDefaultAsync(booking => booking.Id == bookingId, cancellationToken);
 
     public async Task<(IReadOnlyList<User> Items, int TotalCount)> GetStaffAsync(
         string? search, string? role, UserStatus? status, int pageNumber, int pageSize,
@@ -147,6 +259,7 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
             .Include(user => user.KycVerification)
             .Include(user => user.UserRoles).ThenInclude(userRole => userRole.Role)
             .Include(user => user.Vehicles).ThenInclude(vehicle => vehicle.Images)
+            .Include(user => user.Vehicles).ThenInclude(vehicle => vehicle.Amenities)
             .Include(user => user.Vehicles).ThenInclude(vehicle => vehicle.Documents)
             .FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
     }
@@ -157,7 +270,7 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
         CancellationToken cancellationToken = default)
     {
         var query = context.Users.AsNoTracking()
-            .Where(user => user.UserRoles.Any(userRole => userRole.Role.Name == "Driver"));
+            .Where(user => user.UserRoles.Any(userRole => userRole.Role.Name == RoleNames.Driver));
         if (status.HasValue) query = query.Where(user => user.Status == status.Value);
         if (kycStatus.HasValue)
             query = query.Where(user => user.KycVerification != null && user.KycVerification.Status == kycStatus.Value);
@@ -172,6 +285,7 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
             .Include(user => user.KycVerification)
             .Include(user => user.UserRoles).ThenInclude(userRole => userRole.Role)
             .Include(user => user.Vehicles).ThenInclude(vehicle => vehicle.Images)
+            .Include(user => user.Vehicles).ThenInclude(vehicle => vehicle.Amenities)
             .Include(user => user.Vehicles).ThenInclude(vehicle => vehicle.Documents)
             .OrderByDescending(user => user.CreatedAt).ThenBy(user => user.Id)
             .Skip((pageNumber - 1) * pageSize).Take(pageSize)
@@ -204,6 +318,7 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
         return await context.Vehicles.AsNoTracking()
             .Include(vehicle => vehicle.User).ThenInclude(user => user.Profile)
             .Include(vehicle => vehicle.Images)
+            .Include(vehicle => vehicle.Amenities)
             .Include(vehicle => vehicle.Documents)
             .FirstOrDefaultAsync(vehicle => vehicle.Id == vehicleId, cancellationToken);
     }
@@ -212,9 +327,10 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
         CancellationToken cancellationToken = default)
     {
         var users = context.Users.AsNoTracking();
-        var drivers = users.Where(user => user.UserRoles.Any(userRole => userRole.Role.Name == "Driver"));
+        var drivers = users.Where(user =>
+            user.UserRoles.Any(userRole => userRole.Role.Name == RoleNames.Driver));
         var customerUsers = users.Where(user => !user.UserRoles.Any(userRole =>
-            userRole.Role.Name == "Admin" || userRole.Role.Name == "SuperAdmin"));
+            userRole.Role.Name == RoleNames.Admin || userRole.Role.Name == RoleNames.SuperAdmin));
 
         return new AdminDashboardCounts(
             await customerUsers.CountAsync(cancellationToken),
@@ -234,7 +350,7 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
         return await context.Users.AsNoTracking()
             .Include(user => user.Profile)
             .Include(user => user.KycVerification)
-            .Where(user => user.UserRoles.Any(userRole => userRole.Role.Name == "Driver"))
+            .Where(user => user.UserRoles.Any(userRole => userRole.Role.Name == RoleNames.Driver))
             .OrderByDescending(user => user.CreatedAt)
             .Take(count)
             .ToListAsync(cancellationToken);
@@ -242,7 +358,8 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
 
     public async Task<(IReadOnlyList<WalletTransaction> Items, int TotalCount)> GetWalletTransactionsAsync(
         Guid? userId, WalletTransactionType? transactionType, string? status,
-        DateTime? dateFrom, DateTime? dateTo, string? search, int pageNumber, int pageSize,
+        DateTime? dateFrom, DateTime? dateTo, string? reference, string? search,
+        int pageNumber, int pageSize,
         CancellationToken cancellationToken = default)
     {
         var query = context.WalletTransactions.AsNoTracking().AsQueryable();
@@ -252,6 +369,12 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
             query = query.Where(_ => false);
         if (dateFrom.HasValue) query = query.Where(transaction => transaction.CreatedAt >= dateFrom.Value.ToUniversalTime());
         if (dateTo.HasValue) query = query.Where(transaction => transaction.CreatedAt <= dateTo.Value.ToUniversalTime());
+        if (!string.IsNullOrWhiteSpace(reference))
+        {
+            var referenceTerm = reference.Trim().ToLower();
+            query = query.Where(transaction =>
+                transaction.Reference != null && transaction.Reference.ToLower().Contains(referenceTerm));
+        }
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim().ToLower();
@@ -299,7 +422,27 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
 
     private IQueryable<User> StaffQuery() => context.Users.AsNoTracking()
         .Where(user => user.UserRoles.Any(userRole =>
-            userRole.Role.Name == "Admin" || userRole.Role.Name == "SuperAdmin"));
+            userRole.Role.Name == RoleNames.Admin || userRole.Role.Name == RoleNames.SuperAdmin));
+
+    private static IOrderedQueryable<User> ApplyUserSorting(
+        IQueryable<User> query, string? sortBy, string? sortDirection)
+    {
+        var descending = !string.Equals(sortDirection, "asc", StringComparison.OrdinalIgnoreCase);
+        var field = sortBy?.Trim().ToLowerInvariant();
+        return (field, descending) switch
+        {
+            ("email", false) => query.OrderBy(user => user.Email).ThenBy(user => user.Id),
+            ("email", true) => query.OrderByDescending(user => user.Email).ThenBy(user => user.Id),
+            ("status", false) => query.OrderBy(user => user.Status).ThenBy(user => user.Id),
+            ("status", true) => query.OrderByDescending(user => user.Status).ThenBy(user => user.Id),
+            ("firstname", false) => query.OrderBy(user => user.Profile!.FirstName).ThenBy(user => user.Id),
+            ("firstname", true) => query.OrderByDescending(user => user.Profile!.FirstName).ThenBy(user => user.Id),
+            ("lastname", false) => query.OrderBy(user => user.Profile!.LastName).ThenBy(user => user.Id),
+            ("lastname", true) => query.OrderByDescending(user => user.Profile!.LastName).ThenBy(user => user.Id),
+            (_, false) => query.OrderBy(user => user.CreatedAt).ThenBy(user => user.Id),
+            _ => query.OrderByDescending(user => user.CreatedAt).ThenBy(user => user.Id)
+        };
+    }
 
     private static IQueryable<User> ApplySearch(IQueryable<User> query, string search)
     {
@@ -313,14 +456,16 @@ public class AdminListingRepository(PrydeDbContext context) : IAdminListingRepos
     private static IQueryable<User> ApplyRoleFilter(IQueryable<User> query, string role)
     {
         return role.Equals("Both", StringComparison.OrdinalIgnoreCase)
-            ? query.Where(user => user.UserRoles.Any(x => x.Role.Name == "Driver") && user.UserRoles.Any(x => x.Role.Name == "Passenger"))
+            ? query.Where(user => user.UserRoles.Any(x => x.Role.Name == RoleNames.Driver) &&
+                                  user.UserRoles.Any(x => x.Role.Name == RoleNames.Passenger))
             : query.Where(user => user.UserRoles.Any(x => x.Role.Name.ToLower() == role.Trim().ToLower()));
     }
 
     private static IQueryable<KycVerification> ApplyRoleFilter(IQueryable<KycVerification> query, string role)
     {
         return role.Equals("Both", StringComparison.OrdinalIgnoreCase)
-            ? query.Where(kyc => kyc.User.UserRoles.Any(x => x.Role.Name == "Driver") && kyc.User.UserRoles.Any(x => x.Role.Name == "Passenger"))
+            ? query.Where(kyc => kyc.User.UserRoles.Any(x => x.Role.Name == RoleNames.Driver) &&
+                                 kyc.User.UserRoles.Any(x => x.Role.Name == RoleNames.Passenger))
             : query.Where(kyc => kyc.User.UserRoles.Any(x => x.Role.Name.ToLower() == role.Trim().ToLower()));
     }
 }

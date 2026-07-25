@@ -3,6 +3,7 @@ using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pryde.Contracts.RequestModels;
+using Pryde.Domain.Constants;
 using Pryde.Services.Service.Interface;
 using Pryde.Api.Authorization;
 
@@ -19,7 +20,7 @@ public class KycController(
     IAdminPortalService adminPortalService) : ControllerBase
 {
     [HttpGet("~/api/v{version:apiVersion}/admin/kyc")]
-    [Authorize(Roles = "Admin,SuperAdmin")]
+    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
     public async Task<IActionResult> GetAdminKyc(
         [FromQuery] AdminKycRequestDto request,
         CancellationToken cancellationToken)
@@ -29,7 +30,7 @@ public class KycController(
     }
 
     [HttpGet("~/api/v{version:apiVersion}/admin/kyc/{kycId:guid}")]
-    [Authorize(Roles = "Admin,SuperAdmin")]
+    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
     public async Task<IActionResult> GetAdminKycById(
         Guid kycId, CancellationToken cancellationToken)
     {
@@ -37,7 +38,7 @@ public class KycController(
     }
 
     [HttpPost("~/api/v{version:apiVersion}/admin/kyc/{userId:guid}/approve")]
-    [Authorize(Roles = "Admin,SuperAdmin")]
+    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
     public async Task<IActionResult> ApproveKyc(Guid userId, CancellationToken cancellationToken)
     {
         var result = await kycService.ApproveAsync(userId, cancellationToken);
@@ -45,7 +46,7 @@ public class KycController(
     }
 
     [HttpPost("~/api/v{version:apiVersion}/admin/kyc/{userId:guid}/reject")]
-    [Authorize(Roles = "Admin,SuperAdmin")]
+    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
     public async Task<IActionResult> RejectKyc(
         Guid userId,
         [FromBody] string reason,
@@ -65,6 +66,18 @@ public class KycController(
         var result = await kycService.UploadDocumentsAsync(
             GetUserId(),
             request,
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpPost("submit")]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
+    public async Task<IActionResult> Submit(
+        CancellationToken cancellationToken)
+    {
+        var result = await kycService.SubmitAsync(
+            GetUserId(),
             cancellationToken);
 
         return Ok(result);

@@ -42,6 +42,7 @@ public class AdminWalletTransactionsRequestDto : PaginationRequestDto
     public string? Status { get; set; }
     public DateTime? DateFrom { get; set; }
     public DateTime? DateTo { get; set; }
+    public string? Reference { get; set; }
     public string? Search { get; set; }
 }
 

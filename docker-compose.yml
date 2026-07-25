@@ -20,10 +20,10 @@ services:
       JwtSettings__AccessTokenExpiryMinutes: "60"
       JwtSettings__RefreshTokenExpiryDays: "30"
 
-      EmailSettings__ApiKey: ${RESEND_API_KEY}
-      EmailSettings__FromAddress: ${EMAIL_FROM_ADDRESS}
-      EmailSettings__FromName: Pryde
-      EmailSettings__OtpExpiryMinutes: ${EMAIL_OTP_EXPIRY_MINUTES}
+      EmailSettings__ApiKey: ${RESEND_API_KEY:-${EMAILSETTINGS__APIKEY}}
+      EmailSettings__FromAddress: ${EMAIL_FROM_ADDRESS:-${EMAIL__FROM_ADDRESS}}
+      EmailSettings__FromName: ${EMAIL_FROM_NAME:-${EMAIL__FROM_NAME:-Pryde}}
+      EmailSettings__OtpExpiryMinutes: ${EMAIL_OTP_EXPIRY_MINUTES:-${EMAIL__OTP__EXPIRY__MINUTES:-10}}
 
 
       Dojah__Enabled: ${Dojah__Enabled:-false}
@@ -67,10 +67,10 @@ services:
       CloudinarySettings__ApiKey: ${CLOUDINARY_API_KEY}
       CloudinarySettings__ApiSecret: ${CLOUDINARY_API_SECRET}
 
-      EmailSettings__ApiKey: ${RESEND_API_KEY}
-      EmailSettings__FromAddress: ${EMAIL_FROM_ADDRESS}
-      EmailSettings__FromName: ${EMAIL_FROM_NAME}
-      EmailSettings__OtpExpiryMinutes: ${EMAIL_OTP_EXPIRY_MINUTES}
+      EmailSettings__ApiKey: ${RESEND_API_KEY:-${EMAILSETTINGS__APIKEY}}
+      EmailSettings__FromAddress: ${EMAIL_FROM_ADDRESS:-${EMAIL__FROM_ADDRESS}}
+      EmailSettings__FromName: ${EMAIL_FROM_NAME:-${EMAIL__FROM_NAME:-Pryde}}
+      EmailSettings__OtpExpiryMinutes: ${EMAIL_OTP_EXPIRY_MINUTES:-${EMAIL__OTP__EXPIRY__MINUTES:-10}}
 
       Dojah__Enabled: ${Dojah__Enabled:-false}
       Dojah__BaseUrl: ${Dojah__BaseUrl}

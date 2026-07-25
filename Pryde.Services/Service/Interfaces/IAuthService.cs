@@ -11,6 +11,10 @@ public interface IAuthService
     Task<LoginResponseDto> LoginAsync(
         LoginRequestDto request,
         CancellationToken cancellationToken = default);
+    Task<LoginResponseDto> SelectRolesAsync(
+        Guid userId,
+        SelectRolesRequestDto request,
+        CancellationToken cancellationToken = default);
     Task<LoginResponseDto> RefreshTokenAsync(
         RefreshTokenRequestDto request,
         CancellationToken cancellationToken = default);
