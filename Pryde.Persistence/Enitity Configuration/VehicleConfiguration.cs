@@ -18,11 +18,26 @@ public class VehicleConfiguration : IEntityTypeConfiguration<Vehicle>
         builder.Property(x => x.VehicleOwnerName)
             .HasMaxLength(200);
 
+        builder.Property(x => x.VehicleType)
+            .HasMaxLength(100);
+
+        builder.Property(x => x.Make)
+            .HasMaxLength(100);
+
+        builder.Property(x => x.Model)
+            .HasMaxLength(100);
+
+        builder.Property(x => x.Colour)
+            .HasMaxLength(50);
+
         builder.Property(x => x.WalkAroundVideoUrl)
             .HasMaxLength(2000);
 
         builder.Property(x => x.AdditionalDetails)
             .HasMaxLength(1000);
+
+        builder.Property(x => x.RejectionReason)
+            .HasMaxLength(500);
 
         builder.Property(x => x.OnboardingStatus)
             .IsRequired();

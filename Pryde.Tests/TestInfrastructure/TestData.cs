@@ -30,6 +30,7 @@ internal static class TestData
             UserId = driverId,
             Capacity = capacity,
             IsActive = true,
+            OnboardingStatus = VehicleOnboardingStatus.Approved,
             LicensePlateNumber = "PRYDE-01"
         };
         unitOfWork.UserRoleRepository.Items.Add(new UserRole

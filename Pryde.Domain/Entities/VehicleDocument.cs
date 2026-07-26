@@ -13,7 +13,7 @@ namespace Pryde.Domain.Entities
         public Guid VehicleId { get; set; }
         public VehicleDocumentType DocumentType { get; set; }
         public string DocumentUrl { get; set; } = string.Empty;
-        public DateTime ExpiryDate { get; set; }
+        public DateTime? ExpiryDate { get; set; }
         public VehicleDocumentReviewStatus ReviewStatus { get; set; } = VehicleDocumentReviewStatus.Pending;
         public Guid? ReviewedBy { get; set; }
         public DateTime? ReviewedAt { get; set; }

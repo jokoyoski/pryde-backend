@@ -54,6 +54,7 @@ public class ApiConfigurationTests
     [InlineData(typeof(VehicleController), nameof(VehicleController.GetAdminVehicles))]
     [InlineData(typeof(VehicleController), nameof(VehicleController.ActivateVehicle))]
     [InlineData(typeof(VehicleController), nameof(VehicleController.DeactivateVehicle))]
+    [InlineData(typeof(VehicleController), nameof(VehicleController.RejectVehicle))]
     [InlineData(typeof(VehicleDocumentController), nameof(VehicleDocumentController.GetAdminVehicleDocuments))]
     public void AdminResourceActionsRequireAdminOrSuperAdmin(Type controllerType, string actionName)
     {
@@ -377,6 +378,7 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/admin/kyc/{userId}/reject", paths);
         Assert.Contains("/api/v1/admin/vehicles/{id}/activate", paths);
         Assert.Contains("/api/v1/admin/vehicles/{id}/deactivate", paths);
+        Assert.Contains("/api/v1/admin/vehicles/{vehicleId}/reject", paths);
 
         Assert.Equal(OperationType.Get, document.Paths["/api/v1/admin/users"].Operations.Single().Key);
         Assert.Single(document.Paths["/api/v1/admin/users"].Operations);
@@ -386,6 +388,9 @@ public class ApiConfigurationTests
         Assert.Equal(OperationType.Get, document.Paths["/api/v1/admin/vehicles"].Operations.Single().Key);
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/vehicles/{id}/activate"].Operations.Single().Key);
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/vehicles/{id}/deactivate"].Operations.Single().Key);
+        Assert.Equal(
+            OperationType.Post,
+            document.Paths["/api/v1/admin/vehicles/{vehicleId}/reject"].Operations.Single().Key);
         Assert.Equal(OperationType.Get, document.Paths["/api/v1/admin/vehicle-documents"].Operations.Single().Key);
         Assert.Equal(
             OperationType.Post,

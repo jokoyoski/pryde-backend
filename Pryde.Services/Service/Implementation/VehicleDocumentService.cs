@@ -8,7 +8,7 @@ using Pryde.Services.Service.Interface;
 namespace Pryde.Services.Service.Implementation;
 public class VehicleDocumentService(IUnitOfWork unitOfWork) : IVehicleDocumentService
 {
-    public async Task<VehicleDocumentResponseDto> UploadAsync(Guid vehicleId, Guid requestingUserId, VehicleDocumentType documentType, DateTime expiryDate, string documentUrl, CancellationToken cancellationToken = default)
+    public async Task<VehicleDocumentResponseDto> UploadAsync(Guid vehicleId, Guid requestingUserId, VehicleDocumentType documentType, DateTime? expiryDate, string documentUrl, CancellationToken cancellationToken = default)
     {
         var vehicle = await unitOfWork.Vehicles.GetByIdAsync(vehicleId, cancellationToken)
             ?? throw new NotFoundException(nameof(Vehicle), vehicleId);
@@ -17,9 +17,17 @@ public class VehicleDocumentService(IUnitOfWork unitOfWork) : IVehicleDocumentSe
             throw new ForbiddenException("You do not have access to this vehicle.");
         EnsureVehicleCanBeEdited(vehicle);
 
+        if (!Enum.IsDefined(documentType))
+            throw new ValidationException("Vehicle document type is invalid.");
         if (string.IsNullOrWhiteSpace(documentUrl))
             throw new ValidationException("A document file is required.");
-        if (expiryDate <= DateTime.UtcNow)
+        if (RequiresExpiry(documentType) && !expiryDate.HasValue)
+        {
+            throw new ValidationException(
+                $"Expiry date is required for {documentType}.");
+        }
+        if (expiryDate.HasValue &&
+            expiryDate.Value <= DateTime.UtcNow)
             throw new ValidationException("Expiry date must be in the future.");
 
         var documents = await unitOfWork.VehicleDocuments
@@ -137,7 +145,19 @@ public class VehicleDocumentService(IUnitOfWork unitOfWork) : IVehicleDocumentSe
 
     private static void EnsureVehicleCanBeEdited(Vehicle vehicle)
     {
-        if (vehicle.OnboardingStatus == VehicleOnboardingStatus.Approved)
-            throw new ConflictException("An approved vehicle cannot be edited by the driver.");
+        if (vehicle.OnboardingStatus is not (
+                VehicleOnboardingStatus.Draft or
+                VehicleOnboardingStatus.Rejected))
+        {
+            throw new ConflictException(
+                $"A vehicle in {vehicle.OnboardingStatus} status cannot be edited by the driver.");
+        }
     }
+
+    private static bool RequiresExpiry(
+        VehicleDocumentType documentType) =>
+        documentType is
+            VehicleDocumentType.Insurance or
+            VehicleDocumentType.RoadworthinessCertificate or
+            VehicleDocumentType.DriversLicense;
 }

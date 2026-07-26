@@ -21,6 +21,40 @@ public class TripServiceTests
         Assert.Equal(1, unitOfWork.SaveChangesCount);
     }
 
+    [Theory]
+    [InlineData(false, VehicleOnboardingStatus.Approved)]
+    [InlineData(true, VehicleOnboardingStatus.Draft)]
+    [InlineData(true, VehicleOnboardingStatus.PendingReview)]
+    [InlineData(true, VehicleOnboardingStatus.Rejected)]
+    public async Task TripCreationRequiresActiveApprovedVehicle(
+        bool isActive,
+        VehicleOnboardingStatus onboardingStatus)
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        vehicle.IsActive = isActive;
+        vehicle.OnboardingStatus = onboardingStatus;
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            TestData.CreateTripService(unitOfWork).CreateAsync(
+                driverId,
+                TestData.ValidTripRequest(vehicle.Id)));
+    }
+
+    [Fact]
+    public async Task ApprovedActiveVehicleCanCreateTrip()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+
+        var result = await TestData.CreateTripService(unitOfWork)
+            .CreateAsync(
+                driverId,
+                TestData.ValidTripRequest(vehicle.Id));
+
+        Assert.Equal(TripStatus.Scheduled, result.Status);
+    }
+
     [Fact]
     public async Task DriverCannotCreateTripWithAnotherDriversVehicle()
     {
