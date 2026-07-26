@@ -18,6 +18,7 @@ namespace Pryde.Domain.Entities
         public DateTime? VerifiedAt { get; set; }
         public string? ProviderName { get; set; }
         public string? ProviderReference { get; set; }
+        public string? DojahReference { get; set; }
         public string? ProviderStatus { get; set; }
         public string? RejectionReason { get; set; }
         public DateTime? LastProviderUpdatedAt { get; set; }

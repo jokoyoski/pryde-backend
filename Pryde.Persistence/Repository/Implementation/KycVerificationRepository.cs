@@ -37,6 +37,16 @@ public class KycVerificationRepository(PrydeDbContext context)
                 cancellationToken);
     }
 
+    public async Task<KycVerification?> GetByDojahReferenceAsync(
+        string dojahReference,
+        CancellationToken cancellationToken = default)
+    {
+        return await context.KycVerifications
+            .FirstOrDefaultAsync(
+                kyc => kyc.DojahReference == dojahReference,
+                cancellationToken);
+    }
+
     public async Task<IReadOnlyList<KycVerification>> GetAllAsync(
         CancellationToken cancellationToken = default)
     {

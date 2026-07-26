@@ -13,6 +13,7 @@ public class KycVerificationConfiguration : IEntityTypeConfiguration<KycVerifica
 
         builder.Property(x => x.ProviderName).HasMaxLength(50);
         builder.Property(x => x.ProviderReference).HasMaxLength(100);
+        builder.Property(x => x.DojahReference).HasMaxLength(100);
         builder.Property(x => x.ProviderStatus).HasMaxLength(50);
         builder.Property(x => x.RejectionReason).HasMaxLength(500);
 
@@ -22,5 +23,9 @@ public class KycVerificationConfiguration : IEntityTypeConfiguration<KycVerifica
         builder.HasIndex(x => x.ProviderReference)
             .IsUnique()
             .HasFilter("\"ProviderReference\" IS NOT NULL");
+
+        builder.HasIndex(x => x.DojahReference)
+            .IsUnique()
+            .HasFilter("\"DojahReference\" IS NOT NULL");
     }
 }

@@ -54,6 +54,7 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
             VerifiedAt = kyc.VerifiedAt,
             ProviderName = kyc.ProviderName,
             ProviderReference = kyc.ProviderReference,
+            DojahReference = kyc.DojahReference,
             ProviderStatus = kyc.ProviderStatus,
             RejectionReason = kyc.RejectionReason,
             LastProviderUpdatedAt = kyc.LastProviderUpdatedAt
