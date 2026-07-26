@@ -69,16 +69,30 @@ public class LedgerRepository(PrydeDbContext context) : ILedgerRepository
     }
 
     public async Task<IReadOnlyList<LedgerRevenueTotal>> GetRevenueSummaryAsync(
-        DateTime dateFrom, CancellationToken cancellationToken = default)
+     DateTime dateFrom,
+     CancellationToken cancellationToken = default)
     {
-        return await context.LedgerEntries.AsNoTracking()
-            .Where(entry => entry.CreatedAt >= dateFrom &&
-                entry.LedgerAccount.AccountType == LedgerAccountType.PlatformRevenue &&
+        var revenueSummary = await context.LedgerEntries
+            .AsNoTracking()
+            .Where(entry =>
+                entry.CreatedAt >= dateFrom &&
+                entry.LedgerAccount.AccountType ==
+                    LedgerAccountType.PlatformRevenue &&
                 entry.EntryType == LedgerEntryType.Credit)
             .GroupBy(entry => entry.CreatedAt.Date)
-            .Select(group => new LedgerRevenueTotal(group.Key, group.Sum(entry => entry.Amount)))
+            .Select(group => new
+            {
+                Date = group.Key,
+                Amount = group.Sum(entry => entry.Amount)
+            })
             .OrderBy(item => item.Date)
             .ToListAsync(cancellationToken);
+
+        return revenueSummary
+            .Select(item => new LedgerRevenueTotal(
+                item.Date,
+                item.Amount))
+            .ToList();
     }
 
     public async Task<LedgerAccount> CreateAsync(LedgerAccount account, CancellationToken cancellationToken = default)
