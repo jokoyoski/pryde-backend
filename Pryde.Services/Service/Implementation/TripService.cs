@@ -224,8 +224,12 @@ public class TripService(
             ?? throw new NotFoundException(nameof(Vehicle), vehicleId);
         if (vehicle.UserId != driverId)
             throw new ForbiddenException("The selected vehicle does not belong to the authenticated driver.");
-        if (!vehicle.IsActive)
-            throw new ConflictException("The selected vehicle is not active.");
+        if (!vehicle.IsActive ||
+            vehicle.OnboardingStatus != VehicleOnboardingStatus.Approved)
+        {
+            throw new ConflictException(
+                "The selected vehicle must be approved and active.");
+        }
         if (vehicle.Capacity <= 0)
             throw new ConflictException("The selected vehicle has an invalid passenger capacity.");
         return vehicle;

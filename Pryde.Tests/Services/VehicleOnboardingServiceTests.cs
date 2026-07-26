@@ -178,6 +178,74 @@ public class VehicleOnboardingServiceTests
         Assert.False(result.IsActive);
     }
 
+    [Theory]
+    [InlineData("VehicleType")]
+    [InlineData("Make")]
+    [InlineData("Model")]
+    [InlineData("ManufacturingYear")]
+    [InlineData("Colour")]
+    public async Task MissingCoreVehicleFieldBlocksSubmission(
+        string field)
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        Complete(unitOfWork, vehicle);
+
+        switch (field)
+        {
+            case "VehicleType":
+                vehicle.VehicleType = null;
+                break;
+            case "Make":
+                vehicle.Make = null;
+                break;
+            case "Model":
+                vehicle.Model = null;
+                break;
+            case "ManufacturingYear":
+                vehicle.ManufacturingYear = null;
+                break;
+            case "Colour":
+                vehicle.Colour = null;
+                break;
+        }
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            Service(unitOfWork).SubmitAsync(vehicle.Id, ownerId));
+    }
+
+    [Fact]
+    public async Task PendingReviewVehicleCannotBeEdited()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            Service(unitOfWork).UpdateDetailsAsync(
+                vehicle.Id,
+                ownerId,
+                DetailsRequest()));
+    }
+
+    [Fact]
+    public async Task RejectedVehicleCanBeEditedAndResubmitted()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        Complete(unitOfWork, vehicle);
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+        var service = Service(unitOfWork);
+
+        await service.RejectAsync(vehicle.Id, "Incorrect colour");
+        await service.UpdateDetailsAsync(
+            vehicle.Id,
+            ownerId,
+            DetailsRequest("Black"));
+        var result = await service.SubmitAsync(vehicle.Id, ownerId);
+
+        Assert.Equal(VehicleOnboardingStatus.PendingReview, result.OnboardingStatus);
+        Assert.Null(result.RejectionReason);
+        Assert.Equal("Black", result.Colour);
+    }
+
     [Fact]
     public async Task ApprovedVehicleCannotBeEditedByDriver()
     {
@@ -195,6 +263,7 @@ public class VehicleOnboardingServiceTests
     public async Task AdminActivationRequiresApprovedKyc()
     {
         var (unitOfWork, ownerId, vehicle) = Context();
+        Complete(unitOfWork, vehicle);
         vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
         var service = Service(unitOfWork);
 
@@ -210,6 +279,91 @@ public class VehicleOnboardingServiceTests
 
         Assert.True(result.IsActive);
         Assert.Equal(VehicleOnboardingStatus.Approved, result.OnboardingStatus);
+    }
+
+    [Fact]
+    public async Task AdminRejectionRequiresReason()
+    {
+        var (unitOfWork, _, vehicle) = Context();
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            Service(unitOfWork).RejectAsync(vehicle.Id, " "));
+    }
+
+    [Fact]
+    public async Task AdminRejectionSetsRejectedAndInactive()
+    {
+        var (unitOfWork, _, vehicle) = Context();
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+        vehicle.IsActive = true;
+
+        var result = await Service(unitOfWork)
+            .RejectAsync(vehicle.Id, "  Missing registration  ");
+
+        Assert.Equal(VehicleOnboardingStatus.Rejected, result.OnboardingStatus);
+        Assert.False(result.IsActive);
+        Assert.Equal("Missing registration", result.RejectionReason);
+    }
+
+    [Fact]
+    public async Task IncompleteVehicleCannotBeApproved()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+        unitOfWork.KycVerificationRepository.Items.Add(new KycVerification
+        {
+            UserId = ownerId,
+            Status = KycStatus.Approved
+        });
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            Service(unitOfWork).ActivateAsync(vehicle.Id));
+    }
+
+    [Fact]
+    public async Task LuggageCapacityIsOptionalForSubmission()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        Complete(unitOfWork, vehicle);
+        vehicle.LuggageCapacity = null;
+
+        var result = await Service(unitOfWork)
+            .SubmitAsync(vehicle.Id, ownerId);
+
+        Assert.Equal(VehicleOnboardingStatus.PendingReview, result.OnboardingStatus);
+        Assert.Null(result.LuggageCapacity);
+    }
+
+    [Fact]
+    public async Task InvalidVehicleDocumentTypeIsRejected()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        var service = new VehicleDocumentService(unitOfWork);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            service.UploadAsync(
+                vehicle.Id,
+                ownerId,
+                (VehicleDocumentType)999,
+                null,
+                "https://files.test/invalid.pdf"));
+    }
+
+    [Fact]
+    public async Task VehicleRegistrationDoesNotRequireExpiry()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+
+        var result = await new VehicleDocumentService(unitOfWork)
+            .UploadAsync(
+                vehicle.Id,
+                ownerId,
+                VehicleDocumentType.VehicleRegistration,
+                null,
+                "https://files.test/registration.pdf");
+
+        Assert.Null(result.ExpiryDate);
     }
 
     [Fact]
@@ -246,10 +400,16 @@ public class VehicleOnboardingServiceTests
         return (unitOfWork, ownerId, vehicle);
     }
 
-    private static VehicleDetailsRequestDto DetailsRequest() => new()
+    private static VehicleDetailsRequestDto DetailsRequest(
+        string colour = "Silver") => new()
     {
         VehicleOwnerName = "Driver Owner",
-        RegistrationType = VehicleRegistrationType.Private
+        RegistrationType = VehicleRegistrationType.Private,
+        VehicleType = "Sedan",
+        Make = "Toyota",
+        Model = "Corolla",
+        ManufacturingYear = 2022,
+        Colour = colour
     };
 
     private static VehicleCapacityExtrasRequestDto CapacityRequest(int seatCount) =>
@@ -265,9 +425,13 @@ public class VehicleOnboardingServiceTests
     {
         vehicle.VehicleOwnerName = "Driver Owner";
         vehicle.RegistrationType = VehicleRegistrationType.Private;
+        vehicle.VehicleType = "Sedan";
+        vehicle.Make = "Toyota";
+        vehicle.Model = "Corolla";
+        vehicle.ManufacturingYear = 2022;
+        vehicle.Colour = "Silver";
         vehicle.PassengerSeatCount = 4;
         vehicle.Capacity = 4;
-        vehicle.LuggageCapacity = LuggageCapacity.Medium;
         unitOfWork.VehicleDocumentRepository.Items.Add(new VehicleDocument
         {
             VehicleId = vehicle.Id,

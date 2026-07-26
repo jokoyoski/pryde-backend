@@ -99,16 +99,20 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
     {
         var vehicle = await GetEditableOwnedVehicleAsync(
             vehicleId, requestingUserId, cancellationToken);
-        var ownerName = NormalizeOptionalText(request.VehicleOwnerName);
-        if (string.IsNullOrWhiteSpace(ownerName))
-            throw new ValidationException("Vehicle owner name is required.");
-        if (ownerName.Length > 200)
-            throw new ValidationException("Vehicle owner name cannot exceed 200 characters.");
-        if (!Enum.IsDefined(request.RegistrationType))
-            throw new ValidationException("Vehicle registration type is invalid.");
+        ValidateVehicleDetails(request);
 
-        vehicle.VehicleOwnerName = ownerName;
+        vehicle.VehicleOwnerName = NormalizeRequiredText(
+            request.VehicleOwnerName, "Vehicle owner name", 200);
         vehicle.RegistrationType = request.RegistrationType;
+        vehicle.VehicleType = NormalizeRequiredText(
+            request.VehicleType, "Vehicle type", 100);
+        vehicle.Make = NormalizeRequiredText(
+            request.Make, "Vehicle make", 100);
+        vehicle.Model = NormalizeRequiredText(
+            request.Model, "Vehicle model", 100);
+        vehicle.ManufacturingYear = request.ManufacturingYear;
+        vehicle.Colour = NormalizeRequiredText(
+            request.Colour, "Vehicle colour", 50);
         unitOfWork.Vehicles.Update(vehicle);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return await BuildResponseAsync(vehicle, cancellationToken);
@@ -171,7 +175,8 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
         var vehicle = await GetEditableOwnedVehicleAsync(
             vehicleId, requestingUserId, cancellationToken);
         ValidatePassengerSeatCount(request.PassengerSeatCount);
-        if (!Enum.IsDefined(request.LuggageCapacity))
+        if (request.LuggageCapacity.HasValue &&
+            !Enum.IsDefined(request.LuggageCapacity.Value))
             throw new ValidationException("Luggage capacity is invalid.");
 
         var additionalDetails = NormalizeOptionalText(request.AdditionalDetails);
@@ -202,7 +207,8 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
 
         vehicle.PassengerSeatCount = request.PassengerSeatCount;
         vehicle.Capacity = request.PassengerSeatCount;
-        vehicle.LuggageCapacity = request.LuggageCapacity;
+        if (request.LuggageCapacity.HasValue)
+            vehicle.LuggageCapacity = request.LuggageCapacity.Value;
         vehicle.AdditionalDetails = additionalDetails;
         unitOfWork.Vehicles.Update(vehicle);
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -216,26 +222,11 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
     {
         var vehicle = await GetEditableOwnedVehicleAsync(
             vehicleId, requestingUserId, cancellationToken);
-        var documents = await unitOfWork.VehicleDocuments
-            .GetByVehicleIdAsync(vehicleId, cancellationToken);
-        var images = await unitOfWork.VehicleImages
-            .GetByVehicleIdAsync(vehicleId, cancellationToken);
-        var requiredImageTypes = Enum.GetValues<VehicleImageType>();
-
-        if (string.IsNullOrWhiteSpace(vehicle.VehicleOwnerName) ||
-            vehicle.RegistrationType is null ||
-            !documents.Any(x => x.DocumentType == VehicleDocumentType.VehicleRegistration) ||
-            requiredImageTypes.Any(type => images.All(x => x.ImageType != type)) ||
-            vehicle.PassengerSeatCount is null ||
-            !AllowedPassengerSeatCounts.Contains(vehicle.PassengerSeatCount.Value) ||
-            vehicle.LuggageCapacity is null)
-        {
-            throw new ValidationException(
-                "Vehicle onboarding is incomplete. Complete details, registration document, required media, and capacity before submission.");
-        }
+        await ValidateCompletenessAsync(vehicle, cancellationToken);
 
         vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
         vehicle.IsActive = false;
+        vehicle.RejectionReason = null;
         unitOfWork.Vehicles.Update(vehicle);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return await BuildResponseAsync(vehicle, cancellationToken);
@@ -297,6 +288,14 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
         var vehicle = await unitOfWork.Vehicles.GetByIdAsync(vehicleId, cancellationToken)
             ?? throw new NotFoundException(nameof(Vehicle), vehicleId);
 
+        if (vehicle.OnboardingStatus is not (
+                VehicleOnboardingStatus.PendingReview or
+                VehicleOnboardingStatus.Approved))
+        {
+            throw new ConflictException(
+                "Only a vehicle pending review can be approved.");
+        }
+
         var kyc = await unitOfWork.KycVerifications
             .GetByUserIdAsync(vehicle.UserId, cancellationToken);
         if (kyc?.Status != KycStatus.Approved)
@@ -311,11 +310,11 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
             return await BuildResponseAsync(vehicle, cancellationToken);
         }
 
-        if (vehicle.OnboardingStatus != VehicleOnboardingStatus.PendingReview)
-            throw new ConflictException("Only a vehicle pending review can be approved.");
+        await ValidateCompletenessAsync(vehicle, cancellationToken);
 
         vehicle.OnboardingStatus = VehicleOnboardingStatus.Approved;
         vehicle.IsActive = true;
+        vehicle.RejectionReason = null;
         unitOfWork.Vehicles.Update(vehicle);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return await BuildResponseAsync(vehicle, cancellationToken);
@@ -326,6 +325,31 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
         var vehicle = await unitOfWork.Vehicles.GetByIdAsync(vehicleId, cancellationToken)
             ?? throw new NotFoundException(nameof(Vehicle), vehicleId);
         vehicle.IsActive = false;
+        unitOfWork.Vehicles.Update(vehicle);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return await BuildResponseAsync(vehicle, cancellationToken);
+    }
+
+    public async Task<VehicleResponseDto> RejectAsync(
+        Guid vehicleId,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        var vehicle = await unitOfWork.Vehicles.GetByIdAsync(
+            vehicleId,
+            cancellationToken)
+            ?? throw new NotFoundException(nameof(Vehicle), vehicleId);
+
+        if (vehicle.OnboardingStatus != VehicleOnboardingStatus.PendingReview)
+            throw new ConflictException("Only a vehicle pending review can be rejected.");
+
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.Rejected;
+        vehicle.IsActive = false;
+        vehicle.RejectionReason = NormalizeRequiredText(
+            reason,
+            "Rejection reason",
+            500);
+
         unitOfWork.Vehicles.Update(vehicle);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return await BuildResponseAsync(vehicle, cancellationToken);
@@ -343,12 +367,18 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
             LicensePlateNumber = vehicle.LicensePlateNumber,
             VehicleOwnerName = vehicle.VehicleOwnerName,
             RegistrationType = vehicle.RegistrationType,
+            VehicleType = vehicle.VehicleType,
+            Make = vehicle.Make,
+            Model = vehicle.Model,
+            ManufacturingYear = vehicle.ManufacturingYear,
+            Colour = vehicle.Colour,
             WalkAroundVideoUrl = vehicle.WalkAroundVideoUrl,
             PassengerSeatCount = vehicle.PassengerSeatCount,
             LuggageCapacity = vehicle.LuggageCapacity,
             Amenities = amenities.Select(x => x.AmenityType).Order().ToList(),
             AdditionalDetails = vehicle.AdditionalDetails,
             OnboardingStatus = vehicle.OnboardingStatus,
+            RejectionReason = vehicle.RejectionReason,
             Capacity = vehicle.Capacity,
             IsActive = vehicle.IsActive,
             ImageUrls = images.OrderByDescending(i => i.IsPrimary).Select(i => i.ImageUrl).ToList(),
@@ -375,9 +405,97 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
             ?? throw new NotFoundException(nameof(Vehicle), vehicleId);
         if (vehicle.UserId != requestingUserId)
             throw new ForbiddenException("You do not have access to this vehicle.");
-        if (vehicle.OnboardingStatus == VehicleOnboardingStatus.Approved)
-            throw new ConflictException("An approved vehicle cannot be edited by the driver.");
+        if (vehicle.OnboardingStatus is not (
+                VehicleOnboardingStatus.Draft or
+                VehicleOnboardingStatus.Rejected))
+        {
+            throw new ConflictException(
+                $"A vehicle in {vehicle.OnboardingStatus} status cannot be edited by the driver.");
+        }
         return vehicle;
+    }
+
+    private async Task ValidateCompletenessAsync(
+        Vehicle vehicle,
+        CancellationToken cancellationToken)
+    {
+        var documents = await unitOfWork.VehicleDocuments
+            .GetByVehicleIdAsync(vehicle.Id, cancellationToken);
+        var images = await unitOfWork.VehicleImages
+            .GetByVehicleIdAsync(vehicle.Id, cancellationToken);
+        var missingRequirements = new List<string>();
+
+        AddMissingText(
+            missingRequirements,
+            vehicle.VehicleOwnerName,
+            "vehicle owner name");
+        if (vehicle.RegistrationType is null ||
+            !Enum.IsDefined(vehicle.RegistrationType.Value))
+        {
+            missingRequirements.Add("registration type");
+        }
+        AddMissingText(
+            missingRequirements,
+            vehicle.VehicleType,
+            "vehicle type");
+        AddMissingText(missingRequirements, vehicle.Make, "make");
+        AddMissingText(missingRequirements, vehicle.Model, "model");
+        if (!vehicle.ManufacturingYear.HasValue ||
+            !IsValidManufacturingYear(vehicle.ManufacturingYear.Value))
+        {
+            missingRequirements.Add("valid manufacturing year");
+        }
+        AddMissingText(missingRequirements, vehicle.Colour, "colour");
+
+        if (!documents.Any(document =>
+                document.DocumentType ==
+                VehicleDocumentType.VehicleRegistration))
+        {
+            missingRequirements.Add("vehicle registration document");
+        }
+
+        foreach (var imageType in Enum.GetValues<VehicleImageType>())
+        {
+            if (images.All(image => image.ImageType != imageType))
+                missingRequirements.Add($"{FormatImageType(imageType)} photograph");
+        }
+
+        if (!vehicle.PassengerSeatCount.HasValue ||
+            !AllowedPassengerSeatCounts.Contains(
+                vehicle.PassengerSeatCount.Value))
+        {
+            missingRequirements.Add("valid passenger capacity");
+        }
+
+        if (missingRequirements.Count > 0)
+        {
+            throw new ValidationException(
+                $"Vehicle onboarding is incomplete. Missing: {string.Join(", ", missingRequirements)}.");
+        }
+    }
+
+    private static void ValidateVehicleDetails(
+        VehicleDetailsRequestDto request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _ = NormalizeRequiredText(
+            request.VehicleOwnerName, "Vehicle owner name", 200);
+        if (!Enum.IsDefined(request.RegistrationType))
+            throw new ValidationException(
+                "Vehicle registration type is invalid.");
+        _ = NormalizeRequiredText(
+            request.VehicleType, "Vehicle type", 100);
+        _ = NormalizeRequiredText(
+            request.Make, "Vehicle make", 100);
+        _ = NormalizeRequiredText(
+            request.Model, "Vehicle model", 100);
+        if (!IsValidManufacturingYear(request.ManufacturingYear))
+        {
+            throw new ValidationException(
+                $"Manufacturing year must be between 1900 and {DateTime.UtcNow.Year + 1}.");
+        }
+        _ = NormalizeRequiredText(
+            request.Colour, "Vehicle colour", 50);
     }
 
     private static void ValidatePassengerSeatCount(int passengerSeatCount)
@@ -385,6 +503,44 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
         if (!AllowedPassengerSeatCounts.Contains(passengerSeatCount))
             throw new ValidationException(
                 "Passenger seat count must be 2, 4, 5, 6, or 7.");
+    }
+
+    private static bool IsValidManufacturingYear(int year) =>
+        year is >= 1900 && year <= DateTime.UtcNow.Year + 1;
+
+    private static void AddMissingText(
+        ICollection<string> missingRequirements,
+        string? value,
+        string name)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            missingRequirements.Add(name);
+    }
+
+    private static string FormatImageType(VehicleImageType imageType) =>
+        imageType switch
+        {
+            VehicleImageType.FrontView => "front view",
+            VehicleImageType.RearView => "rear view",
+            VehicleImageType.SideProfile => "side profile",
+            VehicleImageType.Interior => "interior",
+            _ => imageType.ToString()
+        };
+
+    private static string NormalizeRequiredText(
+        string? value,
+        string name,
+        int maximumLength)
+    {
+        var normalized = NormalizeOptionalText(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+            throw new ValidationException($"{name} is required.");
+        if (normalized.Length > maximumLength)
+        {
+            throw new ValidationException(
+                $"{name} cannot exceed {maximumLength} characters.");
+        }
+        return normalized;
     }
 
     private static string? NormalizeOptionalText(string? value)

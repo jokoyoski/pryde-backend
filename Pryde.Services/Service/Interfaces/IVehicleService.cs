@@ -18,4 +18,5 @@ public interface IVehicleService
     Task DeleteImageAsync(Guid vehicleId, Guid imageId, Guid requestingUserId, CancellationToken cancellationToken = default);
     Task<VehicleResponseDto> ActivateAsync(Guid vehicleId, CancellationToken cancellationToken = default);
     Task<VehicleResponseDto> DeactivateAsync(Guid vehicleId, CancellationToken cancellationToken = default);
+    Task<VehicleResponseDto> RejectAsync(Guid vehicleId, string reason, CancellationToken cancellationToken = default);
 }

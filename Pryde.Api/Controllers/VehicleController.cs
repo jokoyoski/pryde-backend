@@ -59,6 +59,20 @@ public class VehicleController(
         return Ok(result);
     }
 
+    [HttpPost("~/api/v{version:apiVersion}/admin/vehicles/{vehicleId:guid}/reject")]
+    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
+    public async Task<IActionResult> RejectVehicle(
+        Guid vehicleId,
+        [FromBody] RejectionRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var result = await vehicleService.RejectAsync(
+            vehicleId,
+            request.Reason,
+            cancellationToken);
+        return Ok(result);
+    }
+
     [HttpPost]
     [Consumes("multipart/form-data")]
     [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
