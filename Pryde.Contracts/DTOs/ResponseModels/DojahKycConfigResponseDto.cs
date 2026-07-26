@@ -9,5 +9,7 @@ public class DojahKycConfigResponseDto
     public string ShareableLink { get; set; } = string.Empty;
     public string WidgetId { get; set; } = string.Empty;
     public string ReferenceId { get; set; } = string.Empty;
+    public IReadOnlyDictionary<string, string> Metadata { get; set; } =
+        new Dictionary<string, string>();
     public KycStatus Status { get; set; }
 }

@@ -17,6 +17,10 @@ public interface IKycVerificationRepository
         string providerReference,
         CancellationToken cancellationToken = default);
 
+    Task<KycVerification?> GetByDojahReferenceAsync(
+        string dojahReference,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<KycVerification>> GetAllAsync(
         CancellationToken cancellationToken = default);
 

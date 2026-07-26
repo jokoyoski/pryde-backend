@@ -420,6 +420,7 @@ public class AdminPortalService(
         target.VerifiedAt = source.VerifiedAt;
         target.ProviderName = source.ProviderName;
         target.ProviderReference = source.ProviderReference;
+        target.DojahReference = source.DojahReference;
         target.ProviderStatus = source.ProviderStatus;
         target.RejectionReason = source.RejectionReason;
         target.LastProviderUpdatedAt = source.LastProviderUpdatedAt;

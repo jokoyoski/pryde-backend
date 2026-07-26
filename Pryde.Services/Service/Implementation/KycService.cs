@@ -66,6 +66,7 @@ public class KycService(
         kyc.VerifiedAt = null;
         kyc.RejectionReason = null;
         kyc.ProviderReference = null;
+        kyc.DojahReference = null;
         kyc.ProviderStatus = null;
         kyc.LastProviderUpdatedAt = null;
 

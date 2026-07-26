@@ -93,6 +93,7 @@ internal sealed class TestKycVerificationRepository : IKycVerificationRepository
     public Task<KycVerification?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(kyc => kyc.Id == id));
     public Task<KycVerification?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(kyc => kyc.UserId == userId));
     public Task<KycVerification?> GetByProviderReferenceAsync(string providerReference, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(kyc => kyc.ProviderReference == providerReference));
+    public Task<KycVerification?> GetByDojahReferenceAsync(string dojahReference, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(kyc => kyc.DojahReference == dojahReference));
     public Task<IReadOnlyList<KycVerification>> GetAllAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<KycVerification>>(Items.ToList());
     public Task<IReadOnlyList<KycVerification>> GetByStatusAsync(KycStatus status, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<KycVerification>>(Items.Where(kyc => kyc.Status == status).ToList());
     public Task<bool> ExistsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(Items.Any(kyc => kyc.UserId == userId));

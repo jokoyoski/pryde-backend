@@ -97,6 +97,7 @@ public class KycCompatibilityTests
         Assert.Equal(KycStatus.Pending, result.Status);
         Assert.Equal("Dojah", result.ProviderName);
         Assert.Null(result.ProviderReference);
+        Assert.Null(result.DojahReference);
         Assert.Null(result.ProviderStatus);
         Assert.Null(result.RejectionReason);
         Assert.Null(result.VerifiedAt);

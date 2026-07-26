@@ -68,6 +68,13 @@ public class DojahKycServiceTests
 
         Assert.Equal(first.ReferenceId, second.ReferenceId);
         Assert.StartsWith("PRYDE-", first.ReferenceId);
+        Assert.Equal(first.ReferenceId, first.Metadata["kyc_reference"]);
+        Assert.Contains(
+            $"reference_id={first.ReferenceId}",
+            first.ShareableLink);
+        Assert.Contains(
+            $"metadata%5Bkyc_reference%5D={first.ReferenceId}",
+            first.ShareableLink);
         Assert.Equal("widget-test", first.WidgetId);
         Assert.Equal(KycStatus.Pending, first.Status);
         Assert.Single(unitOfWork.KycVerificationRepository.Items);
@@ -119,6 +126,136 @@ public class DojahKycServiceTests
         Assert.Equal(providerStatus, kyc.ProviderStatus);
         if (expectedStatus == KycStatus.Rejected)
             Assert.Equal("provider check failed", kyc.RejectionReason);
+    }
+
+    [Fact]
+    public async Task WebhookUsingCustomPrydeReferenceUpdatesVerification()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Payload(config.ReferenceId, "Completed");
+
+        await service.ProcessWebhookAsync(payload, SignV1(payload), null);
+
+        var kyc = Assert.Single(unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(config.ReferenceId, kyc.ProviderReference);
+        Assert.Null(kyc.DojahReference);
+        Assert.Equal("Completed", kyc.ProviderStatus);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
+        Assert.NotNull(kyc.VerifiedAt);
+        Assert.NotNull(kyc.LastProviderUpdatedAt);
+    }
+
+    [Fact]
+    public async Task WebhookUsingDojahReferenceAndCustomMetadataStoresBothReferences()
+    {
+        const string dojahReference = "DJ-31038041E0";
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = PayloadWithMetadata(
+            dojahReference,
+            config.ReferenceId,
+            "Completed");
+
+        await service.ProcessWebhookAsync(payload, SignV1(payload), null);
+
+        var kyc = Assert.Single(unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(config.ReferenceId, kyc.ProviderReference);
+        Assert.Equal(dojahReference, kyc.DojahReference);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
+    }
+
+    [Fact]
+    public async Task LaterWebhookCanResolveStoredDojahReferenceWithoutMetadata()
+    {
+        const string dojahReference = "DJ-31038041E1";
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var firstPayload = PayloadWithMetadata(
+            dojahReference,
+            config.ReferenceId,
+            "Ongoing");
+        await service.ProcessWebhookAsync(
+            firstPayload,
+            SignV1(firstPayload),
+            null);
+        var completedPayload = Payload(dojahReference, "Completed");
+
+        await service.ProcessWebhookAsync(
+            completedPayload,
+            SignV1(completedPayload),
+            null);
+
+        var kyc = Assert.Single(unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(dojahReference, kyc.DojahReference);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
+    }
+
+    [Fact]
+    public async Task UnknownDojahReferenceIsRejected()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var payload = Payload("DJ-UNKNOWN001", "Completed");
+
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            service.ProcessWebhookAsync(payload, SignV1(payload), null));
+
+        Assert.Empty(unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(0, unitOfWork.SaveChangesCount);
+    }
+
+    [Fact]
+    public async Task DuplicateDojahWebhookIsIdempotent()
+    {
+        const string dojahReference = "DJ-31038041E2";
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = PayloadWithMetadata(
+            dojahReference,
+            config.ReferenceId,
+            "Completed");
+        var signature = SignV1(payload);
+
+        await service.ProcessWebhookAsync(payload, signature, null);
+        var saveCount = unitOfWork.SaveChangesCount;
+        var updatedAt = unitOfWork.KycVerificationRepository.Items[0]
+            .LastProviderUpdatedAt;
+        await service.ProcessWebhookAsync(payload, signature, null);
+
+        Assert.Equal(saveCount, unitOfWork.SaveChangesCount);
+        Assert.Equal(
+            updatedAt,
+            unitOfWork.KycVerificationRepository.Items[0].LastProviderUpdatedAt);
+    }
+
+    [Fact]
+    public async Task FailedDojahWebhookSetsRejectedDecisionFields()
+    {
+        const string dojahReference = "DJ-31038041E3";
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = PayloadWithMetadata(
+            dojahReference,
+            config.ReferenceId,
+            "Failed",
+            "Document could not be verified.");
+
+        await service.ProcessWebhookAsync(payload, SignV1(payload), null);
+
+        var kyc = Assert.Single(unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(KycStatus.Rejected, kyc.Status);
+        Assert.Equal("Failed", kyc.ProviderStatus);
+        Assert.Equal(
+            "Document could not be verified.",
+            kyc.RejectionReason);
+        Assert.Null(kyc.VerifiedAt);
+        Assert.NotNull(kyc.LastProviderUpdatedAt);
     }
 
     [Fact]
@@ -277,6 +414,14 @@ public class DojahKycServiceTests
 
     private static byte[] Payload(string referenceId, string status, string message = "") =>
         Encoding.UTF8.GetBytes($"{{\"reference_id\":\"{referenceId}\",\"verification_status\":\"{status}\",\"message\":\"{message}\"}}");
+
+    private static byte[] PayloadWithMetadata(
+        string dojahReference,
+        string customReference,
+        string status,
+        string message = "") =>
+        Encoding.UTF8.GetBytes(
+            $"{{\"reference_id\":\"{dojahReference}\",\"verification_status\":\"{status}\",\"message\":\"{message}\",\"metadata\":{{\"kyc_reference\":\"{customReference}\"}}}}");
 
     private static string SignV1(byte[] payload)
     {
