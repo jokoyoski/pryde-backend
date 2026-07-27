@@ -27,6 +27,7 @@ public static class ServiceCollectionExtension
         services.AddScoped<IWalletService, WalletService>();
         services.AddScoped<ITripService, TripService>();
         services.AddScoped<ITripBookingService, TripBookingService>();
+        services.AddScoped<IDriverDashboardService, DriverDashboardService>();
         services.AddScoped<IAdminListingService, AdminListingService>();
         services.AddScoped<IFinancialService, FinancialService>();
         services.AddScoped<IAdminPortalService, AdminPortalService>();

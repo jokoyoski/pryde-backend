@@ -68,6 +68,19 @@ public class TripBookingRepository(PrydeDbContext context) : ITripBookingReposit
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<int> CountPendingByDriverIdAsync(
+        Guid driverId,
+        CancellationToken cancellationToken = default)
+    {
+        return await context.TripBookings
+            .AsNoTracking()
+            .CountAsync(
+                booking =>
+                    booking.Trip.DriverId == driverId &&
+                    booking.Status == Pryde.Domain.Enums.BookingStatus.Pending,
+                cancellationToken);
+    }
+
     public async Task<bool> HasActiveBookingAsync(Guid tripId, Guid passengerId, CancellationToken cancellationToken = default)
     {
         return await context.TripBookings.AnyAsync(

@@ -417,6 +417,17 @@ internal sealed class TestTripBookingRepository(TestTripRepository trips) : ITri
     public Task<IReadOnlyList<TripBooking>> GetByPassengerIdAsync(Guid passengerId, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<TripBooking>>(Items.Where(b => b.PassengerId == passengerId).ToList());
 
+    public Task<int> CountPendingByDriverIdAsync(
+        Guid driverId,
+        CancellationToken cancellationToken = default)
+    {
+        var pendingBookingCount = Items.Count(booking =>
+            booking.Trip.DriverId == driverId &&
+            booking.Status == BookingStatus.Pending);
+
+        return Task.FromResult(pendingBookingCount);
+    }
+
     public Task<bool> HasActiveBookingAsync(Guid tripId, Guid passengerId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Items.Any(b => b.TripId == tripId && b.PassengerId == passengerId
             && b.Status is BookingStatus.Pending or BookingStatus.Approved));
