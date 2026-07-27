@@ -20,7 +20,8 @@ namespace Pryde.Services.Service.Implementation;
 public class AuthService(
     IUnitOfWork unitOfWork,IPasswordHasher passwordHasher,IJwtService jwtService,
     IEmailService emailService, IWalletService walletService, ILogger<AuthService> logger,
-    IOptions<EmailSettings> emailOptions) : IAuthService
+    IOptions<EmailSettings> emailOptions,
+    IOnboardingStatusService onboardingStatusService) : IAuthService
 {
     private const int ResendCooldownSeconds = 60;
     private const int MaximumVerificationAttempts = 5;
@@ -198,6 +199,7 @@ public class AuthService(
         await walletService.CreateWalletForUserAsync(
             user, accountName, cancellationToken);
 
+        await unitOfWork.SaveChangesAsync(cancellationToken);
         var response = await IssueTokensAsync(user, roleNames, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return response;
@@ -297,6 +299,9 @@ public class AuthService(
         var response = user.Adapt<LoginResponseDto>();
         response.AccessToken = accessToken;
         response.RefreshToken = refreshToken;
+        response.Onboarding = await onboardingStatusService.GetAsync(
+            user.Id,
+            cancellationToken);
         return response;
     }
     public async Task ForgotPasswordAsync(

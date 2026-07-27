@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
 using Pryde.Contracts.RequestModels;
+using Pryde.Contracts.ResponseModels;
 using Pryde.Services.Service.Interface;
 
 namespace Pryde.Api.Controllers.V1;
@@ -10,7 +11,9 @@ namespace Pryde.Api.Controllers.V1;
 [ApiController]
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/auth")]
-public class AuthController(IAuthService authService) : ControllerBase
+public class AuthController(
+    IAuthService authService,
+    IOnboardingStatusService onboardingStatusService) : ControllerBase
 {
     [HttpPost("register")]
     public async Task<IActionResult> Register(
@@ -23,6 +26,7 @@ public class AuthController(IAuthService authService) : ControllerBase
     }
 
     [HttpPost("login")]
+    [ProducesResponseType(typeof(LoginResponseDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Login(
         [FromBody] LoginRequestDto request,
         CancellationToken cancellationToken)
@@ -101,6 +105,19 @@ public class AuthController(IAuthService authService) : ControllerBase
         CancellationToken cancellationToken)
     {
         return Ok(await authService.GetVerificationStatusAsync(
+            Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!),
+            cancellationToken));
+    }
+
+    [HttpGet("onboarding-status")]
+    [Authorize]
+    [ProducesResponseType(
+        typeof(OnboardingStatusResponseDto),
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetOnboardingStatus(
+        CancellationToken cancellationToken)
+    {
+        return Ok(await onboardingStatusService.GetAsync(
             Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!),
             cancellationToken));
     }

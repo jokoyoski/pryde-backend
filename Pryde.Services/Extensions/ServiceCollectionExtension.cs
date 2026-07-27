@@ -14,6 +14,7 @@ public static class ServiceCollectionExtension
     {
         services.AddScoped<IJwtService, JwtService>();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IOnboardingStatusService, OnboardingStatusService>();
         services.AddScoped<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IKycService, KycService>();

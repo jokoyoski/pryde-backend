@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,6 +9,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Models;
 using Pryde.Api.Authorization;
 using Pryde.Api.Controllers.V1;
@@ -312,6 +314,9 @@ public class ApiConfigurationTests
         var services = builder.Services;
         services.AddLogging();
         services.AddControllers()
+            .AddJsonOptions(options =>
+                options.JsonSerializerOptions.Converters.Add(
+                    new JsonStringEnumConverter()))
             .AddApplicationPart(typeof(TripsController).Assembly);
         services.AddEndpointsApiExplorer();
         services.AddApiVersioningConfiguration();
@@ -372,6 +377,7 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/auth/email-verification/resend", paths);
         Assert.Contains("/api/v1/auth/email-verification/verify", paths);
         Assert.Contains("/api/v1/auth/verification-status", paths);
+        Assert.Contains("/api/v1/auth/onboarding-status", paths);
         Assert.Contains("/api/v1/auth/roles/select", paths);
         Assert.Contains("/api/v1/kyc/submit", paths);
         Assert.Contains("/api/v1/admin/kyc/{userId}/approve", paths);
@@ -401,6 +407,29 @@ public class ApiConfigurationTests
         Assert.DoesNotContain(
             "roles",
             document.Components.Schemas[nameof(RegisterRequestDto)].Properties.Keys);
+        Assert.Equal(
+            "string",
+            document.Components.Schemas["OnboardingStage"].Type);
+        Assert.Equal(
+            [
+                "RoleSelection",
+                "IdentityVerification",
+                "DriverDocuments",
+                "VehicleInformation",
+                "SubmittedForReview",
+                "Completed"
+            ],
+            document.Components.Schemas["OnboardingStage"].Enum
+                .Cast<OpenApiString>()
+                .Select(value => value.Value)
+                .ToList());
+        Assert.Equal(
+            "string",
+            document.Components.Schemas["DriverVerificationStatus"].Type);
+        Assert.Contains(
+            document.Components.Schemas["DriverVerificationStatus"].Enum,
+            value => value is OpenApiString openApiString &&
+                     openApiString.Value == "ResubmissionRequired");
     }
 
     private static async Task<AuthorizationResult> AuthorizeKycActionAsync(
