@@ -9,6 +9,7 @@ using Pryde.Services.DependencyInjection;
 using Pryde.Services.Notifications.Implementation;
 using Pryde.Services.Notifications.Interface;
 using Pryde.Services.Settings;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,7 +17,10 @@ TypeAdapterConfig.GlobalSettings.Scan(
     typeof(Program).Assembly,
     typeof(Pryde.Services.Mapping.MapsterConfig).Assembly);
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+        options.JsonSerializerOptions.Converters.Add(
+            new JsonStringEnumConverter()));
 builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddApiVersioningConfiguration();

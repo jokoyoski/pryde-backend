@@ -354,7 +354,8 @@ public class EmailVerificationServiceTests
                 FromAddress = "test@pryde.local",
                 FromName = "Pryde",
                 OtpExpiryMinutes = 10
-            }));
+            }),
+            new OnboardingStatusService(unitOfWork));
         return new EmailVerificationTestContext(unitOfWork, service, email, jwt);
     }
 
