@@ -26,6 +26,7 @@ public interface IUnitOfWork
     IAdminListingRepository AdminListings { get; }
     IEscrowRepository Escrows { get; }
     ILedgerRepository Ledger { get; }
+    IDriverBankAccountRepository DriverBankAccounts { get; }
 
     Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default);

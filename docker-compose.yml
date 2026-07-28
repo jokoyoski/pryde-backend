@@ -34,6 +34,10 @@ services:
       Dojah__PrivateKey: ${Dojah__PrivateKey}
       Dojah__ShareableLink: ${Dojah__ShareableLink}
 
+      Paystack__Enabled: ${Paystack__Enabled:-false}
+      Paystack__BaseUrl: ${Paystack__BaseUrl:-https://api.paystack.co}
+      Paystack__SecretKey: ${Paystack__SecretKey}
+
 
 
   api:
@@ -79,6 +83,10 @@ services:
       Dojah__PublicKey: ${Dojah__PublicKey}
       Dojah__PrivateKey: ${Dojah__PrivateKey}
       Dojah__ShareableLink: ${Dojah__ShareableLink}
+
+      Paystack__Enabled: ${Paystack__Enabled:-false}
+      Paystack__BaseUrl: ${Paystack__BaseUrl:-https://api.paystack.co}
+      Paystack__SecretKey: ${Paystack__SecretKey}
 
     ports:
       - "8080:8080"

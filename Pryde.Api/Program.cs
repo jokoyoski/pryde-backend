@@ -29,6 +29,7 @@ builder.Services.AddSwaggerConfiguration();
 builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddServices();
 builder.Services.AddDojahIntegration(builder.Configuration);
+builder.Services.AddPaystackIntegration(builder.Configuration);
 
 builder.Services
     .AddOptions<VehicleUploadSettings>()

@@ -23,6 +23,7 @@ namespace Pryde.Domain.Entities
         public ICollection<UserRole> UserRoles {  get; set; } = new List<UserRole>();
         public ICollection<Vehicle> Vehicles { get; set; } = new List<Vehicle>();
         public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
+        public ICollection<DriverBankAccount> DriverBankAccounts { get; set; } = new List<DriverBankAccount>();
 
     }
 }

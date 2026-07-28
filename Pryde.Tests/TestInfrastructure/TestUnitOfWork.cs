@@ -28,6 +28,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         RefreshTokens = new TestRefreshTokenRepository();
         Escrows = new TestEscrowRepository((TestTripBookingRepository)TripBookings);
         Ledger = new TestLedgerRepository();
+        DriverBankAccounts = new TestDriverBankAccountRepository();
     }
 
     public TestTripRepository TripRepository => (TestTripRepository)Trips;
@@ -50,6 +51,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public TestLedgerRepository LedgerRepository => (TestLedgerRepository)Ledger;
     public TestVerificationCodeRepository VerificationCodeRepository =>
         (TestVerificationCodeRepository)VerificationCodes;
+    public TestDriverBankAccountRepository DriverBankAccountRepository =>
+        (TestDriverBankAccountRepository)DriverBankAccounts;
     public int SaveChangesCount { get; private set; }
 
     public IUserRepository Users { get; }
@@ -74,6 +77,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public IAdminListingRepository AdminListings { get; }
     public IEscrowRepository Escrows { get; }
     public ILedgerRepository Ledger { get; }
+    public IDriverBankAccountRepository DriverBankAccounts { get; }
 
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
@@ -84,6 +88,61 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public Task<T> ExecuteInTransactionAsync<T>(
         Func<CancellationToken, Task<T>> action,
         CancellationToken cancellationToken = default) => action(cancellationToken);
+}
+
+internal sealed class TestDriverBankAccountRepository
+    : IDriverBankAccountRepository
+{
+    public List<DriverBankAccount> Items { get; } = [];
+
+    public Task<IReadOnlyList<DriverBankAccount>> GetByUserIdAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var bankAccounts = Items
+            .Where(bankAccount =>
+                bankAccount.UserId == userId &&
+                bankAccount.IsActive)
+            .OrderByDescending(bankAccount => bankAccount.IsDefault)
+            .ThenByDescending(bankAccount => bankAccount.CreatedAt)
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<DriverBankAccount>>(
+            bankAccounts);
+    }
+
+    public Task<bool> ExistsAsync(
+        Guid userId,
+        string bankCode,
+        string accountNumber,
+        CancellationToken cancellationToken = default)
+    {
+        var exists = Items.Any(bankAccount =>
+            bankAccount.UserId == userId &&
+            bankAccount.BankCode == bankCode &&
+            bankAccount.AccountNumber == accountNumber);
+
+        return Task.FromResult(exists);
+    }
+
+    public Task<bool> HasAnyActiveAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var exists = Items.Any(bankAccount =>
+            bankAccount.UserId == userId &&
+            bankAccount.IsActive);
+
+        return Task.FromResult(exists);
+    }
+
+    public Task<DriverBankAccount> CreateAsync(
+        DriverBankAccount bankAccount,
+        CancellationToken cancellationToken = default)
+    {
+        Items.Add(bankAccount);
+        return Task.FromResult(bankAccount);
+    }
 }
 
 internal sealed class TestKycVerificationRepository : IKycVerificationRepository

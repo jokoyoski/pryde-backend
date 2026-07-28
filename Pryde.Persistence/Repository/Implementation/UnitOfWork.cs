@@ -28,7 +28,8 @@ public class UnitOfWork(
     IVehicleAmenityRepository vehicleAmenity,
     IAdminListingRepository adminListings,
     IEscrowRepository escrows,
-    ILedgerRepository ledger)
+    ILedgerRepository ledger,
+    IDriverBankAccountRepository driverBankAccounts)
     : IUnitOfWork
 {
     public IUserRepository Users { get; } = users;
@@ -53,6 +54,7 @@ public class UnitOfWork(
     public IAdminListingRepository AdminListings { get; } = adminListings;
     public IEscrowRepository Escrows { get; } = escrows;
     public ILedgerRepository Ledger { get; } = ledger;
+    public IDriverBankAccountRepository DriverBankAccounts { get; } = driverBankAccounts;
 
 
     public async Task<int> SaveChangesAsync(
