@@ -5,6 +5,7 @@
         Credit = 1,
         Debit = 2,
         EscrowHold = 3,
-        EscrowRelease = 4
+        EscrowRelease = 4,
+        Withdrawal = 5
     }
 }

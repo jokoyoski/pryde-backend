@@ -29,6 +29,18 @@ public class PaystackTransferRecipient
     public string RecipientCode { get; set; } = string.Empty;
 }
 
+public class PaystackTransferResult
+{
+    [JsonPropertyName("reference")]
+    public string Reference { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    [JsonPropertyName("transfer_code")]
+    public string TransferCode { get; set; } = string.Empty;
+}
+
 internal class PaystackResponse<T>
 {
     [JsonPropertyName("status")]
@@ -54,6 +66,27 @@ internal class PaystackTransferRecipientRequest
 
     [JsonPropertyName("bank_code")]
     public string BankCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = "NGN";
+}
+
+internal class PaystackTransferRequest
+{
+    [JsonPropertyName("source")]
+    public string Source { get; set; } = "balance";
+
+    [JsonPropertyName("amount")]
+    public long Amount { get; set; }
+
+    [JsonPropertyName("recipient")]
+    public string Recipient { get; set; } = string.Empty;
+
+    [JsonPropertyName("reference")]
+    public string Reference { get; set; } = string.Empty;
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = string.Empty;
 
     [JsonPropertyName("currency")]
     public string Currency { get; set; } = "NGN";

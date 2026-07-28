@@ -14,6 +14,30 @@ public class DriverBankAccountRepository : IDriverBankAccountRepository
         _context = context;
     }
 
+    public async Task<DriverBankAccount?> GetActiveByIdAndUserIdAsync(
+        Guid bankAccountId,
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _context.DriverBankAccounts
+            .AsNoTracking()
+            .Where(bankAccount =>
+                bankAccount.Id == bankAccountId &&
+                bankAccount.UserId == userId &&
+                bankAccount.IsActive)
+            .Select(bankAccount => new DriverBankAccount
+            {
+                Id = bankAccount.Id,
+                UserId = bankAccount.UserId,
+                BankName = bankAccount.BankName,
+                AccountNumber = bankAccount.AccountNumber,
+                AccountName = bankAccount.AccountName,
+                RecipientCode = bankAccount.RecipientCode,
+                IsActive = bankAccount.IsActive
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<DriverBankAccount>> GetByUserIdAsync(
         Guid userId,
         CancellationToken cancellationToken = default)

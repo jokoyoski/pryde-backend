@@ -6,6 +6,8 @@ namespace Pryde.Tests.TestInfrastructure;
 
 internal sealed class TestUnitOfWork : IUnitOfWork
 {
+    private readonly SemaphoreSlim _transactionLock = new(1, 1);
+
     public TestUnitOfWork()
     {
         AdminListings = new TestAdminListingRepository();
@@ -20,7 +22,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         VehicleImages = new TestVehicleImageRepository();
         VehicleAmenities = new TestVehicleAmenityRepository();
         Wallets = new TestWalletRepository();
-        WalletTransactions = new TestWalletTransactionRepository();
+        WalletTransactions = new TestWalletTransactionRepository(
+            (TestWalletRepository)Wallets);
         VirtualAccounts = new TestVirtualAccountRepository();
         KycVerifications = new TestKycVerificationRepository();
         PasswordResetCodes = new TestPasswordResetCodeRepository();
@@ -32,6 +35,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     }
 
     public TestTripRepository TripRepository => (TestTripRepository)Trips;
+    public TestUserRepository UserRepository => (TestUserRepository)Users;
     public TestTripBookingRepository TripBookingRepository => (TestTripBookingRepository)TripBookings;
     public TestVehicleRepository VehicleRepository => (TestVehicleRepository)Vehicles;
     public TestVehicleDocumentRepository VehicleDocumentRepository =>
@@ -85,15 +89,40 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         return Task.FromResult(1);
     }
 
-    public Task<T> ExecuteInTransactionAsync<T>(
+    public async Task<T> ExecuteInTransactionAsync<T>(
         Func<CancellationToken, Task<T>> action,
-        CancellationToken cancellationToken = default) => action(cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        await _transactionLock.WaitAsync(cancellationToken);
+
+        try
+        {
+            return await action(cancellationToken);
+        }
+        finally
+        {
+            _transactionLock.Release();
+        }
+    }
 }
 
 internal sealed class TestDriverBankAccountRepository
     : IDriverBankAccountRepository
 {
     public List<DriverBankAccount> Items { get; } = [];
+
+    public Task<DriverBankAccount?> GetActiveByIdAndUserIdAsync(
+        Guid bankAccountId,
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var bankAccount = Items.FirstOrDefault(item =>
+            item.Id == bankAccountId &&
+            item.UserId == userId &&
+            item.IsActive);
+
+        return Task.FromResult(bankAccount);
+    }
 
     public Task<IReadOnlyList<DriverBankAccount>> GetByUserIdAsync(
         Guid userId,
@@ -164,6 +193,8 @@ internal sealed class TestKycVerificationRepository : IKycVerificationRepository
 internal sealed class TestUserRepository(List<User> items) : IUserRepository
 {
     public List<User> Items { get; } = items;
+    public Task<bool> ExistsByIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Items.Any(user => user.Id == userId));
     public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(user => user.Id == id));
     public Task<User?> GetByEmailAsync(string email, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(user => user.Email.Equals(email, StringComparison.OrdinalIgnoreCase)));
     public Task<User?> GetByPhoneNumberAsync(string phoneNumber, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(user => user.PhoneNumber == phoneNumber));
@@ -285,11 +316,48 @@ internal sealed class TestWalletRepository : IWalletRepository
     public void Update(Wallet wallet) { }
 }
 
-internal sealed class TestWalletTransactionRepository : IWalletTransactionRepository
+internal sealed class TestWalletTransactionRepository(
+    TestWalletRepository wallets) : IWalletTransactionRepository
 {
     public List<WalletTransaction> Items { get; } = [];
     public Task<WalletTransaction> CreateAsync(WalletTransaction transaction, CancellationToken cancellationToken = default) { Items.Add(transaction); return Task.FromResult(transaction); }
     public Task<IReadOnlyList<WalletTransaction>> GetByWalletIdAsync(Guid walletId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<WalletTransaction>>(Items.Where(transaction => transaction.WalletId == walletId).OrderByDescending(transaction => transaction.CreatedAt).ToList());
+
+    public Task<IReadOnlyList<WalletTransaction>> GetWithdrawalsByUserIdAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var walletIds = wallets.Items
+            .Where(wallet => wallet.UserId == userId)
+            .Select(wallet => wallet.Id)
+            .ToHashSet();
+        var withdrawals = Items
+            .Where(transaction =>
+                walletIds.Contains(transaction.WalletId) &&
+                transaction.Type == WalletTransactionType.Withdrawal)
+            .OrderByDescending(transaction => transaction.CreatedAt)
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<WalletTransaction>>(
+            withdrawals);
+    }
+
+    public Task<WalletTransaction?> GetWithdrawalByIdAndUserIdAsync(
+        Guid withdrawalId,
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var walletIds = wallets.Items
+            .Where(wallet => wallet.UserId == userId)
+            .Select(wallet => wallet.Id)
+            .ToHashSet();
+        var withdrawal = Items.FirstOrDefault(transaction =>
+            transaction.Id == withdrawalId &&
+            walletIds.Contains(transaction.WalletId) &&
+            transaction.Type == WalletTransactionType.Withdrawal);
+
+        return Task.FromResult(withdrawal);
+    }
 }
 
 internal sealed class TestVirtualAccountRepository : IVirtualAccountRepository

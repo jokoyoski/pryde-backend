@@ -4,6 +4,10 @@ namespace Pryde.Persistence.Repository.Interfaces;
 
 public interface IUserRepository
 {
+    Task<bool> ExistsByIdAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
     Task<User?> GetByIdAsync(
         Guid id,
         CancellationToken cancellationToken = default);

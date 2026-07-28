@@ -4,6 +4,11 @@ namespace Pryde.Persistence.Repository.Interfaces;
 
 public interface IDriverBankAccountRepository
 {
+    Task<DriverBankAccount?> GetActiveByIdAndUserIdAsync(
+        Guid bankAccountId,
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<DriverBankAccount>> GetByUserIdAsync(
         Guid userId,
         CancellationToken cancellationToken = default);

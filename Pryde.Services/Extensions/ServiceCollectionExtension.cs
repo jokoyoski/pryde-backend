@@ -30,6 +30,8 @@ public static class ServiceCollectionExtension
         services.AddScoped<IDriverDashboardService, DriverDashboardService>();
         services.AddScoped<IAdminListingService, AdminListingService>();
         services.AddScoped<IFinancialService, FinancialService>();
+        services.AddScoped<IDriverWithdrawalService, DriverWithdrawalService>();
+        services.AddScoped<IAdminWalletService, AdminWalletService>();
         services.AddScoped<IAdminPortalService, AdminPortalService>();
 
         services.AddScoped<IFareCalculator, FareCalculator>();

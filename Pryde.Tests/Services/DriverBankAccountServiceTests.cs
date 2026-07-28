@@ -281,7 +281,8 @@ public class DriverBankAccountServiceTests
                 {
                     Enabled = false
                 }),
-                NullLogger<PaystackClient>.Instance);
+                NullLogger<PaystackClient>.Instance,
+                new TestHostEnvironment());
 
             await Assert.ThrowsAsync<ServiceUnavailableException>(
                 async () =>
@@ -302,10 +303,14 @@ public class DriverBankAccountServiceTests
                        HttpStatusCode.BadRequest,
                        responseJson)))
         {
+            httpClient.BaseAddress = new Uri(
+                "https://api.paystack.co/");
+
             var client = new PaystackClient(
                 httpClient,
                 Options.Create(EnabledSettings()),
-                NullLogger<PaystackClient>.Instance);
+                NullLogger<PaystackClient>.Instance,
+                new TestHostEnvironment());
 
             await Assert.ThrowsAsync<ServiceUnavailableException>(
                 async () =>
@@ -468,6 +473,16 @@ public class DriverBankAccountServiceTests
                 {
                     RecipientCode = "RCP_test_recipient"
                 });
+        }
+
+        public Task<PaystackTransferResult> CreateTransferAsync(
+            string recipientCode,
+            long amountInKobo,
+            string reference,
+            string reason,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
         }
 
         private void ThrowIfFailed()
