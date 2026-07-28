@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Models;
@@ -48,6 +49,7 @@ public class ApiConfigurationTests
     [InlineData(typeof(AdminTripsController), nameof(AdminTripsController.GetAll))]
     [InlineData(typeof(AdminBookingsController), nameof(AdminBookingsController.GetAll))]
     [InlineData(typeof(AdminFinanceController), nameof(AdminFinanceController.GetWalletTransactions))]
+    [InlineData(typeof(AdminWalletsController), nameof(AdminWalletsController.Fund))]
     [InlineData(typeof(AdminLedgerController), nameof(AdminLedgerController.GetAll))]
     [InlineData(typeof(AdminEscrowsController), nameof(AdminEscrowsController.GetAll))]
     [InlineData(typeof(KycController), nameof(KycController.GetAdminKyc))]
@@ -77,6 +79,7 @@ public class ApiConfigurationTests
     [InlineData("Admin", true)]
     [InlineData("SuperAdmin", true)]
     [InlineData("Driver", false)]
+    [InlineData("Passenger", false)]
     public async Task AdminResourcePolicyAllowsOnlyAdminRoles(string role, bool expected)
     {
         var authorizeData = typeof(AdminUsersController)
@@ -96,6 +99,45 @@ public class ApiConfigurationTests
             "Test"));
 
         var result = await authorizationService.AuthorizeAsync(principal, null, policy!);
+
+        Assert.Equal(expected, result.Succeeded);
+    }
+
+    [Theory]
+    [InlineData("Admin", true)]
+    [InlineData("SuperAdmin", true)]
+    [InlineData("Driver", false)]
+    [InlineData("Passenger", false)]
+    public async Task AdminWalletFundingAllowsOnlyAdminRoles(
+        string role,
+        bool expected)
+    {
+        var authorizeData = typeof(AdminWalletsController)
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<IAuthorizeData>();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAuthorizationCore();
+
+        using var provider = services.BuildServiceProvider();
+        var policy = await AuthorizationPolicy.CombineAsync(
+            provider.GetRequiredService<IAuthorizationPolicyProvider>(),
+            authorizeData);
+        var principal = new ClaimsPrincipal(
+            new ClaimsIdentity(
+                [
+                    new Claim(
+                        ClaimTypes.NameIdentifier,
+                        Guid.NewGuid().ToString()),
+                    new Claim(ClaimTypes.Role, role)
+                ],
+                "Test"));
+        var result = await provider
+            .GetRequiredService<IAuthorizationService>()
+            .AuthorizeAsync(
+                principal,
+                null,
+                policy!);
 
         Assert.Equal(expected, result.Succeeded);
     }
@@ -305,6 +347,7 @@ public class ApiConfigurationTests
 
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<ITripService>());
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<ITripBookingService>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAdminWalletService>());
     }
 
     [Fact]
@@ -366,6 +409,7 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/admin/bookings/{bookingId}", paths);
         Assert.Contains("/api/v1/admin/finance/summary", paths);
         Assert.Contains("/api/v1/admin/wallet-transactions", paths);
+        Assert.Contains("/api/v1/admin/wallets/fund", paths);
         Assert.Contains("/api/v1/admin/escrows", paths);
         Assert.Contains("/api/v1/admin/escrows/{escrowId}", paths);
         Assert.Contains("/api/v1/admin/ledger/transactions", paths);
@@ -430,6 +474,30 @@ public class ApiConfigurationTests
             document.Components.Schemas["DriverVerificationStatus"].Enum,
             value => value is OpenApiString openApiString &&
                      openApiString.Value == "ResubmissionRequired");
+    }
+
+    [Fact]
+    public async Task AdminWalletFundingIsHiddenInProduction()
+    {
+        var service = new TestAdminWalletService();
+        var environment = new TestHostEnvironment
+        {
+            EnvironmentName = "Production"
+        };
+        var controller = new AdminWalletsController(
+            service,
+            environment);
+
+        var result = await controller.Fund(
+            new AdminFundWalletRequest
+            {
+                UserId = Guid.NewGuid(),
+                Amount = 100m
+            },
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result);
+        Assert.Equal(0, service.CallCount);
     }
 
     private static async Task<AuthorizationResult> AuthorizeKycActionAsync(
@@ -499,4 +567,19 @@ public class ApiConfigurationTests
         return (await JsonSerializer.DeserializeAsync<ErrorResponseDto>(
             response.Body))!;
     }
+
+    private sealed class TestAdminWalletService : IAdminWalletService
+    {
+        public int CallCount { get; private set; }
+
+        public Task<AdminFundWalletResponseDto> FundWalletAsync(
+            AdminFundWalletRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return Task.FromResult(
+                new AdminFundWalletResponseDto());
+        }
+    }
+
 }

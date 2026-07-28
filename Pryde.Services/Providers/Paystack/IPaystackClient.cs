@@ -15,4 +15,11 @@ public interface IPaystackClient
         string accountNumber,
         string accountName,
         CancellationToken cancellationToken = default);
+
+    Task<PaystackTransferResult> CreateTransferAsync(
+        string recipientCode,
+        long amountInKobo,
+        string reference,
+        string reason,
+        CancellationToken cancellationToken = default);
 }

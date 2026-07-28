@@ -13,6 +13,8 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
     private const string Currency = "NGN";
     private const string EscrowAccountCode = "SYSTEM:ESCROW:NGN";
     private const string PlatformRevenueAccountCode = "SYSTEM:PLATFORM_REVENUE:NGN";
+    private const string DriverWithdrawalAccountCode = "SYSTEM:DRIVER_WITHDRAWALS:NGN";
+    private const string TestFundingAccountCode = "SYSTEM:TEST_FUNDING:NGN";
 
     public async Task<EscrowResponseDto> HoldBookingPaymentAsync(
         Guid passengerId, Guid bookingId, string idempotencyKey,
@@ -269,6 +271,181 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
             Date = total.Date,
             Amount = total.Amount
         }).ToList();
+    }
+
+    public async Task<WalletTransaction> RecordDriverWithdrawalAsync(
+        Guid userId,
+        decimal amount,
+        string providerReference,
+        string bankName,
+        string maskedAccountNumber,
+        string accountName,
+        WalletTransactionStatus status,
+        CancellationToken cancellationToken = default)
+    {
+        return await unitOfWork.ExecuteInTransactionAsync(
+            async transactionToken =>
+            {
+                var wallet = await unitOfWork.Wallets.GetByUserIdAsync(
+                    userId,
+                    transactionToken)
+                    ?? throw new NotFoundException(nameof(Wallet), userId);
+
+                if (wallet.Balance < amount)
+                {
+                    throw new ConflictException(
+                        "The wallet balance is insufficient for this withdrawal.");
+                }
+
+                var walletAccount = await EnsureWalletAccountAsync(
+                    wallet,
+                    transactionToken);
+                var withdrawalAccount = await EnsureSystemAccountAsync(
+                    DriverWithdrawalAccountCode,
+                    "Driver Withdrawals",
+                    LedgerAccountType.ExternalPayout,
+                    transactionToken);
+                var now = DateTime.UtcNow;
+                var ledgerTransaction = new LedgerTransaction
+                {
+                    Reference = $"WITHDRAWAL-{Guid.NewGuid():N}",
+                    IdempotencyKey = providerReference,
+                    TransactionType = LedgerTransactionType.DriverWithdrawal,
+                    Status = LedgerTransactionStatus.Posted,
+                    Amount = amount,
+                    Currency = Currency,
+                    ExternalProvider = "Paystack",
+                    ExternalReference = providerReference,
+                    CompletedAt = now
+                };
+
+                await AddBalancedEntriesAsync(
+                    ledgerTransaction,
+                    new List<LedgerEntry>
+                    {
+                        NewEntry(
+                            ledgerTransaction,
+                            walletAccount,
+                            LedgerEntryType.Debit,
+                            amount),
+                        NewEntry(
+                            ledgerTransaction,
+                            withdrawalAccount,
+                            LedgerEntryType.Credit,
+                            amount)
+                    },
+                    transactionToken);
+
+                wallet.Balance -= amount;
+                unitOfWork.Wallets.Update(wallet);
+
+                var walletTransaction = new WalletTransaction
+                {
+                    WalletId = wallet.Id,
+                    Amount = amount,
+                    Type = WalletTransactionType.Withdrawal,
+                    Reference = providerReference,
+                    Status = status,
+                    Description = "Pryde driver withdrawal",
+                    Provider = "Paystack",
+                    Currency = Currency,
+                    BankName = bankName,
+                    MaskedAccountNumber = maskedAccountNumber,
+                    AccountName = accountName,
+                    CompletedAt = status == WalletTransactionStatus.Successful
+                        ? now
+                        : null
+                };
+
+                await unitOfWork.WalletTransactions.CreateAsync(
+                    walletTransaction,
+                    transactionToken);
+                await unitOfWork.SaveChangesAsync(transactionToken);
+
+                return walletTransaction;
+            },
+            cancellationToken);
+    }
+
+    public async Task<(Wallet Wallet, WalletTransaction Transaction)>
+        RecordTestWalletFundingAsync(
+            Guid userId,
+            decimal amount,
+            string description,
+            CancellationToken cancellationToken = default)
+    {
+        return await unitOfWork.ExecuteInTransactionAsync(
+            async transactionToken =>
+            {
+                var wallet = await unitOfWork.Wallets.GetByUserIdAsync(
+                    userId,
+                    transactionToken)
+                    ?? throw new NotFoundException(nameof(Wallet), userId);
+                var walletAccount = await EnsureWalletAccountAsync(
+                    wallet,
+                    transactionToken);
+                var fundingAccount = await EnsureSystemAccountAsync(
+                    TestFundingAccountCode,
+                    "Test Wallet Funding",
+                    LedgerAccountType.SystemFunding,
+                    transactionToken);
+                var now = DateTime.UtcNow;
+                var reference = $"TEST-FUND-{Guid.NewGuid():N}";
+                var ledgerTransaction = new LedgerTransaction
+                {
+                    Reference = reference,
+                    IdempotencyKey = reference,
+                    TransactionType =
+                        LedgerTransactionType.TestWalletFunding,
+                    Status = LedgerTransactionStatus.Posted,
+                    Amount = amount,
+                    Currency = Currency,
+                    ExternalProvider = "System",
+                    ExternalReference = reference,
+                    CompletedAt = now
+                };
+
+                await AddBalancedEntriesAsync(
+                    ledgerTransaction,
+                    new List<LedgerEntry>
+                    {
+                        NewEntry(
+                            ledgerTransaction,
+                            fundingAccount,
+                            LedgerEntryType.Debit,
+                            amount),
+                        NewEntry(
+                            ledgerTransaction,
+                            walletAccount,
+                            LedgerEntryType.Credit,
+                            amount)
+                    },
+                    transactionToken);
+
+                wallet.Balance += amount;
+                unitOfWork.Wallets.Update(wallet);
+
+                var walletTransaction = new WalletTransaction
+                {
+                    WalletId = wallet.Id,
+                    Amount = amount,
+                    Type = WalletTransactionType.Credit,
+                    Reference = reference,
+                    Status = WalletTransactionStatus.Successful,
+                    Description = description,
+                    Provider = "System",
+                    Currency = Currency,
+                    CompletedAt = now
+                };
+
+                await unitOfWork.WalletTransactions.CreateAsync(
+                    walletTransaction,
+                    transactionToken);
+                await unitOfWork.SaveChangesAsync(transactionToken);
+
+                return (wallet, walletTransaction);
+            },
+            cancellationToken);
     }
 
     private async Task RefundEscrowAsync(Escrow escrow, CancellationToken cancellationToken)

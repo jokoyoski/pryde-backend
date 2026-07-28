@@ -87,6 +87,33 @@ public class PaystackClient : IPaystackClient
         }
     }
 
+    public async Task<PaystackTransferResult> CreateTransferAsync(
+        string recipientCode,
+        long amountInKobo,
+        string reference,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        var providerRequest = new PaystackTransferRequest
+        {
+            Recipient = recipientCode,
+            Amount = amountInKobo,
+            Reference = reference,
+            Reason = reason
+        };
+
+        using (var request = new HttpRequestMessage(
+                   HttpMethod.Post,
+                   "transfer"))
+        {
+            request.Content = JsonContent.Create(providerRequest);
+
+            return await SendAsync<PaystackTransferResult>(
+                request,
+                cancellationToken);
+        }
+    }
+
     private async Task<T> SendAsync<T>(
     HttpRequestMessage request,
     CancellationToken cancellationToken)
@@ -122,22 +149,34 @@ public class PaystackClient : IPaystackClient
 
         using (response)
         {
+            var responseBody = await response.Content
+                .ReadAsStringAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Paystack response ({StatusCode}): {Response}",
+                (int)response.StatusCode,
+                responseBody);
+
             PaystackResponse<T>? providerResponse;
 
             try
             {
-                providerResponse = await response.Content
-                    .ReadFromJsonAsync<PaystackResponse<T>>(
-                        cancellationToken: cancellationToken);
+                providerResponse =
+                    JsonSerializer.Deserialize<PaystackResponse<T>>(
+                        responseBody,
+                        new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        });
             }
             catch (JsonException exception)
             {
                 _logger.LogError(
                     exception,
-                    "Paystack returned an invalid response.");
+                    "Paystack returned an invalid response. Response: {Response}",
+                    responseBody);
 
-                throw new ServiceUnavailableException(
-                    "Paystack returned an invalid response.");
+                throw new ServiceUnavailableException(responseBody);
             }
 
             if (!response.IsSuccessStatusCode ||
@@ -146,17 +185,16 @@ public class PaystackClient : IPaystackClient
                 providerResponse.Data == null)
             {
                 _logger.LogWarning(
-                    "Paystack rejected a request with status code {StatusCode}.",
-                    (int)response.StatusCode);
+                    "Paystack rejected the request. Status: {StatusCode}, Response: {Response}",
+                    (int)response.StatusCode,
+                    responseBody);
 
-                throw new ServiceUnavailableException(
-                    "Paystack could not complete the request.");
+                throw new ServiceUnavailableException(responseBody);
             }
 
             return providerResponse.Data;
         }
     }
-
     private void EnsureAvailable()
     {
         if (!_settings.Enabled)

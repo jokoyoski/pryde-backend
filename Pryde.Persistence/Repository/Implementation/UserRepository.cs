@@ -7,6 +7,15 @@ namespace Pryde.Persistence.Repository.Implementations;
 
 public class UserRepository(PrydeDbContext context) : IUserRepository
 {
+    public async Task<bool> ExistsByIdAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        return await context.Users.AnyAsync(
+            user => user.Id == userId,
+            cancellationToken);
+    }
+
     public async Task<User?> GetByIdAsync(
         Guid id,
         CancellationToken cancellationToken = default)

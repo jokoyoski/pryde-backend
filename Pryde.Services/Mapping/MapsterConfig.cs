@@ -17,5 +17,13 @@ public class MapsterConfig : IRegister
             .Map(
                 destination => destination.AccountNumber,
                 source => "******" + source.AccountNumber.Substring(6, 4));
+
+        config.NewConfig<WalletTransaction, DriverWithdrawalResponseDto>()
+            .Map(
+                destination => destination.ProviderReference,
+                source => source.Reference)
+            .Map(
+                destination => destination.Status,
+                source => source.Status!.Value);
     }
 }

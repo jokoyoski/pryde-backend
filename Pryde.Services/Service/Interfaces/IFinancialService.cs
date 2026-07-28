@@ -1,5 +1,7 @@
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
+using Pryde.Domain.Entities;
+using Pryde.Domain.Enums;
 
 namespace Pryde.Services.Service.Interface;
 
@@ -15,4 +17,19 @@ public interface IFinancialService
     Task<PagedResponseDto<LedgerTransactionResponseDto>> GetTransactionsAsync(AdminLedgerTransactionsRequestDto request, CancellationToken cancellationToken = default);
     Task<LedgerTransactionDetailResponseDto> GetTransactionAsync(Guid transactionId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<RevenueSummaryItemResponseDto>> GetRevenueSummaryAsync(int days, CancellationToken cancellationToken = default);
+    Task<WalletTransaction> RecordDriverWithdrawalAsync(
+        Guid userId,
+        decimal amount,
+        string providerReference,
+        string bankName,
+        string maskedAccountNumber,
+        string accountName,
+        WalletTransactionStatus status,
+        CancellationToken cancellationToken = default);
+    Task<(Wallet Wallet, WalletTransaction Transaction)>
+        RecordTestWalletFundingAsync(
+            Guid userId,
+            decimal amount,
+            string description,
+            CancellationToken cancellationToken = default);
 }
