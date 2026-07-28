@@ -57,6 +57,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAdminListingRepository, AdminListingRepository>();
         services.AddScoped<IEscrowRepository, EscrowRepository>();
         services.AddScoped<ILedgerRepository, LedgerRepository>();
+        services.AddScoped<IDriverBankAccountRepository, DriverBankAccountRepository>();
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         return services;

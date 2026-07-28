@@ -12,5 +12,10 @@ public class MapsterConfig : IRegister
 
         config.NewConfig<User, LoginResponseDto>()
             .Map(dest => dest.UserId, src => src.Id);
+
+        config.NewConfig<DriverBankAccount, DriverBankAccountResponseDto>()
+            .Map(
+                destination => destination.AccountNumber,
+                source => "******" + source.AccountNumber.Substring(6, 4));
     }
 }
