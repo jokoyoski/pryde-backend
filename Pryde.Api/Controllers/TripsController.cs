@@ -64,6 +64,54 @@ public class TripsController(ITripService tripService) : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("{tripId:guid}/start")]
+    [Authorize(Roles = "Driver", Policy = AuthorizationPolicies.EmailVerified)]
+    public async Task<IActionResult> Start(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await tripService.StartAsync(
+            tripId,
+            GetUserId(),
+            cancellationToken));
+    }
+
+    [HttpPost("{tripId:guid}/pickup-confirmation")]
+    [Authorize(Roles = "Passenger", Policy = AuthorizationPolicies.EmailVerified)]
+    public async Task<IActionResult> ConfirmPickup(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await tripService.ConfirmPickupAsync(
+            tripId,
+            GetUserId(),
+            cancellationToken));
+    }
+
+    [HttpPost("{tripId:guid}/end")]
+    [Authorize(Roles = "Driver", Policy = AuthorizationPolicies.EmailVerified)]
+    public async Task<IActionResult> End(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await tripService.EndAsync(
+            tripId,
+            GetUserId(),
+            cancellationToken));
+    }
+
+    [HttpPost("{tripId:guid}/dropoff-confirmation")]
+    [Authorize(Roles = "Passenger", Policy = AuthorizationPolicies.EmailVerified)]
+    public async Task<IActionResult> ConfirmDropoff(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await tripService.ConfirmDropoffAsync(
+            tripId,
+            GetUserId(),
+            cancellationToken));
+    }
+
     [HttpPatch("{tripId:guid}/complete")]
     [Authorize(Roles = "Driver", Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> Complete(Guid tripId, CancellationToken cancellationToken)

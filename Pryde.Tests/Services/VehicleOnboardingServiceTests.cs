@@ -176,6 +176,13 @@ public class VehicleOnboardingServiceTests
 
         Assert.Equal(VehicleOnboardingStatus.PendingReview, result.OnboardingStatus);
         Assert.False(result.IsActive);
+        Assert.Equal(
+            VehicleOnboardingStatus.PendingReview,
+            result.WorkflowStatus);
+        Assert.Equal(
+            WorkflowNextAction.AwaitAdminApproval,
+            result.NextAction);
+        Assert.Equal(WorkflowActor.Admin, result.RequiredActor);
     }
 
     [Theory]
@@ -279,6 +286,8 @@ public class VehicleOnboardingServiceTests
 
         Assert.True(result.IsActive);
         Assert.Equal(VehicleOnboardingStatus.Approved, result.OnboardingStatus);
+        Assert.Equal(WorkflowNextAction.CreateTrip, result.NextAction);
+        Assert.Equal(WorkflowActor.Driver, result.RequiredActor);
     }
 
     [Fact]
@@ -304,6 +313,10 @@ public class VehicleOnboardingServiceTests
         Assert.Equal(VehicleOnboardingStatus.Rejected, result.OnboardingStatus);
         Assert.False(result.IsActive);
         Assert.Equal("Missing registration", result.RejectionReason);
+        Assert.Equal(
+            WorkflowNextAction.CompleteVehicleOnboarding,
+            result.NextAction);
+        Assert.Equal(WorkflowActor.Driver, result.RequiredActor);
     }
 
     [Fact]

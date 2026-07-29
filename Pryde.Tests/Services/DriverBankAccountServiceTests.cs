@@ -281,8 +281,7 @@ public class DriverBankAccountServiceTests
                 {
                     Enabled = false
                 }),
-                NullLogger<PaystackClient>.Instance,
-                new TestHostEnvironment());
+                NullLogger<PaystackClient>.Instance);
 
             await Assert.ThrowsAsync<ServiceUnavailableException>(
                 async () =>
@@ -309,8 +308,7 @@ public class DriverBankAccountServiceTests
             var client = new PaystackClient(
                 httpClient,
                 Options.Create(EnabledSettings()),
-                NullLogger<PaystackClient>.Instance,
-                new TestHostEnvironment());
+                NullLogger<PaystackClient>.Instance);
 
             await Assert.ThrowsAsync<ServiceUnavailableException>(
                 async () =>

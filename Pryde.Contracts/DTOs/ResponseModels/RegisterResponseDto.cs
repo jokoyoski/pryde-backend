@@ -2,7 +2,7 @@ using Pryde.Domain.Enums;
 
 namespace Pryde.Contracts.ResponseModels;
 
-public class RegisterResponseDto
+public class RegisterResponseDto : WorkflowResponseDto
 {
     public Guid UserId { get; set; }
     public string Email { get; set; } = string.Empty;

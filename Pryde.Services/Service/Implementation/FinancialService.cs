@@ -30,7 +30,9 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
                     throw new ConflictException("The idempotency key has already been used for another booking.");
                 var priorEscrow = await unitOfWork.Escrows.GetByBookingIdAsync(bookingId, transactionToken)
                     ?? throw new ConflictException("The prior payment record is incomplete.");
-                return MapEscrow(priorEscrow);
+                var priorResponse = MapEscrow(priorEscrow);
+                priorResponse.TripId = priorEscrow.Booking.TripId;
+                return priorResponse;
             }
 
             var booking = await unitOfWork.TripBookings.GetByIdWithTripAsync(bookingId, transactionToken)
@@ -87,7 +89,9 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
             booking.PaidAt = now;
             unitOfWork.TripBookings.Update(booking);
             await unitOfWork.SaveChangesAsync(transactionToken);
-            return MapEscrow(escrow);
+            var response = MapEscrow(escrow);
+            response.TripId = booking.TripId;
+            return response;
         }, cancellationToken);
     }
 
@@ -131,8 +135,22 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
             if (trip.Status == TripStatus.Completed) return true;
             if (trip.Status == TripStatus.Cancelled)
                 throw new ConflictException("A cancelled trip cannot be completed.");
-            if (trip.DepartureTime > DateTime.UtcNow)
-                throw new ConflictException("A trip cannot be completed before its departure time.");
+            if (trip.Status != TripStatus.DropoffConfirmationPending)
+            {
+                throw new ConflictException("The trip is not waiting for drop-off confirmations.");
+            }
+
+            var activeBookings = trip.Bookings
+                .Where(booking =>
+                    booking.Status == BookingStatus.Approved &&
+                    booking.PaidAt.HasValue)
+                .ToList();
+            if (activeBookings.Count == 0 ||
+                activeBookings.Any(booking =>
+                    !booking.DropoffConfirmed))
+            {
+                throw new ConflictException("Every active passenger must confirm drop-off before completion.");
+            }
 
             var escrows = await unitOfWork.Escrows.GetHeldByTripIdAsync(tripId, transactionToken);
             if (escrows.Count > 0)

@@ -27,6 +27,10 @@ public class EmailVerificationServiceTests
         var code = Assert.Single(context.UnitOfWork.VerificationCodeRepository.Items);
         var sent = Assert.Single(context.Email.Messages);
         Assert.True(response.EmailVerificationRequired);
+        Assert.Equal(
+            WorkflowNextAction.VerifyEmail,
+            response.NextAction);
+        Assert.Equal(WorkflowActor.User, response.RequiredActor);
         Assert.Equal(VerificationCodePurpose.EmailAccountVerification, code.Purpose);
         Assert.Equal(VerificationChannel.Email, code.Channel);
         Assert.DoesNotContain(sent.Code, code.CodeHash);
@@ -56,6 +60,9 @@ public class EmailVerificationServiceTests
         Assert.True(result.IsEmailVerified);
         Assert.False(result.IsPhoneNumberVerified);
         Assert.False(result.EmailVerificationRequired);
+        Assert.Equal(context.User.Status, result.WorkflowStatus);
+        Assert.Equal(WorkflowNextAction.Login, result.NextAction);
+        Assert.Equal(WorkflowActor.User, result.RequiredActor);
         Assert.NotNull(context.UnitOfWork.VerificationCodeRepository.Items.Single().ConsumedAt);
     }
 
@@ -80,6 +87,9 @@ public class EmailVerificationServiceTests
         var response = await context.Service.LoginAsync(Login(context.User.Email));
 
         Assert.Equal("access-token", response.AccessToken);
+        Assert.Null(response.WorkflowStatus);
+        Assert.Null(response.NextAction);
+        Assert.Null(response.RequiredActor);
         Assert.NotEmpty(response.RefreshToken);
         Assert.Equal(1, context.Jwt.AccessTokensGenerated);
         Assert.Single(((TestRefreshTokenRepository)context.UnitOfWork.RefreshTokens).Items);
@@ -100,6 +110,13 @@ public class EmailVerificationServiceTests
         Assert.Equal(RoleType.Driver.ToString(), assignment.Role.Name);
         Assert.Contains(RoleType.Driver.ToString(), context.Jwt.LastRoles);
         Assert.Equal("access-token", response.AccessToken);
+        Assert.Equal(
+            OnboardingStage.IdentityVerification,
+            response.WorkflowStatus);
+        Assert.Equal(
+            WorkflowNextAction.CompleteKyc,
+            response.NextAction);
+        Assert.Equal(WorkflowActor.User, response.RequiredActor);
         Assert.Equal(2, context.Jwt.AccessTokensGenerated);
         Assert.Single(((TestKycVerificationRepository)
             context.UnitOfWork.KycVerifications).Items);

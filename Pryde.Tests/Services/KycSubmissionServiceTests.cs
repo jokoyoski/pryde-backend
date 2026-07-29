@@ -25,6 +25,10 @@ public class KycSubmissionServiceTests
         var result = await Service(unitOfWork).SubmitAsync(kyc.UserId);
 
         Assert.Equal(KycStatus.Submitted, result.Status);
+        Assert.Equal(
+            WorkflowNextAction.AwaitAdminApproval,
+            result.NextAction);
+        Assert.Equal(WorkflowActor.Admin, result.RequiredActor);
     }
 
     [Fact]
@@ -138,6 +142,10 @@ public class KycSubmissionServiceTests
 
         Assert.Equal(KycStatus.Approved, result.Status);
         Assert.NotNull(result.VerifiedAt);
+        Assert.Equal(
+            WorkflowNextAction.CompleteVehicleOnboarding,
+            result.NextAction);
+        Assert.Equal(WorkflowActor.Driver, result.RequiredActor);
     }
 
     [Fact]

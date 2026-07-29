@@ -35,7 +35,6 @@ services:
       Dojah__ShareableLink: ${Dojah__ShareableLink}
 
       Paystack__Enabled: ${Paystack__Enabled:-false}
-      Paystack__UseDevelopmentTransfer: "false"
       Paystack__BaseUrl: ${Paystack__BaseUrl:-https://api.paystack.co}
       Paystack__SecretKey: ${Paystack__SecretKey}
 
@@ -86,7 +85,6 @@ services:
       Dojah__ShareableLink: ${Dojah__ShareableLink}
 
       Paystack__Enabled: ${Paystack__Enabled:-false}
-      Paystack__UseDevelopmentTransfer: "false"
       Paystack__BaseUrl: ${Paystack__BaseUrl:-https://api.paystack.co}
       Paystack__SecretKey: ${Paystack__SecretKey}
 

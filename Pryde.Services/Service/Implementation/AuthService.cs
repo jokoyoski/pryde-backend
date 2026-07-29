@@ -1,8 +1,6 @@
 ﻿using Mapster;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Security.Cryptography;
-using System.Text;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
@@ -10,6 +8,7 @@ using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Notifications.Interface;
+using Pryde.Services.Security.Implementation;
 using Pryde.Services.Security.Interface;
 using Pryde.Services.Service.Interface;
 using Pryde.Services.Settings;
@@ -100,6 +99,8 @@ public class AuthService(
 
         var response = user.Adapt<RegisterResponseDto>();
         response.EmailVerificationRequired = !user.IsEmailVerified;
+        response.NextAction = WorkflowNextAction.VerifyEmail;
+        response.RequiredActor = WorkflowActor.User;
         return response;
     }
 
@@ -202,6 +203,7 @@ public class AuthService(
         await unitOfWork.SaveChangesAsync(cancellationToken);
         var response = await IssueTokensAsync(user, roleNames, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
+        ApplyOnboardingWorkflow(response);
         return response;
     }
 
@@ -449,10 +451,20 @@ public class AuthService(
             var user = await unitOfWork.Users.GetByEmailAsync(
                 normalizedEmail, transactionToken);
             if (user is null)
-                return (Succeeded: false, UserId: Guid.Empty);
+            {
+                return (
+                    Succeeded: false,
+                    UserId: Guid.Empty,
+                    Status: UserStatus.Pending);
+            }
 
             if (user.IsEmailVerified)
-                return (Succeeded: true, UserId: user.Id);
+            {
+                return (
+                    Succeeded: true,
+                    UserId: user.Id,
+                    Status: user.Status);
+            }
 
             var verificationCode = await unitOfWork.VerificationCodes.GetLatestActiveAsync(
                 user.Id,
@@ -466,10 +478,17 @@ public class AuthService(
                 verificationCode.ExpiresAt <= now ||
                 verificationCode.AttemptCount >= MaximumVerificationAttempts)
             {
-                return (Succeeded: false, UserId: user.Id);
+                return (
+                    Succeeded: false,
+                    UserId: user.Id,
+                    Status: user.Status);
             }
 
-            if (!VerificationCodeMatches(user.Id, request.Code, verificationCode.CodeHash))
+            if (!VerificationCodeSecurity.Matches(
+                    user.Id,
+                    VerificationCodePurpose.EmailAccountVerification,
+                    request.Code,
+                    verificationCode.CodeHash))
             {
                 verificationCode.AttemptCount++;
                 if (verificationCode.AttemptCount >= MaximumVerificationAttempts)
@@ -477,7 +496,10 @@ public class AuthService(
 
                 unitOfWork.VerificationCodes.Update(verificationCode);
                 await unitOfWork.SaveChangesAsync(transactionToken);
-                return (Succeeded: false, UserId: user.Id);
+                return (
+                    Succeeded: false,
+                    UserId: user.Id,
+                    Status: user.Status);
             }
 
             verificationCode.ConsumedAt = now;
@@ -485,13 +507,22 @@ public class AuthService(
             unitOfWork.VerificationCodes.Update(verificationCode);
             unitOfWork.Users.Update(user);
             await unitOfWork.SaveChangesAsync(transactionToken);
-            return (Succeeded: true, UserId: user.Id);
+            return (
+                Succeeded: true,
+                UserId: user.Id,
+                Status: user.Status);
         }, cancellationToken);
 
         if (!result.Succeeded)
             throw new ValidationException("Invalid or expired verification code.");
 
-        return await GetVerificationStatusAsync(result.UserId, cancellationToken);
+        var response = await GetVerificationStatusAsync(
+            result.UserId,
+            cancellationToken);
+        response.WorkflowStatus = result.Status;
+        response.NextAction = WorkflowNextAction.Login;
+        response.RequiredActor = WorkflowActor.User;
+        return response;
     }
 
     public async Task<VerificationStatusResponseDto> GetVerificationStatusAsync(
@@ -540,13 +571,16 @@ public class AuthService(
             now,
             cancellationToken);
 
-        var rawCode = RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+        var rawCode = VerificationCodeSecurity.GenerateSixDigitCode();
         var verificationCode = new VerificationCode
         {
             UserId = userId,
             Purpose = VerificationCodePurpose.EmailAccountVerification,
             Channel = VerificationChannel.Email,
-            CodeHash = HashVerificationCode(userId, rawCode),
+            CodeHash = VerificationCodeSecurity.Hash(
+                userId,
+                VerificationCodePurpose.EmailAccountVerification,
+                rawCode),
             ExpiresAt = now.AddMinutes(_emailSettings.OtpExpiryMinutes),
             LastSentAt = now,
             CreatedAt = now
@@ -580,38 +614,72 @@ public class AuthService(
     {
         Message = GenericResendMessage,
         ResendAvailableAt = resendAvailableAt,
-        ResendCooldownSeconds = RemainingSeconds(resendAvailableAt, now)
+        ResendCooldownSeconds = RemainingSeconds(resendAvailableAt, now),
+        Status = WorkflowOperationStatus.Accepted,
+        NextAction = WorkflowNextAction.VerifyEmail,
+        RequiredActor = WorkflowActor.User
     };
+
+    private static void ApplyOnboardingWorkflow(
+        LoginResponseDto response)
+    {
+        response.WorkflowStatus = response.Onboarding.CurrentStage;
+
+        switch (response.Onboarding.CurrentStage)
+        {
+            case OnboardingStage.RoleSelection:
+            {
+                response.NextAction = WorkflowNextAction.SelectRole;
+                response.RequiredActor = WorkflowActor.User;
+                break;
+            }
+            case OnboardingStage.IdentityVerification:
+            {
+                response.NextAction = WorkflowNextAction.CompleteKyc;
+                response.RequiredActor = WorkflowActor.User;
+                break;
+            }
+            case OnboardingStage.DriverDocuments:
+            case OnboardingStage.VehicleInformation:
+            {
+                response.NextAction =
+                    WorkflowNextAction.CompleteVehicleOnboarding;
+                response.RequiredActor = WorkflowActor.Driver;
+                break;
+            }
+            case OnboardingStage.SubmittedForReview:
+            {
+                response.NextAction =
+                    WorkflowNextAction.AwaitAdminApproval;
+                response.RequiredActor = WorkflowActor.Admin;
+                break;
+            }
+            case OnboardingStage.Completed:
+            {
+                if (response.Onboarding.DriverAccessGranted)
+                {
+                    response.NextAction = WorkflowNextAction.CreateTrip;
+                    response.RequiredActor = WorkflowActor.Driver;
+                }
+                else
+                {
+                    response.NextAction = WorkflowNextAction.None;
+                    response.RequiredActor = WorkflowActor.None;
+                }
+
+                break;
+            }
+            default:
+            {
+                response.NextAction = WorkflowNextAction.None;
+                response.RequiredActor = WorkflowActor.None;
+                break;
+            }
+        }
+    }
 
     private static int RemainingSeconds(DateTime availableAt, DateTime now) =>
         Math.Max(0, (int)Math.Ceiling((availableAt - now).TotalSeconds));
-
-    private static string HashVerificationCode(Guid userId, string code)
-    {
-        var value = $"{userId:N}:{VerificationCodePurpose.EmailAccountVerification}:{code}";
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
-    }
-
-    private static bool VerificationCodeMatches(
-        Guid userId,
-        string suppliedCode,
-        string storedHash)
-    {
-        var suppliedHash = Convert.FromHexString(
-            HashVerificationCode(userId, suppliedCode));
-        byte[] storedHashBytes;
-        try
-        {
-            storedHashBytes = Convert.FromHexString(storedHash);
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
-
-        return CryptographicOperations.FixedTimeEquals(
-            suppliedHash, storedHashBytes);
-    }
 
     private static void ValidateEmailVerificationRequest(
         EmailVerificationVerifyRequestDto request)
