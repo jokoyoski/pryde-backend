@@ -139,8 +139,6 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
             {
                 throw new ConflictException("The trip is not waiting for drop-off confirmations.");
             }
-            if (trip.DepartureTime > DateTime.UtcNow)
-                throw new ConflictException("A trip cannot be completed before its departure time.");
 
             var activeBookings = trip.Bookings
                 .Where(booking =>
