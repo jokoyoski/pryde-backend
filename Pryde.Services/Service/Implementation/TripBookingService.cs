@@ -165,11 +165,17 @@ public class TripBookingService(
         if (booking.PassengerId != passengerId)
             throw new ForbiddenException("Only the booking owner can cancel this booking.");
         if (booking.Status is not (BookingStatus.Pending or BookingStatus.Approved))
+        {
             throw new ConflictException("This booking can no longer be cancelled.");
-        if (booking.Status == BookingStatus.Approved
-            && (booking.Trip.DepartureTime <= DateTime.UtcNow
-                || booking.Trip.Status is TripStatus.InProgress or TripStatus.Completed))
-            throw new ConflictException("An approved booking cannot be cancelled after the trip has started.");
+        }
+
+        if (booking.Trip.Status is not (
+                TripStatus.Scheduled or
+                TripStatus.BookingClosed))
+        {
+            throw new ConflictException(
+                "The booking cannot be cancelled after the trip has started.");
+        }
 
         if (booking.Status == BookingStatus.Approved)
         {
@@ -182,9 +188,14 @@ public class TripBookingService(
         booking.Status = BookingStatus.Cancelled;
         unitOfWork.TripBookings.Update(booking);
         if (booking.PaidAt.HasValue)
+        {
             await financialService.RefundBookingAsync(booking.Id, cancellationToken);
+        }
         else
+        {
             await SaveWithConcurrencyHandlingAsync(cancellationToken);
+        }
+
         return MapResponse(booking, booking.Trip, GetPassengerName(booking));
     }
 

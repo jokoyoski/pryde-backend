@@ -33,6 +33,10 @@ namespace Pryde.Domain.Entities
         public string OriginAddress { get; set; } = string.Empty;
 
         public TripStatus Status { get; set; } = TripStatus.Scheduled;
+        public DateTime? DriverEndedAt { get; set; }
+        public DateTime? ConfirmationDeadline { get; set; }
+        public DateTime? AutoCompletedAt { get; set; }
+        public bool WasAutoCompleted { get; set; }
 
         public Guid? RecurringTripId { get; set; }
         public RecurringTrip? RecurringTrip { get; set; }

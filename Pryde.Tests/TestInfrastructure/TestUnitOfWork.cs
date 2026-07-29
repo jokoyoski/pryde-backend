@@ -510,6 +510,25 @@ internal sealed class TestTripRepository : ITripRepository
     public Task<IReadOnlyList<Trip>> GetActiveAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Trip>>(Items.Where(t => t.Status == TripStatus.Scheduled && t.AvailableSeats > 0).ToList());
 
+    public Task<IReadOnlyList<Guid>>
+        GetExpiredConfirmationTripIdsAsync(
+            DateTime utcNow,
+            CancellationToken cancellationToken = default)
+    {
+        var tripIds = Items
+            .Where(trip =>
+                trip.Status ==
+                    TripStatus.DropoffConfirmationPending &&
+                trip.DriverEndedAt.HasValue &&
+                trip.ConfirmationDeadline.HasValue &&
+                trip.ConfirmationDeadline.Value <= utcNow)
+            .OrderBy(trip => trip.ConfirmationDeadline)
+            .Select(trip => trip.Id)
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<Guid>>(tripIds);
+    }
+
     public Task<Trip> CreateAsync(Trip trip, CancellationToken cancellationToken = default)
     {
         trip.Driver = DefaultDriver ?? new User { Id = trip.DriverId };

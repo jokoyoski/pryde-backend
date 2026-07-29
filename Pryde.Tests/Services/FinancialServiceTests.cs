@@ -73,20 +73,42 @@ public class FinancialServiceTests
     }
 
     [Fact]
-    public async Task RefundRestoresPassengerWalletAndCannotPostTwice()
+    public async Task RefundRestoresPassengerWalletAndRejectsSecondRefund()
     {
         var context = CreateContext();
         var service = new FinancialService(context.UnitOfWork);
         await service.HoldBookingPaymentAsync(context.Passenger.Id, context.Booking.Id, "refund-hold");
 
         await service.RefundBookingAsync(context.Booking.Id);
-        await service.RefundBookingAsync(context.Booking.Id);
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            service.RefundBookingAsync(context.Booking.Id));
 
         Assert.Equal(3000m, context.PassengerWallet.Balance);
         Assert.Equal(0m, context.PassengerWallet.EscrowBalance);
         Assert.Equal(EscrowStatus.Refunded, context.UnitOfWork.EscrowRepository.Items.Single().Status);
         Assert.Equal(2, context.UnitOfWork.LedgerRepository.Transactions.Count);
         Assert.All(context.UnitOfWork.LedgerRepository.Transactions, AssertBalanced);
+    }
+
+    [Fact]
+    public async Task ReleasedEscrowCannotBeRefunded()
+    {
+        var context = CreateContext();
+        var service = new FinancialService(context.UnitOfWork);
+        await service.HoldBookingPaymentAsync(
+            context.Passenger.Id,
+            context.Booking.Id,
+            "released-refund");
+        var escrow = Assert.Single(
+            context.UnitOfWork.EscrowRepository.Items);
+        escrow.Status = EscrowStatus.Released;
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            service.RefundBookingAsync(context.Booking.Id));
+
+        Assert.Equal(500m, context.PassengerWallet.Balance);
+        Assert.Equal(2500m, context.PassengerWallet.EscrowBalance);
+        Assert.Single(context.UnitOfWork.LedgerRepository.Transactions);
     }
 
     [Fact]

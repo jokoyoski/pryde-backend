@@ -149,6 +149,107 @@ public class TripBookingServiceTests
     }
 
     [Fact]
+    public async Task PaidCancellationBeforeTripStartRefundsPassenger()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext(4);
+        var trip = AddOpenTrip(
+            unitOfWork,
+            driverId,
+            vehicle,
+            1);
+        var passengerId = Guid.NewGuid();
+        var booking = AddBooking(
+            unitOfWork,
+            trip,
+            passengerId,
+            BookingStatus.Approved);
+        booking.PaidAt = DateTime.UtcNow.AddMinutes(-10);
+        booking.SeatPrice = 100m;
+        booking.ServiceCharge = 10m;
+        booking.TotalAmount = 110m;
+        var passengerWallet = new Pryde.Domain.Entities.Wallet
+        {
+            UserId = passengerId,
+            Balance = 50m,
+            EscrowBalance = 110m
+        };
+        unitOfWork.WalletRepository.Items.Add(passengerWallet);
+        var escrow = new Pryde.Domain.Entities.Escrow
+        {
+            BookingId = booking.Id,
+            Booking = booking,
+            PassengerId = passengerId,
+            DriverId = driverId,
+            Amount = 110m,
+            DriverAmount = 100m,
+            PlatformAmount = 10m,
+            Status = EscrowStatus.Held,
+            HeldAt = DateTime.UtcNow.AddMinutes(-10)
+        };
+        booking.Escrow = escrow;
+        unitOfWork.EscrowRepository.Items.Add(escrow);
+        var service = new TripBookingService(
+            unitOfWork,
+            new FinancialService(unitOfWork));
+
+        var result = await service.CancelAsync(
+            booking.Id,
+            passengerId);
+
+        Assert.Equal(BookingStatus.Cancelled, result.Status);
+        Assert.Equal(EscrowStatus.Refunded, escrow.Status);
+        Assert.NotNull(escrow.RefundedAt);
+        Assert.Equal(160m, passengerWallet.Balance);
+        Assert.Equal(0m, passengerWallet.EscrowBalance);
+        Assert.Equal(2, trip.AvailableSeats);
+        Assert.Single(
+            unitOfWork.WalletTransactionRepository.Items);
+        var ledgerTransaction = Assert.Single(
+            unitOfWork.LedgerRepository.Transactions);
+        Assert.Equal(
+            ledgerTransaction.Entries
+                .Where(entry =>
+                    entry.EntryType ==
+                    LedgerEntryType.Debit)
+                .Sum(entry => entry.Amount),
+            ledgerTransaction.Entries
+                .Where(entry =>
+                    entry.EntryType ==
+                    LedgerEntryType.Credit)
+                .Sum(entry => entry.Amount));
+    }
+
+    [Theory]
+    [InlineData(TripStatus.PickupConfirmationPending)]
+    [InlineData(TripStatus.InProgress)]
+    [InlineData(TripStatus.DropoffConfirmationPending)]
+    public async Task CancellationAfterTripStartsIsRejected(
+        TripStatus tripStatus)
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        trip.Status = tripStatus;
+        var passengerId = Guid.NewGuid();
+        var booking = AddBooking(
+            unitOfWork,
+            trip,
+            passengerId,
+            BookingStatus.Approved);
+        booking.PaidAt = DateTime.UtcNow.AddMinutes(-10);
+
+        var exception = await Assert.ThrowsAsync<ConflictException>(
+            () => new TripBookingService(unitOfWork)
+                .CancelAsync(booking.Id, passengerId));
+
+        Assert.Equal(
+            "The booking cannot be cancelled after the trip has started.",
+            exception.Message);
+        Assert.Equal(BookingStatus.Approved, booking.Status);
+    }
+
+    [Fact]
     public async Task PassengerCannotCancelAnotherPassengersBooking()
     {
         var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();

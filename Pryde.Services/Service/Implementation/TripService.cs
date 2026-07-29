@@ -334,8 +334,12 @@ public class TripService(
                         "Only an in-progress trip can be ended.");
                 }
 
+                var driverEndedAt = DateTime.UtcNow;
                 trip.Status =
                     TripStatus.DropoffConfirmationPending;
+                trip.DriverEndedAt = driverEndedAt;
+                trip.ConfirmationDeadline =
+                    driverEndedAt.AddHours(24);
                 unitOfWork.Trips.Update(trip);
                 await unitOfWork.SaveChangesAsync(transactionToken);
                 return true;
@@ -374,6 +378,12 @@ public class TripService(
                 {
                     throw new ForbiddenException(
                         "Only passengers with an active paid booking can confirm drop-off.");
+                }
+
+                if (booking.Escrow?.Status != EscrowStatus.Held)
+                {
+                    throw new ConflictException(
+                        "Drop-off can only be confirmed while the booking escrow is held.");
                 }
 
                 if (booking.DropoffConfirmed)

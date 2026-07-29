@@ -11,6 +11,9 @@ public interface IFinancialService
     Task RefundBookingAsync(Guid bookingId, CancellationToken cancellationToken = default);
     Task RefundTripAsync(Guid tripId, CancellationToken cancellationToken = default);
     Task CompleteTripAsync(Guid tripId, Guid driverId, CancellationToken cancellationToken = default);
+    Task AutoCompleteTripAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default);
     Task<FinancialSummaryResponseDto> GetSummaryAsync(CancellationToken cancellationToken = default);
     Task<PagedResponseDto<EscrowResponseDto>> GetEscrowsAsync(AdminEscrowsRequestDto request, CancellationToken cancellationToken = default);
     Task<EscrowResponseDto> GetEscrowAsync(Guid escrowId, CancellationToken cancellationToken = default);

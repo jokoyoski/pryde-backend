@@ -16,6 +16,9 @@ public interface ITripRepository
         int requiredSeats,
         CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Trip>> GetActiveAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Guid>> GetExpiredConfirmationTripIdsAsync(
+        DateTime utcNow,
+        CancellationToken cancellationToken = default);
     Task<Trip> CreateAsync(Trip trip, CancellationToken cancellationToken = default);
     void Update(Trip trip);
     void Delete(Trip trip);

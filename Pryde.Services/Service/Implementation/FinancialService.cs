@@ -102,9 +102,10 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
             var escrow = await unitOfWork.Escrows.GetByBookingIdAsync(bookingId, transactionToken);
             if (escrow is null)
             {
-                await unitOfWork.SaveChangesAsync(transactionToken);
-                return true;
+                throw new ConflictException(
+                    "The paid booking escrow was not found.");
             }
+
             await RefundEscrowAsync(escrow, transactionToken);
             await unitOfWork.SaveChangesAsync(transactionToken);
             return true;
@@ -126,18 +127,70 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
     public async Task CompleteTripAsync(
         Guid tripId, Guid driverId, CancellationToken cancellationToken = default)
     {
+        await CompleteTripInternalAsync(
+            tripId,
+            driverId,
+            false,
+            cancellationToken);
+    }
+
+    public async Task AutoCompleteTripAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default)
+    {
+        await CompleteTripInternalAsync(
+            tripId,
+            null,
+            true,
+            cancellationToken);
+    }
+
+    private async Task CompleteTripInternalAsync(
+        Guid tripId,
+        Guid? driverId,
+        bool isAutomaticCompletion,
+        CancellationToken cancellationToken)
+    {
         await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
         {
             var trip = await unitOfWork.Trips.GetByIdForUpdateAsync(tripId, transactionToken)
                 ?? throw new NotFoundException(nameof(Trip), tripId);
-            if (trip.DriverId != driverId)
-                throw new ForbiddenException("Only the trip owner can complete this trip.");
-            if (trip.Status == TripStatus.Completed) return true;
+
+            if (trip.Status == TripStatus.Completed)
+            {
+                return true;
+            }
+
             if (trip.Status == TripStatus.Cancelled)
+            {
                 throw new ConflictException("A cancelled trip cannot be completed.");
+            }
+
             if (trip.Status != TripStatus.DropoffConfirmationPending)
             {
                 throw new ConflictException("The trip is not waiting for drop-off confirmations.");
+            }
+
+            var completionTime = DateTime.UtcNow;
+
+            if (isAutomaticCompletion)
+            {
+                if (!trip.DriverEndedAt.HasValue ||
+                    !trip.ConfirmationDeadline.HasValue ||
+                    trip.ConfirmationDeadline.Value > completionTime)
+                {
+                    throw new ConflictException(
+                        "The trip confirmation deadline has not expired.");
+                }
+            }
+            else
+            {
+                if (!driverId.HasValue ||
+                    trip.DriverId != driverId.Value)
+                {
+                    throw new ForbiddenException(
+                        "Only the trip owner can complete this trip.");
+                }
             }
 
             var activeBookings = trip.Bookings
@@ -145,7 +198,14 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
                     booking.Status == BookingStatus.Approved &&
                     booking.PaidAt.HasValue)
                 .ToList();
-            if (activeBookings.Count == 0 ||
+
+            if (activeBookings.Count == 0)
+            {
+                throw new ConflictException(
+                    "At least one active paid booking is required to complete the trip.");
+            }
+
+            if (!isAutomaticCompletion &&
                 activeBookings.Any(booking =>
                     !booking.DropoffConfirmed))
             {
@@ -153,53 +213,109 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
             }
 
             var escrows = await unitOfWork.Escrows.GetHeldByTripIdAsync(tripId, transactionToken);
-            if (escrows.Count > 0)
+
+            if (escrows.Count != activeBookings.Count)
             {
-                var driverWallet = await unitOfWork.Wallets.GetByUserIdAsync(driverId, transactionToken)
-                    ?? throw new NotFoundException(nameof(Wallet), driverId);
-                var driverAccount = await EnsureWalletAccountAsync(driverWallet, transactionToken);
-                var escrowAccount = await EnsureSystemAccountAsync(
-                    EscrowAccountCode, "Booking Escrow", LedgerAccountType.Escrow, transactionToken);
-                var platformAccount = await EnsureSystemAccountAsync(
-                    PlatformRevenueAccountCode, "Platform Revenue", LedgerAccountType.PlatformRevenue, transactionToken);
+                throw new ConflictException(
+                    "Every active paid booking must have held escrow.");
+            }
 
-                foreach (var escrow in escrows)
+            var driverWallet = await unitOfWork.Wallets.GetByUserIdAsync(
+                trip.DriverId,
+                transactionToken)
+                ?? throw new NotFoundException(
+                    nameof(Wallet),
+                    trip.DriverId);
+            var driverAccount = await EnsureWalletAccountAsync(
+                driverWallet,
+                transactionToken);
+            var escrowAccount = await EnsureSystemAccountAsync(
+                EscrowAccountCode,
+                "Booking Escrow",
+                LedgerAccountType.Escrow,
+                transactionToken);
+            var platformAccount = await EnsureSystemAccountAsync(
+                PlatformRevenueAccountCode,
+                "Platform Revenue",
+                LedgerAccountType.PlatformRevenue,
+                transactionToken);
+
+            foreach (var escrow in escrows)
+            {
+                var passengerWallet = await unitOfWork.Wallets.GetByUserIdAsync(
+                    escrow.PassengerId,
+                    transactionToken)
+                    ?? throw new NotFoundException(
+                        nameof(Wallet),
+                        escrow.PassengerId);
+
+                if (passengerWallet.EscrowBalance < escrow.Amount)
                 {
-                    var passengerWallet = await unitOfWork.Wallets.GetByUserIdAsync(escrow.PassengerId, transactionToken)
-                        ?? throw new NotFoundException(nameof(Wallet), escrow.PassengerId);
-                    if (passengerWallet.EscrowBalance < escrow.Amount)
-                        throw new ConflictException("The passenger escrow balance is inconsistent.");
+                    throw new ConflictException(
+                        "The passenger escrow balance is inconsistent.");
+                }
 
-                    var now = DateTime.UtcNow;
-                    var ledgerTransaction = NewTransaction(
-                        LedgerTransactionType.EscrowRelease, escrow.Amount,
-                        escrow.BookingId, escrow.Id, $"release:{escrow.Id:N}", "RELEASE", now);
-                    await AddBalancedEntriesAsync(ledgerTransaction, [
-                        NewEntry(ledgerTransaction, escrowAccount, LedgerEntryType.Debit, escrow.Amount),
-                        NewEntry(ledgerTransaction, driverAccount, LedgerEntryType.Credit, escrow.DriverAmount),
-                        NewEntry(ledgerTransaction, platformAccount, LedgerEntryType.Credit, escrow.PlatformAmount)
-                    ], transactionToken);
+                var ledgerTransaction = NewTransaction(
+                    LedgerTransactionType.EscrowRelease,
+                    escrow.Amount,
+                    escrow.BookingId,
+                    escrow.Id,
+                    $"release:{escrow.Id:N}",
+                    "RELEASE",
+                    completionTime);
+                await AddBalancedEntriesAsync(
+                    ledgerTransaction,
+                    [
+                        NewEntry(
+                            ledgerTransaction,
+                            escrowAccount,
+                            LedgerEntryType.Debit,
+                            escrow.Amount),
+                        NewEntry(
+                            ledgerTransaction,
+                            driverAccount,
+                            LedgerEntryType.Credit,
+                            escrow.DriverAmount),
+                        NewEntry(
+                            ledgerTransaction,
+                            platformAccount,
+                            LedgerEntryType.Credit,
+                            escrow.PlatformAmount)
+                    ],
+                    transactionToken);
 
-                    passengerWallet.EscrowBalance -= escrow.Amount;
-                    driverWallet.Balance += escrow.DriverAmount;
-                    unitOfWork.Wallets.Update(passengerWallet);
-                    await unitOfWork.WalletTransactions.CreateAsync(new WalletTransaction
+                passengerWallet.EscrowBalance -= escrow.Amount;
+                driverWallet.Balance += escrow.DriverAmount;
+                unitOfWork.Wallets.Update(passengerWallet);
+                await unitOfWork.WalletTransactions.CreateAsync(
+                    new WalletTransaction
                     {
                         WalletId = driverWallet.Id,
                         Amount = escrow.DriverAmount,
                         Type = WalletTransactionType.EscrowRelease,
                         Reference = ledgerTransaction.Reference
-                    }, transactionToken);
-                    escrow.Status = EscrowStatus.Released;
-                    escrow.ReleasedAt = now;
-                    unitOfWork.Escrows.Update(escrow);
-                    escrow.Booking.Status = BookingStatus.Completed;
-                    unitOfWork.TripBookings.Update(escrow.Booking);
-                }
-                unitOfWork.Wallets.Update(driverWallet);
+                    },
+                    transactionToken);
+                escrow.Status = EscrowStatus.Released;
+                escrow.ReleasedAt = completionTime;
+                unitOfWork.Escrows.Update(escrow);
             }
 
+            foreach (var booking in activeBookings)
+            {
+                booking.Status = BookingStatus.Completed;
+                unitOfWork.TripBookings.Update(booking);
+            }
+
+            unitOfWork.Wallets.Update(driverWallet);
             trip.Status = TripStatus.Completed;
+
+            if (isAutomaticCompletion)
+            {
+                trip.WasAutoCompleted = true;
+                trip.AutoCompletedAt = completionTime;
+            }
+
             unitOfWork.Trips.Update(trip);
             await unitOfWork.SaveChangesAsync(transactionToken);
             return true;
@@ -468,9 +584,16 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
 
     private async Task RefundEscrowAsync(Escrow escrow, CancellationToken cancellationToken)
     {
-        if (escrow.Status == EscrowStatus.Refunded) return;
+        if (escrow.Status == EscrowStatus.Refunded)
+        {
+            throw new ConflictException(
+                "A refunded escrow cannot be refunded again.");
+        }
+
         if (escrow.Status == EscrowStatus.Released)
+        {
             throw new ConflictException("A released escrow cannot be refunded.");
+        }
 
         var passengerWallet = await unitOfWork.Wallets.GetByUserIdAsync(escrow.PassengerId, cancellationToken)
             ?? throw new NotFoundException(nameof(Wallet), escrow.PassengerId);

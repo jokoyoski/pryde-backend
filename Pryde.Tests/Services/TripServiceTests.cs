@@ -249,6 +249,12 @@ public class TripServiceTests
         Assert.Equal(
             WorkflowActor.Passenger,
             response.RequiredActor);
+        Assert.NotNull(context.Trip.DriverEndedAt);
+        Assert.NotNull(context.Trip.ConfirmationDeadline);
+        Assert.Equal(
+            TimeSpan.FromHours(24),
+            context.Trip.ConfirmationDeadline.Value -
+            context.Trip.DriverEndedAt.Value);
         Assert.All(
             context.Escrows,
             escrow => Assert.Equal(
@@ -444,6 +450,7 @@ public class TripServiceTests
                 Status = EscrowStatus.Held,
                 HeldAt = DateTime.UtcNow.AddMinutes(-40)
             };
+            booking.Escrow = escrow;
             unitOfWork.EscrowRepository.Items.Add(escrow);
             escrows.Add(escrow);
         }

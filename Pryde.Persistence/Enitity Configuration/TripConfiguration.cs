@@ -23,6 +23,9 @@ public class TripConfiguration : IEntityTypeConfiguration<Trip>
         builder.Property(x => x.AvailableSeats)
             .IsConcurrencyToken();
 
+        builder.Property(x => x.Status)
+            .IsConcurrencyToken();
+
         builder.HasOne(x => x.Driver).WithMany()
             .HasForeignKey(x => x.DriverId)
             .OnDelete(DeleteBehavior.Restrict);
@@ -38,5 +41,10 @@ public class TripConfiguration : IEntityTypeConfiguration<Trip>
 
         builder.HasIndex(x => x.DepartureTime);
         builder.HasIndex(x => x.Status);
+        builder.HasIndex(x => new
+        {
+            x.Status,
+            x.ConfirmationDeadline
+        });
     }
 }
