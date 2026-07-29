@@ -5,6 +5,11 @@ namespace Pryde.Services.Service.Interface;
 
 public interface IDriverWithdrawalService
 {
+    Task<DriverWithdrawalOtpResponseDto> RequestOtpAsync(
+        Guid userId,
+        DriverWithdrawalOtpRequestDto request,
+        CancellationToken cancellationToken = default);
+
     Task<DriverWithdrawalResponseDto> CreateAsync(
         Guid userId,
         CreateDriverWithdrawalRequestDto request,

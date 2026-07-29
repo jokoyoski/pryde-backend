@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Pryde.Services.Providers.Paystack;
 using Pryde.Services.Settings;
-using Pryde.Tests.TestInfrastructure;
 
 namespace Pryde.Tests.Services;
 
@@ -160,69 +159,6 @@ public class PaystackClientTests
     }
 
     [Fact]
-    public async Task DevelopmentTransferBypassesHttpWhenEnabled()
-    {
-        var handler = new RecordingHttpMessageHandler(
-            HttpStatusCode.InternalServerError,
-            "{}");
-
-        using (var httpClient = new HttpClient(handler))
-        {
-            var client = CreateClient(
-                httpClient,
-                "Development",
-                true);
-
-            var transfer = await client.CreateTransferAsync(
-                "RCP_test_recipient",
-                500000,
-                "pryde-wd-development-reference",
-                "Pryde driver withdrawal");
-
-            Assert.Equal("success", transfer.Status);
-            Assert.Equal(
-                "pryde-wd-development-reference",
-                transfer.Reference);
-            Assert.StartsWith("DEV-", transfer.TransferCode);
-            Assert.Null(handler.RequestMethod);
-        }
-    }
-
-    [Theory]
-    [InlineData("Development", false)]
-    [InlineData("Production", true)]
-    public async Task TransferUsesPaystackUnlessBothBypassConditionsMatch(
-        string environmentName,
-        bool useDevelopmentTransfer)
-    {
-        const string responseJson =
-            "{\"status\":true,\"message\":\"Transfer queued\"," +
-            "\"data\":{\"reference\":\"pryde-wd-real-reference\"," +
-            "\"status\":\"success\",\"transfer_code\":\"TRF_real\"}}";
-        var handler = new RecordingHttpMessageHandler(
-            HttpStatusCode.OK,
-            responseJson);
-
-        using (var httpClient = new HttpClient(handler))
-        {
-            var client = CreateClient(
-                httpClient,
-                environmentName,
-                useDevelopmentTransfer);
-
-            var transfer = await client.CreateTransferAsync(
-                "RCP_test_recipient",
-                500000,
-                "pryde-wd-real-reference",
-                "Pryde driver withdrawal");
-
-            Assert.Equal("TRF_real", transfer.TransferCode);
-            Assert.Equal(HttpMethod.Post, handler.RequestMethod);
-            Assert.Equal("/transfer", handler.RequestPathAndQuery);
-        }
-    }
-
-    [Fact]
     public void PaystackSettingsValidateOnlyWhenEnabled()
     {
         var validator = new PaystackSettingsValidator();
@@ -251,9 +187,7 @@ public class PaystackClientTests
     }
 
     private static PaystackClient CreateClient(
-        HttpClient httpClient,
-        string environmentName = "Production",
-        bool useDevelopmentTransfer = false)
+        HttpClient httpClient)
     {
         httpClient.BaseAddress = new Uri(
             "https://api.paystack.co/");
@@ -263,15 +197,10 @@ public class PaystackClientTests
             Options.Create(new PaystackSettings
             {
                 Enabled = true,
-                UseDevelopmentTransfer = useDevelopmentTransfer,
                 BaseUrl = "https://api.paystack.co",
                 SecretKey = "test-secret"
             }),
-            NullLogger<PaystackClient>.Instance,
-            new TestHostEnvironment
-            {
-                EnvironmentName = environmentName
-            });
+            NullLogger<PaystackClient>.Instance);
     }
 
     private sealed class RecordingHttpMessageHandler

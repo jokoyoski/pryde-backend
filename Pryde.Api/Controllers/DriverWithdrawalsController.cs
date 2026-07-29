@@ -25,6 +25,19 @@ public class DriverWithdrawalsController : ControllerBase
         _driverWithdrawalService = driverWithdrawalService;
     }
 
+    [HttpPost("otp")]
+    public async Task<IActionResult> RequestOtp(
+        [FromBody] DriverWithdrawalOtpRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var response = await _driverWithdrawalService.RequestOtpAsync(
+            GetUserId(),
+            request,
+            cancellationToken);
+
+        return Ok(response);
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create(
         [FromBody] CreateDriverWithdrawalRequestDto request,

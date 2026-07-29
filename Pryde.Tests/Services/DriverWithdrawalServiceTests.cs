@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
 using Mapster;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pryde.Contracts.RequestModels;
@@ -5,6 +8,7 @@ using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Services.Mapping;
+using Pryde.Services.Notifications.Interface;
 using Pryde.Services.Providers.Paystack;
 using Pryde.Services.Service.Implementation;
 using Pryde.Tests.TestInfrastructure;
@@ -37,7 +41,7 @@ public class DriverWithdrawalServiceTests
         Assert.Equal(1500m, context.Wallet.Balance);
         Assert.Single(
             context.UnitOfWork.WalletTransactionRepository.Items);
-        Assert.Equal(1, context.UnitOfWork.SaveChangesCount);
+        Assert.Equal(2, context.UnitOfWork.SaveChangesCount);
     }
 
     [Theory]
@@ -151,7 +155,7 @@ public class DriverWithdrawalServiceTests
         Assert.Equal(2000m, context.Wallet.Balance);
         Assert.Empty(
             context.UnitOfWork.WalletTransactionRepository.Items);
-        Assert.Equal(0, context.UnitOfWork.SaveChangesCount);
+        Assert.Equal(1, context.UnitOfWork.SaveChangesCount);
     }
 
     [Fact]
@@ -307,7 +311,7 @@ public class DriverWithdrawalServiceTests
                 ValidRequest(context)));
 
         Assert.Equal(2000m, context.Wallet.Balance);
-        Assert.Equal(0, context.UnitOfWork.SaveChangesCount);
+        Assert.Equal(1, context.UnitOfWork.SaveChangesCount);
     }
 
     [Fact]
@@ -315,7 +319,6 @@ public class DriverWithdrawalServiceTests
     {
         var context = CreateContext();
         context.Wallet.Balance = 500m;
-        context.PaystackClient.WaitForTwoTransfers = true;
 
         var firstTask = context.Service.CreateAsync(
             context.DriverId,
@@ -348,13 +351,289 @@ public class DriverWithdrawalServiceTests
         Assert.Single(
             context.UnitOfWork.WalletTransactionRepository.Items);
         Assert.Single(exceptions);
-        Assert.IsType<ConflictException>(exceptions[0]);
+        Assert.IsType<ValidationException>(exceptions[0]);
+        Assert.Equal(1, context.PaystackClient.TransferCallCount);
     }
 
-    private static WithdrawalTestContext CreateContext()
+    [Fact]
+    public async Task SuccessfulOtpRequestCreatesHashedWithdrawalCode()
+    {
+        var context = CreateContext(seedWithdrawalOtp: false);
+
+        var response = await context.Service.RequestOtpAsync(
+            context.DriverId,
+            ValidOtpRequest(context));
+
+        var verificationCode = Assert.Single(
+            context.UnitOfWork.VerificationCodeRepository.Items);
+        var rawCode = Assert.Single(context.EmailService.Codes);
+        Assert.Equal(
+            VerificationCodePurpose.WalletWithdrawal,
+            verificationCode.Purpose);
+        Assert.Equal(
+            VerificationChannel.Email,
+            verificationCode.Channel);
+        Assert.DoesNotContain(rawCode, verificationCode.CodeHash);
+        Assert.Equal(64, verificationCode.CodeHash.Length);
+        Assert.InRange(
+            verificationCode.ExpiresAt,
+            DateTime.UtcNow.AddMinutes(9),
+            DateTime.UtcNow.AddMinutes(10));
+        Assert.Equal(
+            verificationCode.ExpiresAt,
+            response.ExpiresAt);
+        Assert.Equal(
+            verificationCode.LastSentAt.AddSeconds(60),
+            response.ResendAvailableAt);
+        Assert.DoesNotContain(
+            rawCode,
+            System.Text.Json.JsonSerializer.Serialize(response));
+    }
+
+    [Fact]
+    public async Task NonDriverCannotRequestWithdrawalOtp()
+    {
+        var context = CreateContext(seedWithdrawalOtp: false);
+        context.UnitOfWork.UserRoleRepository.Items.Clear();
+
+        await Assert.ThrowsAsync<ForbiddenException>(() =>
+            context.Service.RequestOtpAsync(
+                context.DriverId,
+                ValidOtpRequest(context)));
+
+        Assert.Empty(context.EmailService.Codes);
+    }
+
+    [Fact]
+    public async Task InsufficientBalanceRejectsOtpRequestBeforeGeneration()
+    {
+        var context = CreateContext(seedWithdrawalOtp: false);
+        context.Wallet.Balance = 100m;
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            context.Service.RequestOtpAsync(
+                context.DriverId,
+                ValidOtpRequest(context)));
+
+        Assert.Empty(context.EmailService.Codes);
+        Assert.Empty(
+            context.UnitOfWork.VerificationCodeRepository.Items);
+    }
+
+    [Fact]
+    public async Task InactiveBankAccountRejectsOtpRequest()
+    {
+        var context = CreateContext(seedWithdrawalOtp: false);
+        context.BankAccount.IsActive = false;
+
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            context.Service.RequestOtpAsync(
+                context.DriverId,
+                ValidOtpRequest(context)));
+
+        Assert.Empty(context.EmailService.Codes);
+    }
+
+    [Fact]
+    public async Task MissingRecipientCodeRejectsOtpRequest()
+    {
+        var context = CreateContext(seedWithdrawalOtp: false);
+        context.BankAccount.RecipientCode = string.Empty;
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            context.Service.RequestOtpAsync(
+                context.DriverId,
+                ValidOtpRequest(context)));
+
+        Assert.Empty(context.EmailService.Codes);
+    }
+
+    [Fact]
+    public async Task OtpRequestEnforcesResendCooldown()
+    {
+        var context = CreateContext(seedWithdrawalOtp: false);
+        await context.Service.RequestOtpAsync(
+            context.DriverId,
+            ValidOtpRequest(context));
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            context.Service.RequestOtpAsync(
+                context.DriverId,
+                ValidOtpRequest(context)));
+
+        Assert.Single(context.EmailService.Codes);
+        Assert.Single(
+            context.UnitOfWork.VerificationCodeRepository.Items);
+    }
+
+    [Fact]
+    public async Task OtpRequestEnforcesFivePerHourLimit()
+    {
+        var context = CreateContext(seedWithdrawalOtp: false);
+
+        for (var index = 0; index < 5; index++)
+        {
+            var code = WithdrawalCode(
+                context.DriverId,
+                $"{index + 1:000000}");
+            code.CreatedAt = DateTime.UtcNow.AddMinutes(-5 - index);
+            code.LastSentAt = code.CreatedAt;
+            code.ConsumedAt = code.CreatedAt.AddSeconds(1);
+            context.UnitOfWork.VerificationCodeRepository.Items.Add(code);
+        }
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            context.Service.RequestOtpAsync(
+                context.DriverId,
+                ValidOtpRequest(context)));
+
+        Assert.Empty(context.EmailService.Codes);
+        Assert.Equal(
+            5,
+            context.UnitOfWork.VerificationCodeRepository.Items.Count);
+    }
+
+    [Fact]
+    public async Task NewOtpInvalidatesPreviousUnusedOtp()
+    {
+        var context = CreateContext(seedWithdrawalOtp: false);
+        var previousCode = WithdrawalCode(
+            context.DriverId,
+            "111111");
+        previousCode.CreatedAt = DateTime.UtcNow.AddMinutes(-2);
+        previousCode.LastSentAt = DateTime.UtcNow.AddSeconds(-61);
+        context.UnitOfWork.VerificationCodeRepository.Items.Add(
+            previousCode);
+
+        await context.Service.RequestOtpAsync(
+            context.DriverId,
+            ValidOtpRequest(context));
+
+        Assert.NotNull(previousCode.ConsumedAt);
+        Assert.Equal(
+            2,
+            context.UnitOfWork.VerificationCodeRepository.Items.Count);
+    }
+
+    [Fact]
+    public async Task WrongOtpIncrementsAttemptAndDoesNotCallPaystack()
+    {
+        var context = CreateContext();
+        var request = ValidRequest(context);
+        request.Otp = "000000";
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            context.Service.CreateAsync(
+                context.DriverId,
+                request));
+
+        Assert.Equal(
+            1,
+            context.UnitOfWork.VerificationCodeRepository
+                .Items.Single().AttemptCount);
+        Assert.Equal(0, context.PaystackClient.TransferCallCount);
+    }
+
+    [Fact]
+    public async Task FiveWrongOtpAttemptsLockTheCode()
+    {
+        var context = CreateContext();
+        var request = ValidRequest(context);
+        request.Otp = "000000";
+
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            await Assert.ThrowsAsync<ValidationException>(() =>
+                context.Service.CreateAsync(
+                    context.DriverId,
+                    request));
+        }
+
+        var verificationCode = context.UnitOfWork
+            .VerificationCodeRepository.Items.Single();
+        Assert.Equal(5, verificationCode.AttemptCount);
+        Assert.NotNull(verificationCode.ConsumedAt);
+        Assert.Equal(0, context.PaystackClient.TransferCallCount);
+    }
+
+    [Fact]
+    public async Task ExpiredWithdrawalOtpIsRejected()
+    {
+        var context = CreateContext();
+        context.UnitOfWork.VerificationCodeRepository
+            .Items.Single().ExpiresAt = DateTime.UtcNow.AddSeconds(-1);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            context.Service.CreateAsync(
+                context.DriverId,
+                ValidRequest(context)));
+
+        Assert.Equal(0, context.PaystackClient.TransferCallCount);
+    }
+
+    [Fact]
+    public async Task ConsumedWithdrawalOtpIsRejected()
+    {
+        var context = CreateContext();
+        context.UnitOfWork.VerificationCodeRepository
+            .Items.Single().ConsumedAt = DateTime.UtcNow;
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            context.Service.CreateAsync(
+                context.DriverId,
+                ValidRequest(context)));
+
+        Assert.Equal(0, context.PaystackClient.TransferCallCount);
+    }
+
+    [Fact]
+    public async Task EmailVerificationOtpCannotAuthorizeWithdrawal()
+    {
+        var context = CreateContext();
+        context.UnitOfWork.VerificationCodeRepository
+            .Items.Single().Purpose =
+                VerificationCodePurpose.EmailAccountVerification;
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            context.Service.CreateAsync(
+                context.DriverId,
+                ValidRequest(context)));
+
+        Assert.Equal(0, context.PaystackClient.TransferCallCount);
+    }
+
+    [Fact]
+    public async Task ConsumedOtpCannotBeReused()
+    {
+        var context = CreateContext();
+        var request = ValidRequest(context);
+
+        await context.Service.CreateAsync(
+            context.DriverId,
+            request);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            context.Service.CreateAsync(
+                context.DriverId,
+                request));
+
+        Assert.Equal(1, context.PaystackClient.TransferCallCount);
+        Assert.Single(
+            context.UnitOfWork.WalletTransactionRepository.Items);
+    }
+
+    private static WithdrawalTestContext CreateContext(
+        bool seedWithdrawalOtp = true)
     {
         var unitOfWork = new TestUnitOfWork();
         var driverId = Guid.NewGuid();
+        var driver = new User
+        {
+            Id = driverId,
+            Email = "driver@test.local",
+            IsEmailVerified = true,
+            Status = UserStatus.Active
+        };
         var wallet = new Wallet
         {
             UserId = driverId,
@@ -370,11 +649,30 @@ public class DriverWithdrawalServiceTests
             RecipientCode = "RCP_test_recipient",
             IsActive = true
         };
+        unitOfWork.UserRepository.Items.Add(driver);
+        var driverRole = ((TestRoleRepository)unitOfWork.Roles)
+            .Items.Single(role => role.Name == "Driver");
+        unitOfWork.UserRoleRepository.Items.Add(new UserRole
+        {
+            UserId = driverId,
+            User = driver,
+            RoleId = driverRole.Id,
+            Role = driverRole
+        });
         unitOfWork.WalletRepository.Items.Add(wallet);
         unitOfWork.DriverBankAccountRepository.Items.Add(bankAccount);
+
+        if (seedWithdrawalOtp)
+        {
+            unitOfWork.VerificationCodeRepository.Items.Add(
+                WithdrawalCode(driverId, "123456"));
+        }
+
         var paystackClient = new FakePaystackClient();
+        var emailService = new CapturingEmailService();
         var financialService = new FinancialService(unitOfWork);
         var service = new DriverWithdrawalService(
+            emailService,
             financialService,
             NullLogger<DriverWithdrawalService>.Instance,
             paystackClient,
@@ -385,6 +683,7 @@ public class DriverWithdrawalServiceTests
             driverId,
             wallet,
             bankAccount,
+            emailService,
             paystackClient,
             service);
     }
@@ -395,19 +694,50 @@ public class DriverWithdrawalServiceTests
         return new CreateDriverWithdrawalRequestDto
         {
             DriverBankAccountId = context.BankAccount.Id,
+            Amount = 500m,
+            Otp = "123456"
+        };
+    }
+
+    private static DriverWithdrawalOtpRequestDto ValidOtpRequest(
+        WithdrawalTestContext context)
+    {
+        return new DriverWithdrawalOtpRequestDto
+        {
+            DriverBankAccountId = context.BankAccount.Id,
             Amount = 500m
+        };
+    }
+
+    private static VerificationCode WithdrawalCode(
+        Guid userId,
+        string code)
+    {
+        var purpose = VerificationCodePurpose.WalletWithdrawal;
+        var value = $"{userId:N}:{purpose}:{code}";
+        var hash = Convert.ToHexString(
+            SHA256.HashData(
+                Encoding.UTF8.GetBytes(value)));
+        var now = DateTime.UtcNow;
+
+        return new VerificationCode
+        {
+            UserId = userId,
+            Purpose = purpose,
+            Channel = VerificationChannel.Email,
+            CodeHash = hash,
+            ExpiresAt = now.AddMinutes(10),
+            LastSentAt = now,
+            CreatedAt = now
         };
     }
 
     private sealed class FakePaystackClient : IPaystackClient
     {
-        private readonly TaskCompletionSource _twoTransfersStarted =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _transferCallCount;
 
         public Exception? Failure { get; set; }
         public string Status { get; set; } = "success";
-        public bool WaitForTwoTransfers { get; set; }
         public int TransferCallCount => _transferCallCount;
         public string RecipientCode { get; private set; } = string.Empty;
         public long AmountInKobo { get; private set; }
@@ -437,7 +767,7 @@ public class DriverWithdrawalServiceTests
             throw new NotSupportedException();
         }
 
-        public async Task<PaystackTransferResult> CreateTransferAsync(
+        public Task<PaystackTransferResult> CreateTransferAsync(
             string recipientCode,
             long amountInKobo,
             string reference,
@@ -454,26 +784,31 @@ public class DriverWithdrawalServiceTests
             Reference = reference;
             Reason = reason;
 
-            var callCount = Interlocked.Increment(
-                ref _transferCallCount);
+            Interlocked.Increment(ref _transferCallCount);
 
-            if (WaitForTwoTransfers)
-            {
-                if (callCount == 2)
+            return Task.FromResult(
+                new PaystackTransferResult
                 {
-                    _twoTransfersStarted.SetResult();
-                }
+                    Reference = reference,
+                    Status = Status,
+                    TransferCode = "TRF_test"
+                });
+        }
+    }
 
-                await _twoTransfersStarted.Task.WaitAsync(
-                    cancellationToken);
-            }
+    private sealed class CapturingEmailService : IEmailService
+    {
+        public List<string> Codes { get; } = [];
 
-            return new PaystackTransferResult
-            {
-                Reference = reference,
-                Status = Status,
-                TransferCode = "TRF_test"
-            };
+        public Task SendAsync(
+            string toEmail,
+            string subject,
+            string htmlBody,
+            CancellationToken cancellationToken = default)
+        {
+            var match = Regex.Match(htmlBody, @"\b\d{6}\b");
+            Codes.Add(match.Value);
+            return Task.CompletedTask;
         }
     }
 
@@ -484,6 +819,7 @@ public class DriverWithdrawalServiceTests
             Guid driverId,
             Wallet wallet,
             DriverBankAccount bankAccount,
+            CapturingEmailService emailService,
             FakePaystackClient paystackClient,
             DriverWithdrawalService service)
         {
@@ -491,6 +827,7 @@ public class DriverWithdrawalServiceTests
             DriverId = driverId;
             Wallet = wallet;
             BankAccount = bankAccount;
+            EmailService = emailService;
             PaystackClient = paystackClient;
             Service = service;
         }
@@ -499,6 +836,7 @@ public class DriverWithdrawalServiceTests
         public Guid DriverId { get; }
         public Wallet Wallet { get; }
         public DriverBankAccount BankAccount { get; }
+        public CapturingEmailService EmailService { get; }
         public FakePaystackClient PaystackClient { get; }
         public DriverWithdrawalService Service { get; }
     }

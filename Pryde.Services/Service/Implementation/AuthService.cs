@@ -1,8 +1,6 @@
 ﻿using Mapster;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Security.Cryptography;
-using System.Text;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
@@ -10,6 +8,7 @@ using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Notifications.Interface;
+using Pryde.Services.Security.Implementation;
 using Pryde.Services.Security.Interface;
 using Pryde.Services.Service.Interface;
 using Pryde.Services.Settings;
@@ -469,7 +468,11 @@ public class AuthService(
                 return (Succeeded: false, UserId: user.Id);
             }
 
-            if (!VerificationCodeMatches(user.Id, request.Code, verificationCode.CodeHash))
+            if (!VerificationCodeSecurity.Matches(
+                    user.Id,
+                    VerificationCodePurpose.EmailAccountVerification,
+                    request.Code,
+                    verificationCode.CodeHash))
             {
                 verificationCode.AttemptCount++;
                 if (verificationCode.AttemptCount >= MaximumVerificationAttempts)
@@ -540,13 +543,16 @@ public class AuthService(
             now,
             cancellationToken);
 
-        var rawCode = RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+        var rawCode = VerificationCodeSecurity.GenerateSixDigitCode();
         var verificationCode = new VerificationCode
         {
             UserId = userId,
             Purpose = VerificationCodePurpose.EmailAccountVerification,
             Channel = VerificationChannel.Email,
-            CodeHash = HashVerificationCode(userId, rawCode),
+            CodeHash = VerificationCodeSecurity.Hash(
+                userId,
+                VerificationCodePurpose.EmailAccountVerification,
+                rawCode),
             ExpiresAt = now.AddMinutes(_emailSettings.OtpExpiryMinutes),
             LastSentAt = now,
             CreatedAt = now
@@ -585,33 +591,6 @@ public class AuthService(
 
     private static int RemainingSeconds(DateTime availableAt, DateTime now) =>
         Math.Max(0, (int)Math.Ceiling((availableAt - now).TotalSeconds));
-
-    private static string HashVerificationCode(Guid userId, string code)
-    {
-        var value = $"{userId:N}:{VerificationCodePurpose.EmailAccountVerification}:{code}";
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
-    }
-
-    private static bool VerificationCodeMatches(
-        Guid userId,
-        string suppliedCode,
-        string storedHash)
-    {
-        var suppliedHash = Convert.FromHexString(
-            HashVerificationCode(userId, suppliedCode));
-        byte[] storedHashBytes;
-        try
-        {
-            storedHashBytes = Convert.FromHexString(storedHash);
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
-
-        return CryptographicOperations.FixedTimeEquals(
-            suppliedHash, storedHashBytes);
-    }
 
     private static void ValidateEmailVerificationRequest(
         EmailVerificationVerifyRequestDto request)

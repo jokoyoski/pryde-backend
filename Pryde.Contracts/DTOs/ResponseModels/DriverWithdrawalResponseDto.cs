@@ -15,3 +15,10 @@ public class DriverWithdrawalResponseDto
     public DateTime CreatedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 }
+
+public class DriverWithdrawalOtpResponseDto
+{
+    public string Message { get; set; } = string.Empty;
+    public DateTime ExpiresAt { get; set; }
+    public DateTime ResendAvailableAt { get; set; }
+}
