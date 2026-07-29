@@ -1,7 +1,8 @@
 ﻿namespace Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Enums;
+using System.Text.Json.Serialization;
 
-public class VehicleResponseDto
+public class VehicleResponseDto : WorkflowResponseDto
 {
     public Guid Id { get; set; }
     public Guid UserId { get; set; }
@@ -21,6 +22,9 @@ public class VehicleResponseDto
     public IReadOnlyList<VehicleAmenityType> Amenities { get; set; } = [];
     public string? AdditionalDetails { get; set; }
     public VehicleOnboardingStatus OnboardingStatus { get; set; }
+    [JsonPropertyName("status")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public VehicleOnboardingStatus? WorkflowStatus { get; set; }
     public string? RejectionReason { get; set; }
     public int Capacity { get; set; }
     public bool IsActive { get; set; }

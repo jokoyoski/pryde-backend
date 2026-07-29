@@ -37,6 +37,8 @@ public class DriverWithdrawalServiceTests
         Assert.Equal(
             WalletTransactionStatus.Successful,
             response.Status);
+        Assert.Equal(WorkflowNextAction.None, response.NextAction);
+        Assert.Equal(WorkflowActor.None, response.RequiredActor);
         Assert.Equal("******6789", response.MaskedAccountNumber);
         Assert.Equal(1500m, context.Wallet.Balance);
         Assert.Single(
@@ -382,6 +384,16 @@ public class DriverWithdrawalServiceTests
         Assert.Equal(
             verificationCode.ExpiresAt,
             response.ExpiresAt);
+        Assert.Equal(
+            WorkflowOperationStatus.Accepted,
+            response.Status);
+        Assert.Equal(
+            context.BankAccount.Id,
+            response.DriverBankAccountId);
+        Assert.Equal(
+            WorkflowNextAction.SubmitWithdrawal,
+            response.NextAction);
+        Assert.Equal(WorkflowActor.Driver, response.RequiredActor);
         Assert.Equal(
             verificationCode.LastSentAt.AddSeconds(60),
             response.ResendAvailableAt);

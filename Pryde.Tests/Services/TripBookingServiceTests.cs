@@ -17,6 +17,10 @@ public class TripBookingServiceTests
         var result = await new TripBookingService(unitOfWork).CreateAsync(passengerId, trip.Id);
 
         Assert.Equal(BookingStatus.Pending, result.Status);
+        Assert.Equal(
+            WorkflowNextAction.AwaitDriverDecision,
+            result.NextAction);
+        Assert.Equal(WorkflowActor.Driver, result.RequiredActor);
         Assert.Equal(2375m, result.SeatPrice);
         Assert.Equal(118.75m, result.ServiceCharge);
         Assert.Equal(2493.75m, result.TotalAmount);
@@ -69,6 +73,10 @@ public class TripBookingServiceTests
         var result = await new TripBookingService(unitOfWork).ApproveAsync(booking.Id, driverId);
 
         Assert.Equal(BookingStatus.Approved, result.Status);
+        Assert.Equal(
+            WorkflowNextAction.PayForBooking,
+            result.NextAction);
+        Assert.Equal(WorkflowActor.Passenger, result.RequiredActor);
         Assert.NotNull(result.ApprovedAt);
         Assert.Equal(1, trip.AvailableSeats);
         Assert.Equal(1, unitOfWork.SaveChangesCount);
@@ -121,6 +129,8 @@ public class TripBookingServiceTests
         var result = await new TripBookingService(unitOfWork).DeclineAsync(booking.Id, driverId);
 
         Assert.Equal(BookingStatus.Declined, result.Status);
+        Assert.Equal(WorkflowNextAction.None, result.NextAction);
+        Assert.Equal(WorkflowActor.None, result.RequiredActor);
         Assert.Equal(2, trip.AvailableSeats);
     }
 

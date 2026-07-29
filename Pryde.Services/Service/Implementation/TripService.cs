@@ -211,6 +211,273 @@ public class TripService(
         return await GetByIdAsync(tripId, cancellationToken);
     }
 
+    public async Task<TripDetailsResponseDto> StartAsync(
+        Guid tripId,
+        Guid driverId,
+        CancellationToken cancellationToken = default)
+    {
+        await unitOfWork.ExecuteInTransactionAsync(
+            async transactionToken =>
+            {
+                var trip = await GetTripForLifecycleAsync(
+                    tripId,
+                    transactionToken);
+
+                if (trip.DriverId != driverId)
+                {
+                    throw new ForbiddenException(
+                        "Only the trip driver can start this trip.");
+                }
+
+                if (trip.Status != TripStatus.Scheduled)
+                {
+                    throw new ConflictException(
+                        "Only a scheduled trip can be started.");
+                }
+
+                var activeBookings = GetActiveBookings(trip);
+
+                if (activeBookings.Count == 0)
+                {
+                    throw new ConflictException(
+                        "At least one paid passenger is required to start the trip.");
+                }
+
+                trip.Status = TripStatus.PickupConfirmationPending;
+                unitOfWork.Trips.Update(trip);
+                await unitOfWork.SaveChangesAsync(transactionToken);
+                return true;
+            },
+            cancellationToken);
+
+        return await GetLifecycleResponseAsync(
+            tripId,
+            cancellationToken);
+    }
+
+    public async Task<TripDetailsResponseDto> ConfirmPickupAsync(
+        Guid tripId,
+        Guid passengerId,
+        CancellationToken cancellationToken = default)
+    {
+        await unitOfWork.ExecuteInTransactionAsync(
+            async transactionToken =>
+            {
+                var trip = await GetTripForLifecycleAsync(
+                    tripId,
+                    transactionToken);
+
+                if (trip.Status !=
+                    TripStatus.PickupConfirmationPending)
+                {
+                    throw new ConflictException(
+                        "Pickup cannot be confirmed in the current trip state.");
+                }
+
+                var activeBookings = GetActiveBookings(trip);
+                var booking = activeBookings.FirstOrDefault(item =>
+                    item.PassengerId == passengerId);
+
+                if (booking == null)
+                {
+                    throw new ForbiddenException(
+                        "Only approved passengers with a paid booking can confirm pickup.");
+                }
+
+                if (booking.PickupConfirmed)
+                {
+                    throw new ConflictException(
+                        "Pickup has already been confirmed.");
+                }
+
+                booking.PickupConfirmed = true;
+                unitOfWork.TripBookings.Update(booking);
+
+                if (activeBookings.All(item =>
+                    item.PickupConfirmed))
+                {
+                    trip.Status = TripStatus.InProgress;
+                    unitOfWork.Trips.Update(trip);
+                }
+
+                await unitOfWork.SaveChangesAsync(transactionToken);
+                return true;
+            },
+            cancellationToken);
+
+        return await GetLifecycleResponseAsync(
+            tripId,
+            cancellationToken);
+    }
+
+    public async Task<TripDetailsResponseDto> EndAsync(
+        Guid tripId,
+        Guid driverId,
+        CancellationToken cancellationToken = default)
+    {
+        await unitOfWork.ExecuteInTransactionAsync(
+            async transactionToken =>
+            {
+                var trip = await GetTripForLifecycleAsync(
+                    tripId,
+                    transactionToken);
+
+                if (trip.DriverId != driverId)
+                {
+                    throw new ForbiddenException(
+                        "Only the trip driver can end this trip.");
+                }
+
+                if (trip.Status != TripStatus.InProgress)
+                {
+                    throw new ConflictException(
+                        "Only an in-progress trip can be ended.");
+                }
+
+                trip.Status =
+                    TripStatus.DropoffConfirmationPending;
+                unitOfWork.Trips.Update(trip);
+                await unitOfWork.SaveChangesAsync(transactionToken);
+                return true;
+            },
+            cancellationToken);
+
+        return await GetLifecycleResponseAsync(
+            tripId,
+            cancellationToken);
+    }
+
+    public async Task<TripDetailsResponseDto> ConfirmDropoffAsync(
+        Guid tripId,
+        Guid passengerId,
+        CancellationToken cancellationToken = default)
+    {
+        var lifecycleResult = await unitOfWork.ExecuteInTransactionAsync(
+            async transactionToken =>
+            {
+                var trip = await GetTripForLifecycleAsync(
+                    tripId,
+                    transactionToken);
+
+                if (trip.Status !=
+                    TripStatus.DropoffConfirmationPending)
+                {
+                    throw new ConflictException(
+                        "Drop-off cannot be confirmed in the current trip state.");
+                }
+
+                var activeBookings = GetActiveBookings(trip);
+                var booking = activeBookings.FirstOrDefault(item =>
+                    item.PassengerId == passengerId);
+
+                if (booking == null)
+                {
+                    throw new ForbiddenException(
+                        "Only passengers with an active paid booking can confirm drop-off.");
+                }
+
+                if (booking.DropoffConfirmed)
+                {
+                    throw new ConflictException(
+                        "Drop-off has already been confirmed.");
+                }
+
+                booking.DropoffConfirmed = true;
+                unitOfWork.TripBookings.Update(booking);
+                var allConfirmed = activeBookings.All(item =>
+                    item.DropoffConfirmed);
+
+                if (!allConfirmed)
+                {
+                    await unitOfWork.SaveChangesAsync(
+                        transactionToken);
+                }
+
+                return (
+                    AllConfirmed: allConfirmed,
+                    DriverId: trip.DriverId);
+            },
+            cancellationToken);
+
+        if (lifecycleResult.AllConfirmed)
+        {
+            await financialService.CompleteTripAsync(
+                tripId,
+                lifecycleResult.DriverId,
+                cancellationToken);
+        }
+
+        return await GetLifecycleResponseAsync(
+            tripId,
+            cancellationToken);
+    }
+
+    private async Task<TripDetailsResponseDto> GetLifecycleResponseAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        var response = await GetByIdAsync(
+            tripId,
+            cancellationToken);
+
+        switch (response.Status)
+        {
+            case TripStatus.PickupConfirmationPending:
+            {
+                response.NextAction =
+                    WorkflowNextAction.PassengerConfirmPickup;
+                response.RequiredActor = WorkflowActor.Passenger;
+                break;
+            }
+            case TripStatus.InProgress:
+            {
+                response.NextAction = WorkflowNextAction.DriverEndTrip;
+                response.RequiredActor = WorkflowActor.Driver;
+                break;
+            }
+            case TripStatus.DropoffConfirmationPending:
+            {
+                response.NextAction =
+                    WorkflowNextAction.PassengerConfirmDropoff;
+                response.RequiredActor = WorkflowActor.Passenger;
+                break;
+            }
+            case TripStatus.Completed:
+            {
+                response.NextAction = WorkflowNextAction.SubmitReview;
+                response.RequiredActor = WorkflowActor.Passenger;
+                break;
+            }
+            default:
+            {
+                response.NextAction = WorkflowNextAction.None;
+                response.RequiredActor = WorkflowActor.None;
+                break;
+            }
+        }
+
+        return response;
+    }
+
+    private async Task<Trip> GetTripForLifecycleAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        return await unitOfWork.Trips.GetByIdForUpdateAsync(
+            tripId,
+            cancellationToken)
+            ?? throw new NotFoundException(nameof(Trip), tripId);
+    }
+
+    private static List<TripBooking> GetActiveBookings(Trip trip)
+    {
+        return trip.Bookings
+            .Where(booking =>
+                booking.Status == BookingStatus.Approved &&
+                booking.PaidAt.HasValue)
+            .ToList();
+    }
+
     private async Task EnsureDriverAsync(Guid userId, CancellationToken cancellationToken)
     {
         var roles = await unitOfWork.UserRoles.GetByUserIdAsync(userId, cancellationToken);

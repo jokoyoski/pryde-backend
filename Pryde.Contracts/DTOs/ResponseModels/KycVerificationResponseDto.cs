@@ -2,7 +2,7 @@ using Pryde.Domain.Enums;
 
 namespace Pryde.Contracts.ResponseModels;
 
-public class KycVerificationResponseDto
+public class KycVerificationResponseDto : WorkflowResponseDto
 {
     public Guid Id { get; set; }
     public Guid UserId { get; set; }

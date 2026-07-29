@@ -99,6 +99,8 @@ public class AuthService(
 
         var response = user.Adapt<RegisterResponseDto>();
         response.EmailVerificationRequired = !user.IsEmailVerified;
+        response.NextAction = WorkflowNextAction.VerifyEmail;
+        response.RequiredActor = WorkflowActor.User;
         return response;
     }
 
@@ -201,6 +203,7 @@ public class AuthService(
         await unitOfWork.SaveChangesAsync(cancellationToken);
         var response = await IssueTokensAsync(user, roleNames, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
+        ApplyOnboardingWorkflow(response);
         return response;
     }
 
@@ -448,10 +451,20 @@ public class AuthService(
             var user = await unitOfWork.Users.GetByEmailAsync(
                 normalizedEmail, transactionToken);
             if (user is null)
-                return (Succeeded: false, UserId: Guid.Empty);
+            {
+                return (
+                    Succeeded: false,
+                    UserId: Guid.Empty,
+                    Status: UserStatus.Pending);
+            }
 
             if (user.IsEmailVerified)
-                return (Succeeded: true, UserId: user.Id);
+            {
+                return (
+                    Succeeded: true,
+                    UserId: user.Id,
+                    Status: user.Status);
+            }
 
             var verificationCode = await unitOfWork.VerificationCodes.GetLatestActiveAsync(
                 user.Id,
@@ -465,7 +478,10 @@ public class AuthService(
                 verificationCode.ExpiresAt <= now ||
                 verificationCode.AttemptCount >= MaximumVerificationAttempts)
             {
-                return (Succeeded: false, UserId: user.Id);
+                return (
+                    Succeeded: false,
+                    UserId: user.Id,
+                    Status: user.Status);
             }
 
             if (!VerificationCodeSecurity.Matches(
@@ -480,7 +496,10 @@ public class AuthService(
 
                 unitOfWork.VerificationCodes.Update(verificationCode);
                 await unitOfWork.SaveChangesAsync(transactionToken);
-                return (Succeeded: false, UserId: user.Id);
+                return (
+                    Succeeded: false,
+                    UserId: user.Id,
+                    Status: user.Status);
             }
 
             verificationCode.ConsumedAt = now;
@@ -488,13 +507,22 @@ public class AuthService(
             unitOfWork.VerificationCodes.Update(verificationCode);
             unitOfWork.Users.Update(user);
             await unitOfWork.SaveChangesAsync(transactionToken);
-            return (Succeeded: true, UserId: user.Id);
+            return (
+                Succeeded: true,
+                UserId: user.Id,
+                Status: user.Status);
         }, cancellationToken);
 
         if (!result.Succeeded)
             throw new ValidationException("Invalid or expired verification code.");
 
-        return await GetVerificationStatusAsync(result.UserId, cancellationToken);
+        var response = await GetVerificationStatusAsync(
+            result.UserId,
+            cancellationToken);
+        response.WorkflowStatus = result.Status;
+        response.NextAction = WorkflowNextAction.Login;
+        response.RequiredActor = WorkflowActor.User;
+        return response;
     }
 
     public async Task<VerificationStatusResponseDto> GetVerificationStatusAsync(
@@ -586,8 +614,69 @@ public class AuthService(
     {
         Message = GenericResendMessage,
         ResendAvailableAt = resendAvailableAt,
-        ResendCooldownSeconds = RemainingSeconds(resendAvailableAt, now)
+        ResendCooldownSeconds = RemainingSeconds(resendAvailableAt, now),
+        Status = WorkflowOperationStatus.Accepted,
+        NextAction = WorkflowNextAction.VerifyEmail,
+        RequiredActor = WorkflowActor.User
     };
+
+    private static void ApplyOnboardingWorkflow(
+        LoginResponseDto response)
+    {
+        response.WorkflowStatus = response.Onboarding.CurrentStage;
+
+        switch (response.Onboarding.CurrentStage)
+        {
+            case OnboardingStage.RoleSelection:
+            {
+                response.NextAction = WorkflowNextAction.SelectRole;
+                response.RequiredActor = WorkflowActor.User;
+                break;
+            }
+            case OnboardingStage.IdentityVerification:
+            {
+                response.NextAction = WorkflowNextAction.CompleteKyc;
+                response.RequiredActor = WorkflowActor.User;
+                break;
+            }
+            case OnboardingStage.DriverDocuments:
+            case OnboardingStage.VehicleInformation:
+            {
+                response.NextAction =
+                    WorkflowNextAction.CompleteVehicleOnboarding;
+                response.RequiredActor = WorkflowActor.Driver;
+                break;
+            }
+            case OnboardingStage.SubmittedForReview:
+            {
+                response.NextAction =
+                    WorkflowNextAction.AwaitAdminApproval;
+                response.RequiredActor = WorkflowActor.Admin;
+                break;
+            }
+            case OnboardingStage.Completed:
+            {
+                if (response.Onboarding.DriverAccessGranted)
+                {
+                    response.NextAction = WorkflowNextAction.CreateTrip;
+                    response.RequiredActor = WorkflowActor.Driver;
+                }
+                else
+                {
+                    response.NextAction = WorkflowNextAction.None;
+                    response.RequiredActor = WorkflowActor.None;
+                }
+
+                break;
+            }
+            default:
+            {
+                response.NextAction = WorkflowNextAction.None;
+                response.RequiredActor = WorkflowActor.None;
+                break;
+            }
+        }
+    }
 
     private static int RemainingSeconds(DateTime availableAt, DateTime now) =>
         Math.Max(0, (int)Math.Ceiling((availableAt - now).TotalSeconds));

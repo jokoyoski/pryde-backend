@@ -2,7 +2,7 @@ using Pryde.Domain.Enums;
 
 namespace Pryde.Contracts.ResponseModels;
 
-public class DriverWithdrawalResponseDto
+public class DriverWithdrawalResponseDto : WorkflowResponseDto
 {
     public Guid Id { get; set; }
     public decimal Amount { get; set; }
@@ -16,8 +16,10 @@ public class DriverWithdrawalResponseDto
     public DateTime? CompletedAt { get; set; }
 }
 
-public class DriverWithdrawalOtpResponseDto
+public class DriverWithdrawalOtpResponseDto : WorkflowResponseDto
 {
+    public WorkflowOperationStatus Status { get; set; }
+    public Guid DriverBankAccountId { get; set; }
     public string Message { get; set; } = string.Empty;
     public DateTime ExpiresAt { get; set; }
     public DateTime ResendAvailableAt { get; set; }

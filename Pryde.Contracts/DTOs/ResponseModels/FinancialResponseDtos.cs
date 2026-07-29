@@ -1,11 +1,15 @@
 using Pryde.Domain.Enums;
+using System.Text.Json.Serialization;
 
 namespace Pryde.Contracts.ResponseModels;
 
-public class EscrowResponseDto
+public class EscrowResponseDto : WorkflowResponseDto
 {
     public Guid EscrowId { get; set; }
     public Guid BookingId { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? TripId { get; set; }
     public Guid PassengerId { get; set; }
     public string PassengerName { get; set; } = string.Empty;
     public Guid DriverId { get; set; }

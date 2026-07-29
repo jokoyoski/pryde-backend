@@ -61,7 +61,12 @@ public class TripBookingService(
         }
 
         var profile = await unitOfWork.Profiles.GetByUserIdAsync(passengerId, cancellationToken);
-        return MapResponse(booking, trip, profile is null ? null : GetName(profile));
+        return WorkflowResponse(
+            booking,
+            trip,
+            profile is null ? null : GetName(profile),
+            WorkflowNextAction.AwaitDriverDecision,
+            WorkflowActor.Driver);
     }
 
     public async Task<IReadOnlyList<TripBookingResponseDto>> GetMineAsync(
@@ -111,7 +116,12 @@ public class TripBookingService(
         unitOfWork.TripBookings.Update(booking);
         unitOfWork.Trips.Update(booking.Trip);
         await SaveWithConcurrencyHandlingAsync(cancellationToken);
-        return MapResponse(booking, booking.Trip, GetPassengerName(booking));
+        return WorkflowResponse(
+            booking,
+            booking.Trip,
+            GetPassengerName(booking),
+            WorkflowNextAction.PayForBooking,
+            WorkflowActor.Passenger);
     }
 
     public async Task<TripBookingResponseDto> DeclineAsync(
@@ -123,14 +133,27 @@ public class TripBookingService(
         booking.Status = BookingStatus.Declined;
         unitOfWork.TripBookings.Update(booking);
         await SaveWithConcurrencyHandlingAsync(cancellationToken);
-        return MapResponse(booking, booking.Trip, GetPassengerName(booking));
+        return WorkflowResponse(
+            booking,
+            booking.Trip,
+            GetPassengerName(booking),
+            WorkflowNextAction.None,
+            WorkflowActor.None);
     }
 
-    public Task<EscrowResponseDto> PayAsync(
+    public async Task<EscrowResponseDto> PayAsync(
         Guid bookingId, Guid passengerId, string idempotencyKey,
-        CancellationToken cancellationToken = default) =>
-        financialService.HoldBookingPaymentAsync(
-            passengerId, bookingId, idempotencyKey, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        var response = await financialService.HoldBookingPaymentAsync(
+            passengerId,
+            bookingId,
+            idempotencyKey,
+            cancellationToken);
+        response.NextAction = WorkflowNextAction.DriverStartTrip;
+        response.RequiredActor = WorkflowActor.Driver;
+        return response;
+    }
 
     public async Task<TripBookingResponseDto> CancelAsync(
         Guid bookingId,
@@ -230,6 +253,22 @@ public class TripBookingService(
             RequestedAt = booking.RequestedAt,
             ApprovedAt = booking.ApprovedAt
         };
+    }
+
+    private static TripBookingResponseDto WorkflowResponse(
+        TripBooking booking,
+        Trip trip,
+        string? passengerName,
+        WorkflowNextAction nextAction,
+        WorkflowActor requiredActor)
+    {
+        var response = MapResponse(
+            booking,
+            trip,
+            passengerName);
+        response.NextAction = nextAction;
+        response.RequiredActor = requiredActor;
+        return response;
     }
 
     private static string? GetPassengerName(TripBooking booking) =>

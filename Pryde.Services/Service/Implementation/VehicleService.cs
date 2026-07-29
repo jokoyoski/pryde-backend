@@ -56,7 +56,11 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return await BuildResponseAsync(vehicle, cancellationToken);
+        return await BuildWorkflowResponseAsync(
+            vehicle,
+            WorkflowNextAction.CompleteVehicleOnboarding,
+            WorkflowActor.Driver,
+            cancellationToken);
     }
 
     public async Task<VehicleResponseDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -88,7 +92,11 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
         unitOfWork.Vehicles.Update(vehicle);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return await BuildResponseAsync(vehicle, cancellationToken);
+        return await BuildWorkflowResponseAsync(
+            vehicle,
+            WorkflowNextAction.CompleteVehicleOnboarding,
+            WorkflowActor.Driver,
+            cancellationToken);
     }
 
     public async Task<VehicleResponseDto> UpdateDetailsAsync(
@@ -115,7 +123,11 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
             request.Colour, "Vehicle colour", 50);
         unitOfWork.Vehicles.Update(vehicle);
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return await BuildResponseAsync(vehicle, cancellationToken);
+        return await BuildWorkflowResponseAsync(
+            vehicle,
+            WorkflowNextAction.CompleteVehicleOnboarding,
+            WorkflowActor.Driver,
+            cancellationToken);
     }
 
     public async Task<VehicleResponseDto> UpdateMediaAsync(
@@ -163,7 +175,11 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
         }
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return await BuildResponseAsync(vehicle, cancellationToken);
+        return await BuildWorkflowResponseAsync(
+            vehicle,
+            WorkflowNextAction.CompleteVehicleOnboarding,
+            WorkflowActor.Driver,
+            cancellationToken);
     }
 
     public async Task<VehicleResponseDto> UpdateCapacityExtrasAsync(
@@ -212,7 +228,11 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
         vehicle.AdditionalDetails = additionalDetails;
         unitOfWork.Vehicles.Update(vehicle);
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return await BuildResponseAsync(vehicle, cancellationToken);
+        return await BuildWorkflowResponseAsync(
+            vehicle,
+            WorkflowNextAction.CompleteVehicleOnboarding,
+            WorkflowActor.Driver,
+            cancellationToken);
     }
 
     public async Task<VehicleResponseDto> SubmitAsync(
@@ -229,7 +249,11 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
         vehicle.RejectionReason = null;
         unitOfWork.Vehicles.Update(vehicle);
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return await BuildResponseAsync(vehicle, cancellationToken);
+        return await BuildWorkflowResponseAsync(
+            vehicle,
+            WorkflowNextAction.AwaitAdminApproval,
+            WorkflowActor.Admin,
+            cancellationToken);
     }
 
     public async Task DeleteAsync(Guid vehicleId, Guid requestingUserId, CancellationToken cancellationToken = default)
@@ -264,7 +288,11 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
         }
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return await BuildResponseAsync(vehicle, cancellationToken);
+        return await BuildWorkflowResponseAsync(
+            vehicle,
+            WorkflowNextAction.CompleteVehicleOnboarding,
+            WorkflowActor.Driver,
+            cancellationToken);
     }
 
     public async Task DeleteImageAsync(Guid vehicleId, Guid imageId, Guid requestingUserId, CancellationToken cancellationToken = default)
@@ -307,7 +335,11 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
             vehicle.IsActive = true;
             unitOfWork.Vehicles.Update(vehicle);
             await unitOfWork.SaveChangesAsync(cancellationToken);
-            return await BuildResponseAsync(vehicle, cancellationToken);
+            return await BuildWorkflowResponseAsync(
+                vehicle,
+                WorkflowNextAction.CreateTrip,
+                WorkflowActor.Driver,
+                cancellationToken);
         }
 
         await ValidateCompletenessAsync(vehicle, cancellationToken);
@@ -317,7 +349,11 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
         vehicle.RejectionReason = null;
         unitOfWork.Vehicles.Update(vehicle);
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return await BuildResponseAsync(vehicle, cancellationToken);
+        return await BuildWorkflowResponseAsync(
+            vehicle,
+            WorkflowNextAction.CreateTrip,
+            WorkflowActor.Driver,
+            cancellationToken);
     }
 
     public async Task<VehicleResponseDto> DeactivateAsync(Guid vehicleId, CancellationToken cancellationToken = default)
@@ -352,7 +388,11 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
 
         unitOfWork.Vehicles.Update(vehicle);
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return await BuildResponseAsync(vehicle, cancellationToken);
+        return await BuildWorkflowResponseAsync(
+            vehicle,
+            WorkflowNextAction.CompleteVehicleOnboarding,
+            WorkflowActor.Driver,
+            cancellationToken);
     }
 
     private async Task<VehicleResponseDto> BuildResponseAsync(Vehicle vehicle, CancellationToken cancellationToken)
@@ -394,6 +434,21 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
                 })
                 .ToList()
         };
+    }
+
+    private async Task<VehicleResponseDto> BuildWorkflowResponseAsync(
+        Vehicle vehicle,
+        WorkflowNextAction nextAction,
+        WorkflowActor requiredActor,
+        CancellationToken cancellationToken)
+    {
+        var response = await BuildResponseAsync(
+            vehicle,
+            cancellationToken);
+        response.WorkflowStatus = vehicle.OnboardingStatus;
+        response.NextAction = nextAction;
+        response.RequiredActor = requiredActor;
+        return response;
     }
 
     private async Task<Vehicle> GetEditableOwnedVehicleAsync(

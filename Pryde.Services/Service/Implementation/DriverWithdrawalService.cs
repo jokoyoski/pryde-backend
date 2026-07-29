@@ -155,10 +155,14 @@ public class DriverWithdrawalService : IDriverWithdrawalService
 
         return new DriverWithdrawalOtpResponseDto
         {
+            Status = WorkflowOperationStatus.Accepted,
+            DriverBankAccountId = request.DriverBankAccountId,
             Message = "A withdrawal verification code has been sent.",
             ExpiresAt = result.VerificationCode.ExpiresAt,
             ResendAvailableAt = result.VerificationCode.LastSentAt
-                .AddSeconds(ResendCooldownSeconds)
+                .AddSeconds(ResendCooldownSeconds),
+            NextAction = WorkflowNextAction.SubmitWithdrawal,
+            RequiredActor = WorkflowActor.Driver
         };
     }
 
@@ -214,7 +218,11 @@ public class DriverWithdrawalService : IDriverWithdrawalService
                     transactionStatus,
                     cancellationToken);
 
-            return walletTransaction.Adapt<DriverWithdrawalResponseDto>();
+            var response =
+                walletTransaction.Adapt<DriverWithdrawalResponseDto>();
+            response.NextAction = WorkflowNextAction.None;
+            response.RequiredActor = WorkflowActor.None;
+            return response;
         }
         catch (Exception exception)
         {

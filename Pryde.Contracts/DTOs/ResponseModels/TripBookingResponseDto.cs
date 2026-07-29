@@ -2,7 +2,7 @@ using Pryde.Domain.Enums;
 
 namespace Pryde.Contracts.ResponseModels;
 
-public class TripBookingResponseDto
+public class TripBookingResponseDto : WorkflowResponseDto
 {
     public Guid BookingId { get; set; }
     public Guid TripId { get; set; }

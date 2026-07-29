@@ -73,7 +73,10 @@ public class KycService(
         unitOfWork.KycVerifications.Update(kyc);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return kyc.Adapt<KycVerificationResponseDto>();
+        return WorkflowResponse(
+            kyc,
+            WorkflowNextAction.CompleteKyc,
+            WorkflowActor.User);
     }
 
     public async Task<KycVerificationResponseDto> SubmitAsync(
@@ -109,7 +112,10 @@ public class KycService(
         unitOfWork.KycVerifications.Update(kyc);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return kyc.Adapt<KycVerificationResponseDto>();
+        return WorkflowResponse(
+            kyc,
+            WorkflowNextAction.AwaitAdminApproval,
+            WorkflowActor.Admin);
     }
 
     public async Task<KycVerificationResponseDto> GetMineAsync(
@@ -222,7 +228,7 @@ public class KycService(
         if (kyc.Status is KycStatus.Approved or KycStatus.Rejected)
             throw new ConflictException("This KYC request has already been finalized.");
 
-        await ValidateCompletenessAsync(
+        var requiresDriverOnboarding = await ValidateCompletenessAsync(
             userId,
             kyc,
             cancellationToken);
@@ -240,10 +246,17 @@ public class KycService(
         unitOfWork.KycVerifications.Update(kyc);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return kyc.Adapt<KycVerificationResponseDto>();
+        return WorkflowResponse(
+            kyc,
+            requiresDriverOnboarding
+                ? WorkflowNextAction.CompleteVehicleOnboarding
+                : WorkflowNextAction.None,
+            requiresDriverOnboarding
+                ? WorkflowActor.Driver
+                : WorkflowActor.None);
     }
 
-    private async Task ValidateCompletenessAsync(
+    private async Task<bool> ValidateCompletenessAsync(
         Guid userId,
         KycVerification kyc,
         CancellationToken cancellationToken)
@@ -278,6 +291,8 @@ public class KycService(
             throw new ValidationException(
                 $"Missing required KYC documents: {string.Join(", ", missingDocuments)}.");
         }
+
+        return requiresDriverDocuments;
     }
 
     public async Task<KycVerificationResponseDto> RejectAsync(
@@ -297,7 +312,21 @@ public class KycService(
         unitOfWork.KycVerifications.Update(kyc);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return kyc.Adapt<KycVerificationResponseDto>();
+        return WorkflowResponse(
+            kyc,
+            WorkflowNextAction.CompleteKyc,
+            WorkflowActor.User);
+    }
+
+    private static KycVerificationResponseDto WorkflowResponse(
+        KycVerification kyc,
+        WorkflowNextAction nextAction,
+        WorkflowActor requiredActor)
+    {
+        var response = kyc.Adapt<KycVerificationResponseDto>();
+        response.NextAction = nextAction;
+        response.RequiredActor = requiredActor;
+        return response;
     }
 
     private static string SanitizeReason(string reason)

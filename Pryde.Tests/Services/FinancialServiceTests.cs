@@ -27,6 +27,27 @@ public class FinancialServiceTests
     }
 
     [Fact]
+    public async Task BookingPaymentReturnsNextTripAction()
+    {
+        var context = CreateContext();
+        var service = new TripBookingService(
+            context.UnitOfWork,
+            new FinancialService(context.UnitOfWork));
+
+        var result = await service.PayAsync(
+            context.Booking.Id,
+            context.Passenger.Id,
+            "workflow-payment");
+
+        Assert.Equal(EscrowStatus.Held, result.Status);
+        Assert.Equal(context.Trip.Id, result.TripId);
+        Assert.Equal(
+            WorkflowNextAction.DriverStartTrip,
+            result.NextAction);
+        Assert.Equal(WorkflowActor.Driver, result.RequiredActor);
+    }
+
+    [Fact]
     public async Task SameIdempotencyKeyDoesNotDebitTwice()
     {
         var context = CreateContext();
@@ -75,6 +96,9 @@ public class FinancialServiceTests
         context.Trip.DepartureTime = DateTime.UtcNow.AddMinutes(-30);
         var service = new FinancialService(context.UnitOfWork);
         await service.HoldBookingPaymentAsync(context.Passenger.Id, context.Booking.Id, "release-hold");
+        context.Trip.Status =
+            TripStatus.DropoffConfirmationPending;
+        context.Booking.DropoffConfirmed = true;
 
         await service.CompleteTripAsync(context.Trip.Id, context.Driver.Id);
         await service.CompleteTripAsync(context.Trip.Id, context.Driver.Id);
