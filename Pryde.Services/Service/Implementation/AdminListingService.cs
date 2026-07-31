@@ -270,7 +270,8 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
         TotalAmount = booking.TotalAmount,
         Status = booking.Status,
         RequestedAt = booking.RequestedAt,
-        ApprovedAt = booking.ApprovedAt
+        ApprovedAt = booking.ApprovedAt,
+        PaymentExpiresAt = booking.PaymentExpiresAt
     };
 
     private static void ValidateDateRange(

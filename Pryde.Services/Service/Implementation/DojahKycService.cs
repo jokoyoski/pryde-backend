@@ -67,7 +67,8 @@ public class DojahKycService(
                 _settings.ShareableLink,
                 kyc.ProviderReference!),
             WidgetId = widgetId,
-            ReferenceId = kyc.ProviderReference!,
+            ReferenceId = null,
+            ProviderReference = kyc.ProviderReference!,
             Metadata = new Dictionary<string, string>
             {
                 ["kyc_reference"] = kyc.ProviderReference!
@@ -95,54 +96,62 @@ public class DojahKycService(
             throw new ValidationException("Invalid Dojah webhook payload.");
         }
 
-        var customReference = webhook.CustomReference;
-        if (string.IsNullOrWhiteSpace(customReference) &&
-            webhook.DojahReference.StartsWith("PRYDE-", StringComparison.OrdinalIgnoreCase))
-        {
-            customReference = webhook.DojahReference;
-        }
-
-        KycVerification? kyc;
-        if (!string.IsNullOrWhiteSpace(customReference))
-        {
-            kyc = await unitOfWork.KycVerifications.GetByProviderReferenceAsync(
-                customReference,
-                cancellationToken);
-        }
-        else
-        {
-            kyc = await unitOfWork.KycVerifications.GetByDojahReferenceAsync(
-                webhook.DojahReference,
-                cancellationToken);
-        }
-
-        kyc = kyc ?? throw new NotFoundException(
-            nameof(KycVerification),
-            customReference ?? webhook.DojahReference);
-
-        if (kyc.Status == KycStatus.Approved &&
-            !webhook.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
+        var correlation = await CorrelateWebhookAsync(
+            webhook,
+            cancellationToken);
+        var kyc = correlation.Kyc;
         var dojahReferenceChanged = false;
-        if (webhook.DojahReference.StartsWith("DJ-", StringComparison.OrdinalIgnoreCase))
+
+        if (!string.IsNullOrWhiteSpace(correlation.DojahReference))
         {
+            var referenceOwner = await unitOfWork.KycVerifications
+                .GetByDojahReferenceAsync(
+                    correlation.DojahReference,
+                    cancellationToken);
+            if (referenceOwner is not null && referenceOwner.Id != kyc.Id)
+            {
+                logger.LogWarning(
+                    "Dojah webhook reference mismatch rejected for KYC {KycId}.",
+                    kyc.Id);
+                throw new ValidationException(
+                    "Dojah webhook reference belongs to another verification.");
+            }
+
             if (!string.IsNullOrWhiteSpace(kyc.DojahReference) &&
                 !kyc.DojahReference.Equals(
-                    webhook.DojahReference,
+                    correlation.DojahReference,
                     StringComparison.OrdinalIgnoreCase))
             {
+                logger.LogWarning(
+                    "Dojah webhook reference mismatch rejected for KYC {KycId}.",
+                    kyc.Id);
                 throw new ValidationException(
                     "Dojah webhook reference does not match the existing verification.");
             }
 
             if (string.IsNullOrWhiteSpace(kyc.DojahReference))
             {
-                kyc.DojahReference = webhook.DojahReference;
+                kyc.DojahReference = correlation.DojahReference;
                 dojahReferenceChanged = true;
             }
+        }
+
+        if (kyc.Status == KycStatus.Approved &&
+            !webhook.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase))
+        {
+            if (dojahReferenceChanged)
+            {
+                unitOfWork.KycVerifications.Update(kyc);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                logger.LogInformation(
+                    "Dojah reference saved for KYC {KycId}.",
+                    kyc.Id);
+            }
+
+            logger.LogInformation(
+                "Dojah webhook ignored because KYC {KycId} is already approved.",
+                kyc.Id);
+            return;
         }
 
         var nextStatus = MapStatus(webhook.Status, kyc.Status);
@@ -155,6 +164,9 @@ public class DojahKycService(
             kyc.Status == nextStatus &&
             kyc.RejectionReason == rejectionReason)
         {
+            logger.LogInformation(
+                "Duplicate Dojah webhook ignored for KYC {KycId}.",
+                kyc.Id);
             return;
         }
 
@@ -167,6 +179,20 @@ public class DojahKycService(
 
         unitOfWork.KycVerifications.Update(kyc);
         await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        if (dojahReferenceChanged)
+        {
+            logger.LogInformation(
+                "Dojah reference saved for KYC {KycId}.",
+                kyc.Id);
+        }
+
+        if (correlation.IsLegacy)
+        {
+            logger.LogInformation(
+                "Legacy Pryde-reference-only Dojah webhook processed for KYC {KycId}.",
+                kyc.Id);
+        }
     }
 
     private void EnsureEnabled()
@@ -184,15 +210,6 @@ public class DojahKycService(
         string? signatureV2)
     {
         var privateKey = _settings.PrivateKey ?? string.Empty;
-        logger.LogInformation(
-            "Dojah webhook signature diagnostic: SignatureV1Present={SignatureV1Present}, SignatureV1Length={SignatureV1Length}, SignatureV2Present={SignatureV2Present}, SignatureV2Length={SignatureV2Length}, PrivateKeyPresent={PrivateKeyPresent}, PrivateKeyLength={PrivateKeyLength}, PayloadLength={PayloadLength}.",
-            !string.IsNullOrWhiteSpace(signatureV1),
-            signatureV1?.Length ?? 0,
-            !string.IsNullOrWhiteSpace(signatureV2),
-            signatureV2?.Length ?? 0,
-            !string.IsNullOrWhiteSpace(privateKey),
-            privateKey.Length,
-            payload.Length);
 
         if (!string.IsNullOrWhiteSpace(signatureV2))
         {
@@ -243,22 +260,18 @@ public class DojahKycService(
         using var document = JsonDocument.Parse(payload.ToArray());
         var root = document.RootElement;
 
-        var dojahReference = GetRequiredString(root, "reference_id");
+        var referenceId = GetRequiredString(root, "reference_id");
         var status = GetRequiredString(root, "verification_status");
         var message = root.TryGetProperty("message", out var messageElement) &&
                       messageElement.ValueKind == JsonValueKind.String
             ? messageElement.GetString()
             : null;
 
-        var customReference =
-            GetOptionalString(root, "vendor_reference") ??
-            GetOptionalString(root, "customer_reference") ??
-            GetOptionalString(root, "custom_reference") ??
-            GetMetadataReference(root);
+        var providerReference = GetMetadataReference(root);
 
         return new DojahWebhookData(
-            dojahReference,
-            customReference,
+            referenceId,
+            providerReference,
             status.Trim(),
             message);
     }
@@ -297,12 +310,7 @@ public class DojahKycService(
             return null;
         }
 
-        return GetOptionalString(metadata, "kyc_reference") ??
-               GetOptionalString(metadata, "vendor_reference") ??
-               GetOptionalString(metadata, "customer_reference") ??
-               GetOptionalString(metadata, "custom_reference") ??
-               GetOptionalString(metadata, "reference_id") ??
-               GetOptionalString(metadata, "user_id");
+        return GetOptionalString(metadata, "kyc_reference");
     }
 
     private static string ValidateReferenceLength(
@@ -355,21 +363,133 @@ public class DojahKycService(
         string customReference)
     {
         var uriBuilder = new UriBuilder(shareableLink);
-        var existingQuery = uriBuilder.Query.TrimStart('?');
-        var encodedReference = Uri.EscapeDataString(customReference);
-        var correlationQuery =
-            $"reference_id={encodedReference}&metadata%5Bkyc_reference%5D={encodedReference}";
+        var queryParts = new List<string>();
+        foreach (var pair in uriBuilder.Query
+                     .TrimStart('?')
+                     .Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2);
+            var key = Uri.UnescapeDataString(parts[0]);
+            if (key.Equals("reference_id", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals(
+                    "metadata[kyc_reference]",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
 
-        uriBuilder.Query = string.IsNullOrWhiteSpace(existingQuery)
-            ? correlationQuery
-            : $"{existingQuery}&{correlationQuery}";
+            queryParts.Add(pair);
+        }
+
+        queryParts.Add(
+            $"{Uri.EscapeDataString("metadata[kyc_reference]")}=" +
+            $"{Uri.EscapeDataString(customReference)}");
+        uriBuilder.Query = string.Join('&', queryParts);
 
         return uriBuilder.Uri.AbsoluteUri;
     }
 
+    private async Task<WebhookCorrelation> CorrelateWebhookAsync(
+        DojahWebhookData webhook,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(webhook.ProviderReference))
+        {
+            var kyc = await unitOfWork.KycVerifications
+                .GetByProviderReferenceAsync(
+                    webhook.ProviderReference,
+                    cancellationToken);
+            if (kyc is null)
+            {
+                var existingByDojah = IsPrydeOwnedReference(webhook.ReferenceId)
+                    ? null
+                    : await unitOfWork.KycVerifications
+                        .GetByDojahReferenceAsync(
+                            webhook.ReferenceId,
+                            cancellationToken);
+                if (existingByDojah is not null)
+                {
+                    logger.LogWarning(
+                        "Dojah webhook ProviderReference mismatch rejected for KYC {KycId}.",
+                        existingByDojah.Id);
+                    throw new ValidationException(
+                        "Dojah webhook correlation reference does not match the verification.");
+                }
+
+                throw new NotFoundException(
+                    nameof(KycVerification),
+                    webhook.ProviderReference);
+            }
+
+            logger.LogInformation(
+                "Dojah webhook correlated by ProviderReference for KYC {KycId}.",
+                kyc.Id);
+
+            if (IsPrydeOwnedReference(webhook.ReferenceId))
+            {
+                if (!webhook.ReferenceId.Equals(
+                        webhook.ProviderReference,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    logger.LogWarning(
+                        "Dojah webhook ProviderReference mismatch rejected for KYC {KycId}.",
+                        kyc.Id);
+                    throw new ValidationException(
+                        "Dojah webhook correlation references do not match.");
+                }
+
+                return new WebhookCorrelation(kyc, null, true);
+            }
+
+            return new WebhookCorrelation(
+                kyc,
+                webhook.ReferenceId,
+                false);
+        }
+
+        var legacyKyc = await unitOfWork.KycVerifications
+            .GetByProviderReferenceAsync(
+                webhook.ReferenceId,
+                cancellationToken);
+        if (legacyKyc is not null)
+        {
+            logger.LogInformation(
+                "Dojah webhook correlated by ProviderReference for KYC {KycId}.",
+                legacyKyc.Id);
+            return new WebhookCorrelation(legacyKyc, null, true);
+        }
+
+        if (IsPrydeOwnedReference(webhook.ReferenceId))
+        {
+            throw new NotFoundException(
+                nameof(KycVerification),
+                webhook.ReferenceId);
+        }
+
+        var kycByDojahReference = await unitOfWork.KycVerifications
+            .GetByDojahReferenceAsync(
+                webhook.ReferenceId,
+                cancellationToken)
+            ?? throw new NotFoundException(
+                nameof(KycVerification),
+                webhook.ReferenceId);
+        return new WebhookCorrelation(
+            kycByDojahReference,
+            webhook.ReferenceId,
+            false);
+    }
+
+    private static bool IsPrydeOwnedReference(string reference) =>
+        reference.StartsWith("PRYDE-", StringComparison.OrdinalIgnoreCase);
+
     private sealed record DojahWebhookData(
-        string DojahReference,
-        string? CustomReference,
+        string ReferenceId,
+        string? ProviderReference,
         string Status,
         string? Message);
+
+    private sealed record WebhookCorrelation(
+        KycVerification Kyc,
+        string? DojahReference,
+        bool IsLegacy);
 }

@@ -1,17 +1,18 @@
 using System.Security.Claims;
+using System.Diagnostics;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Pryde.Api.Authorization;
 using Pryde.Contracts.RequestModels;
-using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Constants;
 using Pryde.Domain.Enums;
 using Pryde.Services.Service.Interface;
 using Pryde.Services.Settings;
 using Pryde.Services.Storage.Enums;
 using Pryde.Services.Storage.Interface;
+using Pryde.Services.Storage.Validation;
 
 namespace Pryde.Api.Controllers.V1;
 
@@ -24,7 +25,8 @@ public class VehicleController(
     IFileStorageService fileStorageService,
     IAdminListingService adminListingService,
     IAdminPortalService adminPortalService,
-    IOptions<VehicleUploadSettings> vehicleUploadSettings) : ControllerBase
+    IOptions<VehicleUploadSettings> vehicleUploadSettings,
+    ILogger<VehicleController> logger) : ControllerBase
 {
     [HttpGet("~/api/v{version:apiVersion}/admin/vehicles")]
     [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
@@ -156,41 +158,47 @@ public class VehicleController(
         CancellationToken cancellationToken)
     {
         var userId = GetUserId();
-        var imageUrls = new Dictionary<VehicleImageType, string>();
-        await AddTypedImageAsync(
-            imageUrls, VehicleImageType.FrontView, request.FrontView,
-            userId, cancellationToken);
-        await AddTypedImageAsync(
-            imageUrls, VehicleImageType.RearView, request.RearView,
-            userId, cancellationToken);
-        await AddTypedImageAsync(
-            imageUrls, VehicleImageType.SideProfile, request.SideProfile,
-            userId, cancellationToken);
-        await AddTypedImageAsync(
-            imageUrls, VehicleImageType.Interior, request.Interior,
-            userId, cancellationToken);
-
-        string? videoUrl = null;
-        if (request.WalkAroundVideo is not null)
+        var fileCount = new[]
         {
-            ValidateFile(
-                request.WalkAroundVideo,
-                vehicleUploadSettings.Value.WalkAroundVideoMaxBytes,
-                ["video/mp4", "video/quicktime", "video/webm"],
-                "Walk-around video");
-            await using var stream = request.WalkAroundVideo.OpenReadStream();
-            var upload = await fileStorageService.UploadAsync(
-                stream,
-                request.WalkAroundVideo.FileName,
-                request.WalkAroundVideo.ContentType,
-                FileCategory.VehicleVideo,
-                userId,
-                cancellationToken);
-            videoUrl = upload.PublicUrl;
-        }
+            request.FrontView,
+            request.RearView,
+            request.SideProfile,
+            request.Interior,
+            request.WalkAroundVideo
+        }.Count(file => file is not null);
+        var stopwatch = Stopwatch.StartNew();
+        var success = false;
 
-        return Ok(await vehicleService.UpdateMediaAsync(
-            vehicleId, userId, imageUrls, videoUrl, cancellationToken));
+        logger.LogInformation(
+            "Vehicle media request received. VehicleId: {VehicleId}. " +
+            "UserId: {UserId}. FileCount: {FileCount}.",
+            vehicleId,
+            userId,
+            fileCount);
+
+        try
+        {
+            var response = await vehicleService.UploadMediaAsync(
+                vehicleId,
+                userId,
+                request,
+                cancellationToken);
+            success = true;
+            return Ok(response);
+        }
+        finally
+        {
+            stopwatch.Stop();
+            logger.LogInformation(
+                "Vehicle media request completed. VehicleId: {VehicleId}. " +
+                "UserId: {UserId}. FileCount: {FileCount}. " +
+                "DurationMilliseconds: {DurationMilliseconds}. Success: {Success}.",
+                vehicleId,
+                userId,
+                fileCount,
+                stopwatch.ElapsedMilliseconds,
+                success);
+        }
     }
 
     [HttpPut("{vehicleId:guid}/capacity-extras")]
@@ -221,7 +229,7 @@ public class VehicleController(
         var urls = new List<string>();
         foreach (var file in files)
         {
-            ValidateFile(
+            FileUploadValidator.Validate(
                 file,
                 vehicleUploadSettings.Value.VehicleImageMaxBytes,
                 ["image/jpeg", "image/png", "image/webp"],
@@ -235,42 +243,4 @@ public class VehicleController(
         return urls;
     }
 
-    private async Task AddTypedImageAsync(
-        IDictionary<VehicleImageType, string> urls,
-        VehicleImageType imageType,
-        IFormFile? file,
-        Guid userId,
-        CancellationToken cancellationToken)
-    {
-        if (file is null)
-            return;
-        ValidateFile(
-            file,
-            vehicleUploadSettings.Value.VehicleImageMaxBytes,
-            ["image/jpeg", "image/png", "image/webp"],
-            imageType.ToString());
-        await using var stream = file.OpenReadStream();
-        var upload = await fileStorageService.UploadAsync(
-            stream,
-            file.FileName,
-            file.ContentType,
-            FileCategory.VehiclePhoto,
-            userId,
-            cancellationToken);
-        urls[imageType] = upload.PublicUrl;
-    }
-
-    private static void ValidateFile(
-        IFormFile file,
-        long maximumBytes,
-        IReadOnlyCollection<string> allowedContentTypes,
-        string name)
-    {
-        if (file.Length == 0)
-            throw new ValidationException($"{name} is empty.");
-        if (file.Length > maximumBytes)
-            throw new ValidationException($"{name} exceeds the configured upload limit.");
-        if (!allowedContentTypes.Contains(file.ContentType, StringComparer.OrdinalIgnoreCase))
-            throw new ValidationException($"{name} file type is not supported.");
-    }
 }

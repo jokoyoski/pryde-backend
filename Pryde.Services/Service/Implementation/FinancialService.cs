@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
@@ -21,78 +23,258 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
         CancellationToken cancellationToken = default)
     {
         var key = ValidateIdempotencyKey(idempotencyKey);
-        return await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
+        try
         {
-            var priorTransaction = await unitOfWork.Ledger.GetByIdempotencyKeyAsync(key, transactionToken);
-            if (priorTransaction is not null)
+            var result = await unitOfWork.ExecuteInTransactionOnceAsync(
+                async transactionToken =>
             {
-                if (priorTransaction.BookingId != bookingId)
-                    throw new ConflictException("The idempotency key has already been used for another booking.");
-                var priorEscrow = await unitOfWork.Escrows.GetByBookingIdAsync(bookingId, transactionToken)
-                    ?? throw new ConflictException("The prior payment record is incomplete.");
-                var priorResponse = MapEscrow(priorEscrow);
-                priorResponse.TripId = priorEscrow.Booking.TripId;
-                return priorResponse;
+                var booking = await unitOfWork.TripBookings
+                    .GetByIdForUpdateAsync(
+                        bookingId,
+                        transactionToken)
+                    ?? throw new NotFoundException(
+                        nameof(TripBooking),
+                        bookingId);
+                if (booking.PassengerId != passengerId)
+                {
+                    throw new ForbiddenException(
+                        "Only the booking owner can pay for this booking.");
+                }
+
+                var trip = await unitOfWork.Trips
+                    .GetByIdWithVehicleForUpdateAsync(
+                        booking.TripId,
+                        transactionToken)
+                    ?? throw new NotFoundException(
+                        nameof(Trip),
+                        booking.TripId);
+                booking.Trip = trip;
+
+                var priorTransaction = await unitOfWork.Ledger
+                    .GetByIdempotencyKeyAsync(
+                        key,
+                        transactionToken);
+                if (priorTransaction is not null)
+                {
+                    if (priorTransaction.BookingId != bookingId)
+                    {
+                        throw new ConflictException(
+                            "The idempotency key has already been used for another booking.");
+                    }
+
+                    var priorEscrow = await unitOfWork.Escrows
+                        .GetByBookingIdAsync(
+                            bookingId,
+                            transactionToken)
+                        ?? throw new ConflictException(
+                            "The prior payment record is incomplete.");
+                    var priorResponse = MapEscrow(priorEscrow);
+                    priorResponse.TripId = booking.TripId;
+                    return new PaymentHoldResult(
+                        priorResponse,
+                        false);
+                }
+
+                if (booking.Status != BookingStatus.Approved)
+                {
+                    throw PaymentUnavailableConflict(booking);
+                }
+
+                if (booking.PaidAt.HasValue ||
+                    await unitOfWork.Escrows.GetByBookingIdAsync(
+                        bookingId,
+                        transactionToken) is not null)
+                {
+                    throw new ConflictException(
+                        "This booking has already been paid.");
+                }
+
+                var now = DateTime.UtcNow;
+                if (!booking.PaymentExpiresAt.HasValue)
+                {
+                    throw new ConflictException(
+                        "This booking does not have a valid payment deadline.");
+                }
+
+                if (booking.PaymentExpiresAt.Value <= now)
+                {
+                    BookingSeatReservation.CancelApprovedBooking(
+                        booking);
+                    unitOfWork.TripBookings.Update(booking);
+                    unitOfWork.Trips.Update(trip);
+                    await unitOfWork.SaveChangesAsync(
+                        transactionToken);
+                    return new PaymentHoldResult(null, true);
+                }
+
+                var passengerWallet = await unitOfWork.Wallets
+                    .GetByUserIdAsync(
+                        passengerId,
+                        transactionToken)
+                    ?? throw new NotFoundException(
+                        nameof(Wallet),
+                        passengerId);
+                if (passengerWallet.Balance < booking.TotalAmount)
+                {
+                    throw new ConflictException(
+                        "The wallet balance is insufficient for this booking.");
+                }
+
+                var walletAccount = await EnsureWalletAccountAsync(
+                    passengerWallet,
+                    transactionToken);
+                var escrowAccount = await EnsureSystemAccountAsync(
+                    EscrowAccountCode,
+                    "Booking Escrow",
+                    LedgerAccountType.Escrow,
+                    transactionToken);
+                var escrow = new Escrow
+                {
+                    BookingId = booking.Id,
+                    Booking = booking,
+                    PassengerId = passengerId,
+                    DriverId = trip.DriverId,
+                    Amount = booking.TotalAmount,
+                    DriverAmount = booking.SeatPrice,
+                    PlatformAmount = booking.ServiceCharge,
+                    Currency = Currency,
+                    Status = EscrowStatus.Held,
+                    HeldAt = now
+                };
+                await unitOfWork.Escrows.CreateAsync(
+                    escrow,
+                    transactionToken);
+
+                var ledgerTransaction = NewTransaction(
+                    LedgerTransactionType.BookingPaymentHold,
+                    booking.TotalAmount,
+                    booking.Id,
+                    escrow.Id,
+                    key,
+                    "HOLD",
+                    now);
+                await AddBalancedEntriesAsync(
+                    ledgerTransaction,
+                    [
+                        NewEntry(
+                            ledgerTransaction,
+                            walletAccount,
+                            LedgerEntryType.Debit,
+                            booking.TotalAmount),
+                        NewEntry(
+                            ledgerTransaction,
+                            escrowAccount,
+                            LedgerEntryType.Credit,
+                            booking.TotalAmount)
+                    ],
+                    transactionToken);
+
+                passengerWallet.Balance -= booking.TotalAmount;
+                passengerWallet.EscrowBalance +=
+                    booking.TotalAmount;
+                unitOfWork.Wallets.Update(passengerWallet);
+                await unitOfWork.WalletTransactions.CreateAsync(
+                    new WalletTransaction
+                    {
+                        WalletId = passengerWallet.Id,
+                        Amount = booking.TotalAmount,
+                        Type = WalletTransactionType.EscrowHold,
+                        Reference = ledgerTransaction.Reference
+                    },
+                    transactionToken);
+                booking.PaidAt = now;
+                unitOfWork.TripBookings.Update(booking);
+                await unitOfWork.SaveChangesAsync(
+                    transactionToken);
+                var response = MapEscrow(escrow);
+                response.TripId = booking.TripId;
+                return new PaymentHoldResult(response, false);
+            }, cancellationToken);
+
+            if (result.Expired)
+            {
+                throw new ConflictException(
+                    "The booking payment window has expired.");
             }
 
-            var booking = await unitOfWork.TripBookings.GetByIdWithTripAsync(bookingId, transactionToken)
-                ?? throw new NotFoundException(nameof(TripBooking), bookingId);
-            if (booking.PassengerId != passengerId)
-                throw new ForbiddenException("Only the booking owner can pay for this booking.");
-            if (booking.Status != BookingStatus.Approved)
-                throw new ConflictException("Only an approved booking can be paid.");
-            if (booking.PaidAt.HasValue || await unitOfWork.Escrows.GetByBookingIdAsync(bookingId, transactionToken) is not null)
-                throw new ConflictException("This booking has already been paid.");
-
-            var passengerWallet = await unitOfWork.Wallets.GetByUserIdAsync(passengerId, transactionToken)
-                ?? throw new NotFoundException(nameof(Wallet), passengerId);
-            if (passengerWallet.Balance < booking.TotalAmount)
-                throw new ConflictException("The wallet balance is insufficient for this booking.");
-
-            var walletAccount = await EnsureWalletAccountAsync(passengerWallet, transactionToken);
-            var escrowAccount = await EnsureSystemAccountAsync(
-                EscrowAccountCode, "Booking Escrow", LedgerAccountType.Escrow, transactionToken);
-            var now = DateTime.UtcNow;
-            var escrow = new Escrow
+            return result.Response!;
+        }
+        catch (Exception exception)
+            when (IsConcurrencyFailure(exception))
+        {
+            var current = await unitOfWork.TripBookings
+                .GetByIdAsync(bookingId, cancellationToken);
+            if (current is not null &&
+                (current.Status == BookingStatus.Cancelled ||
+                 (!current.PaidAt.HasValue &&
+                  current.PaymentExpiresAt.HasValue &&
+                  current.PaymentExpiresAt.Value <=
+                    DateTime.UtcNow)))
             {
-                BookingId = booking.Id,
-                Booking = booking,
-                PassengerId = passengerId,
-                DriverId = booking.Trip.DriverId,
-                Amount = booking.TotalAmount,
-                DriverAmount = booking.SeatPrice,
-                PlatformAmount = booking.ServiceCharge,
-                Currency = Currency,
-                Status = EscrowStatus.Held,
-                HeldAt = now
-            };
-            await unitOfWork.Escrows.CreateAsync(escrow, transactionToken);
+                throw new ConflictException(
+                    "The booking payment window has expired.");
+            }
 
-            var ledgerTransaction = NewTransaction(
-                LedgerTransactionType.BookingPaymentHold, booking.TotalAmount,
-                booking.Id, escrow.Id, key, "HOLD", now);
-            await AddBalancedEntriesAsync(ledgerTransaction, [
-                NewEntry(ledgerTransaction, walletAccount, LedgerEntryType.Debit, booking.TotalAmount),
-                NewEntry(ledgerTransaction, escrowAccount, LedgerEntryType.Credit, booking.TotalAmount)
-            ], transactionToken);
+            throw new ConflictException(
+                "The booking changed while payment was being processed. No payment was taken.");
+        }
+    }
 
-            passengerWallet.Balance -= booking.TotalAmount;
-            passengerWallet.EscrowBalance += booking.TotalAmount;
-            unitOfWork.Wallets.Update(passengerWallet);
-            await unitOfWork.WalletTransactions.CreateAsync(new WalletTransaction
+    public async Task<bool> ExpireUnpaidApprovedBookingAsync(
+        Guid bookingId,
+        DateTime utcNow,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await unitOfWork.ExecuteInTransactionOnceAsync(
+                async transactionToken =>
+                {
+                    var booking = await unitOfWork.TripBookings
+                        .GetByIdForUpdateAsync(
+                            bookingId,
+                            transactionToken);
+                    if (!CanExpire(booking, utcNow))
+                    {
+                        return false;
+                    }
+
+                    var trip = await unitOfWork.Trips
+                        .GetByIdWithVehicleForUpdateAsync(
+                            booking!.TripId,
+                            transactionToken)
+                        ?? throw new NotFoundException(
+                            nameof(Trip),
+                            booking.TripId);
+                    booking.Trip = trip;
+
+                    if (!CanExpire(booking, utcNow))
+                    {
+                        return false;
+                    }
+
+                    BookingSeatReservation.CancelApprovedBooking(
+                        booking);
+                    unitOfWork.TripBookings.Update(booking);
+                    unitOfWork.Trips.Update(trip);
+                    await unitOfWork.SaveChangesAsync(
+                        transactionToken);
+                    return true;
+                },
+                cancellationToken);
+        }
+        catch (Exception exception)
+            when (IsConcurrencyFailure(exception))
+        {
+            var current = await unitOfWork.TripBookings
+                .GetByIdAsync(bookingId, cancellationToken);
+            if (!CanExpire(current, DateTime.UtcNow))
             {
-                WalletId = passengerWallet.Id,
-                Amount = booking.TotalAmount,
-                Type = WalletTransactionType.EscrowHold,
-                Reference = ledgerTransaction.Reference
-            }, transactionToken);
-            booking.PaidAt = now;
-            unitOfWork.TripBookings.Update(booking);
-            await unitOfWork.SaveChangesAsync(transactionToken);
-            var response = MapEscrow(escrow);
-            response.TripId = booking.TripId;
-            return response;
-        }, cancellationToken);
+                return false;
+            }
+
+            throw;
+        }
     }
 
     public async Task RefundBookingAsync(Guid bookingId, CancellationToken cancellationToken = default)
@@ -764,9 +946,63 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
         return value;
     }
 
+    private static bool CanExpire(
+        TripBooking? booking,
+        DateTime utcNow)
+    {
+        return booking is not null &&
+               booking.Status == BookingStatus.Approved &&
+               !booking.PaidAt.HasValue &&
+               booking.PaymentExpiresAt.HasValue &&
+               booking.PaymentExpiresAt.Value <= utcNow;
+    }
+
+    private static ConflictException PaymentUnavailableConflict(
+        TripBooking booking)
+    {
+        if (!booking.PaidAt.HasValue &&
+            booking.PaymentExpiresAt.HasValue &&
+            booking.PaymentExpiresAt.Value <= DateTime.UtcNow)
+        {
+            return new ConflictException(
+                "The booking payment window has expired.");
+        }
+
+        return new ConflictException(
+            "Only an approved booking can be paid.");
+    }
+
+    private static bool IsConcurrencyFailure(
+        Exception exception)
+    {
+        for (Exception? current = exception;
+             current is not null;
+             current = current.InnerException)
+        {
+            if (current is DbUpdateConcurrencyException)
+            {
+                return true;
+            }
+
+            if (current is PostgresException postgresException &&
+                postgresException.SqlState is
+                    PostgresErrorCodes.SerializationFailure or
+                    PostgresErrorCodes.DeadlockDetected)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static void ValidateDateRange(DateTime? from, DateTime? to)
     {
         if (from.HasValue && to.HasValue && from.Value > to.Value)
             throw new ValidationException("DateFrom cannot be later than DateTo.");
     }
+
+    private sealed record PaymentHoldResult(
+        EscrowResponseDto? Response,
+        bool Expired);
 }

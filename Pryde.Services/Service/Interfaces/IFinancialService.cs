@@ -8,6 +8,10 @@ namespace Pryde.Services.Service.Interface;
 public interface IFinancialService
 {
     Task<EscrowResponseDto> HoldBookingPaymentAsync(Guid passengerId, Guid bookingId, string idempotencyKey, CancellationToken cancellationToken = default);
+    Task<bool> ExpireUnpaidApprovedBookingAsync(
+        Guid bookingId,
+        DateTime utcNow,
+        CancellationToken cancellationToken = default);
     Task RefundBookingAsync(Guid bookingId, CancellationToken cancellationToken = default);
     Task RefundTripAsync(Guid tripId, CancellationToken cancellationToken = default);
     Task CompleteTripAsync(Guid tripId, Guid driverId, CancellationToken cancellationToken = default);

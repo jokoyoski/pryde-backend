@@ -20,10 +20,13 @@ public class DojahKycServiceTests
     {
         var values = new Dictionary<string, string?>
         {
+            ["Dojah:BaseUrl"] = "https://sandbox.dojah.io",
             ["Dojah:Enabled"] = "true",
             ["Dojah:AppId"] = "bound-app",
+            ["Dojah:ApiKey"] = "obsolete-api-key",
             ["Dojah:PublicKey"] = "bound-public",
-            ["Dojah:PrivateKey"] = "bound-private"
+            ["Dojah:PrivateKey"] = "bound-private",
+            ["DojahSettings:PrivateKey"] = "wrong-section-private"
         };
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(values)
@@ -33,6 +36,7 @@ public class DojahKycServiceTests
 
         Assert.NotNull(settings);
         Assert.True(settings.Enabled);
+        Assert.Equal("https://sandbox.dojah.io", settings.BaseUrl);
         Assert.Equal("bound-app", settings.AppId);
         Assert.Equal("bound-public", settings.PublicKey);
         Assert.Equal("bound-private", settings.PrivateKey);
@@ -52,8 +56,72 @@ public class DojahKycServiceTests
         var result = new DojahSettingsValidator().Validate(null, new DojahSettings { Enabled = true });
 
         Assert.True(result.Failed);
+        Assert.Contains(nameof(DojahSettings.BaseUrl), result.FailureMessage);
         Assert.Contains(nameof(DojahSettings.AppId), result.FailureMessage);
         Assert.Contains(nameof(DojahSettings.PrivateKey), result.FailureMessage);
+    }
+
+    [Fact]
+    public void EnabledSettingsUsePrivateKeyAndDoNotRequireApiToken()
+    {
+        var settings = Settings();
+        settings.ApiToken = string.Empty;
+
+        var result = new DojahSettingsValidator().Validate(null, settings);
+
+        Assert.False(result.Failed);
+    }
+
+    [Fact]
+    public void EnabledSettingsRejectNonHttpsBaseUrl()
+    {
+        var settings = Settings();
+        settings.BaseUrl = "http://api.dojah.io";
+        settings.ApiToken = "api-token";
+
+        var result = new DojahSettingsValidator().Validate(null, settings);
+
+        Assert.True(result.Failed);
+        Assert.Contains("BaseUrl", result.FailureMessage);
+        Assert.Contains("HTTPS", result.FailureMessage);
+    }
+
+    [Fact]
+    public void EnabledSettingsRejectLeadingOrTrailingWhitespace()
+    {
+        var settings = Settings();
+        settings.PrivateKey = $" {settings.PrivateKey}";
+
+        var result = new DojahSettingsValidator().Validate(null, settings);
+
+        Assert.True(result.Failed);
+        Assert.Contains(nameof(DojahSettings.PrivateKey), result.FailureMessage);
+        Assert.Contains("whitespace", result.FailureMessage);
+    }
+
+    [Fact]
+    public void EnabledSettingsRejectCredentialValuesThatMustBeDifferent()
+    {
+        var validator = new DojahSettingsValidator();
+        var appIdMatchesPrivateKey = Settings();
+        appIdMatchesPrivateKey.PrivateKey = appIdMatchesPrivateKey.AppId;
+        var publicKeyMatchesPrivateKey = Settings();
+        publicKeyMatchesPrivateKey.PrivateKey = publicKeyMatchesPrivateKey.PublicKey;
+        var appIdMatchesApiToken = Settings();
+        appIdMatchesApiToken.ApiToken = appIdMatchesApiToken.AppId;
+
+        var appIdResult = validator.Validate(null, appIdMatchesPrivateKey);
+        var publicKeyResult = validator.Validate(
+            null,
+            publicKeyMatchesPrivateKey);
+        var apiTokenResult = validator.Validate(null, appIdMatchesApiToken);
+
+        Assert.True(appIdResult.Failed);
+        Assert.Contains("AppId and PrivateKey", appIdResult.FailureMessage);
+        Assert.True(publicKeyResult.Failed);
+        Assert.Contains("PublicKey and PrivateKey", publicKeyResult.FailureMessage);
+        Assert.True(apiTokenResult.Failed);
+        Assert.Contains("AppId and ApiToken", apiTokenResult.FailureMessage);
     }
 
     [Fact]
@@ -66,18 +134,62 @@ public class DojahKycServiceTests
         var first = await service.GetConfigAsync(userId);
         var second = await service.GetConfigAsync(userId);
 
-        Assert.Equal(first.ReferenceId, second.ReferenceId);
-        Assert.StartsWith("PRYDE-", first.ReferenceId);
-        Assert.Equal(first.ReferenceId, first.Metadata["kyc_reference"]);
+        Assert.Null(first.ReferenceId);
+        Assert.Null(second.ReferenceId);
+        Assert.Equal(first.ProviderReference, second.ProviderReference);
+        Assert.StartsWith("PRYDE-", first.ProviderReference);
+        Assert.Equal(
+            first.ProviderReference,
+            first.Metadata["kyc_reference"]);
+        Assert.DoesNotContain(
+            "reference_id=",
+            first.ShareableLink,
+            StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
-            $"reference_id={first.ReferenceId}",
+            $"metadata%5Bkyc_reference%5D={first.ProviderReference}",
             first.ShareableLink);
-        Assert.Contains(
-            $"metadata%5Bkyc_reference%5D={first.ReferenceId}",
-            first.ShareableLink);
+        Assert.Equal("app-test", first.AppId);
+        Assert.Equal("public-test", first.PublicKey);
         Assert.Equal("widget-test", first.WidgetId);
         Assert.Equal(KycStatus.Pending, first.Status);
         Assert.Single(unitOfWork.KycVerificationRepository.Items);
+    }
+
+    [Fact]
+    public async Task ShareableLinkReplacesOldCorrelationAndEncodesMetadata()
+    {
+        const string providerReference = "PRYDE-value with/+characters";
+        var unitOfWork = new TestUnitOfWork();
+        unitOfWork.KycVerificationRepository.Items.Add(new KycVerification
+        {
+            UserId = Guid.Parse("74462e4a-98c5-4a1d-a480-ee5e45244a1e"),
+            Status = KycStatus.Pending,
+            ProviderReference = providerReference
+        });
+        var settings = Settings();
+        settings.ShareableLink =
+            "https://identity.dojah.io/?widget_id=widget-test" +
+            "&reference_id=PRYDE-old" +
+            "&metadata%5Bkyc_reference%5D=PRYDE-old" +
+            "&return_url=https%3A%2F%2Fpryde.test%2Fcomplete";
+        var service = Service(unitOfWork, settings);
+
+        var result = await service.GetConfigAsync(
+            Guid.Parse("74462e4a-98c5-4a1d-a480-ee5e45244a1e"));
+
+        Assert.DoesNotContain(
+            "reference_id=",
+            result.ShareableLink,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("PRYDE-old", result.ShareableLink);
+        Assert.Contains(
+            "metadata%5Bkyc_reference%5D=" +
+            "PRYDE-value%20with%2F%2Bcharacters",
+            result.ShareableLink);
+        Assert.Contains(
+            "return_url=https%3A%2F%2Fpryde.test%2Fcomplete",
+            result.ShareableLink);
+        Assert.Equal(providerReference, result.ProviderReference);
     }
 
     [Fact]
@@ -117,7 +229,7 @@ public class DojahKycServiceTests
         var unitOfWork = new TestUnitOfWork();
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
-        var payload = Payload(config.ReferenceId, providerStatus, "  provider   check failed  ");
+        var payload = Payload(config.ProviderReference, providerStatus, "  provider   check failed  ");
 
         await service.ProcessWebhookAsync(payload, SignV1(payload), null);
 
@@ -134,12 +246,12 @@ public class DojahKycServiceTests
         var unitOfWork = new TestUnitOfWork();
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
-        var payload = Payload(config.ReferenceId, "Completed");
+        var payload = Payload(config.ProviderReference, "Completed");
 
         await service.ProcessWebhookAsync(payload, SignV1(payload), null);
 
         var kyc = Assert.Single(unitOfWork.KycVerificationRepository.Items);
-        Assert.Equal(config.ReferenceId, kyc.ProviderReference);
+        Assert.Equal(config.ProviderReference, kyc.ProviderReference);
         Assert.Null(kyc.DojahReference);
         Assert.Equal("Completed", kyc.ProviderStatus);
         Assert.Equal(KycStatus.Approved, kyc.Status);
@@ -156,13 +268,13 @@ public class DojahKycServiceTests
         var config = await service.GetConfigAsync(Guid.NewGuid());
         var payload = PayloadWithMetadata(
             dojahReference,
-            config.ReferenceId,
+            config.ProviderReference,
             "Completed");
 
         await service.ProcessWebhookAsync(payload, SignV1(payload), null);
 
         var kyc = Assert.Single(unitOfWork.KycVerificationRepository.Items);
-        Assert.Equal(config.ReferenceId, kyc.ProviderReference);
+        Assert.Equal(config.ProviderReference, kyc.ProviderReference);
         Assert.Equal(dojahReference, kyc.DojahReference);
         Assert.Equal(KycStatus.Approved, kyc.Status);
     }
@@ -176,7 +288,7 @@ public class DojahKycServiceTests
         var config = await service.GetConfigAsync(Guid.NewGuid());
         var firstPayload = PayloadWithMetadata(
             dojahReference,
-            config.ReferenceId,
+            config.ProviderReference,
             "Ongoing");
         await service.ProcessWebhookAsync(
             firstPayload,
@@ -192,6 +304,137 @@ public class DojahKycServiceTests
         var kyc = Assert.Single(unitOfWork.KycVerificationRepository.Items);
         Assert.Equal(dojahReference, kyc.DojahReference);
         Assert.Equal(KycStatus.Approved, kyc.Status);
+    }
+
+    [Fact]
+    public async Task LaterModernWebhookEnrichesLegacyApprovedKyc()
+    {
+        const string dojahReference = "provider-generated-reference-42";
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var legacyPayload = Payload(
+            config.ProviderReference,
+            "Completed");
+        await service.ProcessWebhookAsync(
+            legacyPayload,
+            SignV1(legacyPayload),
+            null);
+        var modernPayload = PayloadWithMetadata(
+            dojahReference,
+            config.ProviderReference,
+            "Completed");
+
+        await service.ProcessWebhookAsync(
+            modernPayload,
+            SignV1(modernPayload),
+            null);
+
+        var kyc = Assert.Single(unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(dojahReference, kyc.DojahReference);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
+    }
+
+    [Fact]
+    public async Task ExistingIdenticalDojahReferenceIsAccepted()
+    {
+        const string dojahReference = "provider-generated-reference-43";
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var ongoingPayload = PayloadWithMetadata(
+            dojahReference,
+            config.ProviderReference,
+            "Ongoing");
+        await service.ProcessWebhookAsync(
+            ongoingPayload,
+            SignV1(ongoingPayload),
+            null);
+        var completedPayload = PayloadWithMetadata(
+            dojahReference,
+            config.ProviderReference,
+            "Completed");
+
+        await service.ProcessWebhookAsync(
+            completedPayload,
+            SignV1(completedPayload),
+            null);
+
+        var kyc = Assert.Single(unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(dojahReference, kyc.DojahReference);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
+    }
+
+    [Fact]
+    public async Task MismatchedExistingDojahReferenceIsRejectedWithoutUpdatingKyc()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var kyc = Assert.Single(unitOfWork.KycVerificationRepository.Items);
+        kyc.DojahReference = "provider-generated-reference-original";
+        var payload = PayloadWithMetadata(
+            "provider-generated-reference-different",
+            config.ProviderReference,
+            "Completed");
+        var saveCount = unitOfWork.SaveChangesCount;
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            service.ProcessWebhookAsync(
+                payload,
+                SignV1(payload),
+                null));
+
+        Assert.Equal(
+            "provider-generated-reference-original",
+            kyc.DojahReference);
+        Assert.Equal(KycStatus.Pending, kyc.Status);
+        Assert.Equal(saveCount, unitOfWork.SaveChangesCount);
+    }
+
+    [Fact]
+    public async Task MismatchedProviderReferenceIsRejectedWithoutUpdatingKyc()
+    {
+        const string dojahReference = "provider-generated-reference-44";
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var kyc = Assert.Single(unitOfWork.KycVerificationRepository.Items);
+        kyc.DojahReference = dojahReference;
+        var payload = PayloadWithMetadata(
+            dojahReference,
+            "PRYDE-different-correlation",
+            "Completed");
+        var saveCount = unitOfWork.SaveChangesCount;
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            service.ProcessWebhookAsync(
+                payload,
+                SignV1(payload),
+                null));
+
+        Assert.Equal(KycStatus.Pending, kyc.Status);
+        Assert.Equal(config.ProviderReference, kyc.ProviderReference);
+        Assert.Equal(saveCount, unitOfWork.SaveChangesCount);
+    }
+
+    [Fact]
+    public async Task ModernWebhookDoesNotCreateDuplicateKycRecord()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = PayloadWithMetadata(
+            "provider-generated-reference-45",
+            config.ProviderReference,
+            "Completed");
+
+        await service.ProcessWebhookAsync(
+            payload,
+            SignV1(payload),
+            null);
+
+        Assert.Single(unitOfWork.KycVerificationRepository.Items);
     }
 
     [Fact]
@@ -217,7 +460,7 @@ public class DojahKycServiceTests
         var config = await service.GetConfigAsync(Guid.NewGuid());
         var payload = PayloadWithMetadata(
             dojahReference,
-            config.ReferenceId,
+            config.ProviderReference,
             "Completed");
         var signature = SignV1(payload);
 
@@ -242,7 +485,7 @@ public class DojahKycServiceTests
         var config = await service.GetConfigAsync(Guid.NewGuid());
         var payload = PayloadWithMetadata(
             dojahReference,
-            config.ReferenceId,
+            config.ProviderReference,
             "Failed",
             "Document could not be verified.");
 
@@ -264,7 +507,7 @@ public class DojahKycServiceTests
         var unitOfWork = new TestUnitOfWork();
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
-        var payload = Payload(config.ReferenceId, "Completed");
+        var payload = Payload(config.ProviderReference, "Completed");
 
         await service.ProcessWebhookAsync(payload, SignV1(payload), null);
 
@@ -277,7 +520,7 @@ public class DojahKycServiceTests
         var unitOfWork = new TestUnitOfWork();
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
-        var payload = Payload(config.ReferenceId, "Completed");
+        var payload = Payload(config.ProviderReference, "Completed");
 
         await service.ProcessWebhookAsync(payload, null, SignV2());
 
@@ -290,7 +533,7 @@ public class DojahKycServiceTests
         var unitOfWork = new TestUnitOfWork();
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
-        var payload = Payload(config.ReferenceId, "Completed");
+        var payload = Payload(config.ProviderReference, "Completed");
 
         await Assert.ThrowsAsync<UnauthorizedException>(() =>
             service.ProcessWebhookAsync(payload, new string('0', 64), null));
@@ -304,7 +547,7 @@ public class DojahKycServiceTests
         var unitOfWork = new TestUnitOfWork();
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
-        var payload = Payload(config.ReferenceId, "Completed");
+        var payload = Payload(config.ProviderReference, "Completed");
 
         await Assert.ThrowsAsync<UnauthorizedException>(() =>
             service.ProcessWebhookAsync(payload, null, new string('0', 64)));
@@ -318,7 +561,7 @@ public class DojahKycServiceTests
         var unitOfWork = new TestUnitOfWork();
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
-        var payload = Payload(config.ReferenceId, "Completed");
+        var payload = Payload(config.ProviderReference, "Completed");
 
         await service.ProcessWebhookAsync(payload, new string('0', 64), SignV2());
 
@@ -331,7 +574,7 @@ public class DojahKycServiceTests
         var unitOfWork = new TestUnitOfWork();
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
-        var payload = Payload(config.ReferenceId, "Completed");
+        var payload = Payload(config.ProviderReference, "Completed");
 
         await Assert.ThrowsAsync<UnauthorizedException>(() =>
             service.ProcessWebhookAsync(payload, null, null));
@@ -345,7 +588,7 @@ public class DojahKycServiceTests
         var unitOfWork = new TestUnitOfWork();
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
-        var payload = Payload(config.ReferenceId, "Completed");
+        var payload = Payload(config.ProviderReference, "Completed");
 
         await service.ProcessWebhookAsync(
             payload,
@@ -362,7 +605,7 @@ public class DojahKycServiceTests
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
         var payload = Encoding.UTF8.GetBytes(
-            $"{{\n  \"reference_id\": \"{config.ReferenceId}\",\n  \"verification_status\": \"Completed\"\n}}");
+            $"{{\n  \"reference_id\": \"{config.ProviderReference}\",\n  \"verification_status\": \"Completed\"\n}}");
 
         await service.ProcessWebhookAsync(payload, SignV1(payload), null);
 
@@ -375,7 +618,7 @@ public class DojahKycServiceTests
         var unitOfWork = new TestUnitOfWork();
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
-        var payload = Payload(config.ReferenceId, "Completed");
+        var payload = Payload(config.ProviderReference, "Completed");
         var signature = SignV1(payload);
 
         await service.ProcessWebhookAsync(payload, signature, null);
@@ -391,22 +634,29 @@ public class DojahKycServiceTests
         var unitOfWork = new TestUnitOfWork();
         var service = Service(unitOfWork);
         var config = await service.GetConfigAsync(Guid.NewGuid());
-        var completed = Payload(config.ReferenceId, "Completed");
+        var completed = Payload(config.ProviderReference, "Completed");
         await service.ProcessWebhookAsync(completed, SignV1(completed), null);
-        var oldPending = Payload(config.ReferenceId, "Ongoing");
+        var oldPending = Payload(config.ProviderReference, "Ongoing");
 
         await service.ProcessWebhookAsync(oldPending, SignV1(oldPending), null);
 
         Assert.Equal(KycStatus.Approved, unitOfWork.KycVerificationRepository.Items[0].Status);
     }
 
-    private static DojahKycService Service(TestUnitOfWork unitOfWork) =>
-        new(unitOfWork, Options.Create(Settings()), NullLogger<DojahKycService>.Instance);
+    private static DojahKycService Service(
+        TestUnitOfWork unitOfWork,
+        DojahSettings? settings = null) =>
+        new(
+            unitOfWork,
+            Options.Create(settings ?? Settings()),
+            NullLogger<DojahKycService>.Instance);
 
     private static DojahSettings Settings() => new()
     {
         Enabled = true,
+        BaseUrl = "https://api.dojah.io",
         AppId = "app-test",
+        ApiToken = "api-token",
         PublicKey = "public-test",
         PrivateKey = "private-test",
         ShareableLink = "https://identity.dojah.io/?widget_id=widget-test"

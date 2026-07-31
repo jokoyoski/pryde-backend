@@ -1,4 +1,5 @@
 using Pryde.Contracts.RequestModels;
+using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
@@ -157,6 +158,176 @@ public class FinancialServiceTests
             detail.Entries.Where(entry => entry.EntryType == LedgerEntryType.Credit).Sum(entry => entry.Amount));
     }
 
+    [Fact]
+    public async Task ExpiredUnpaidBookingIsCancelledAndRestoresSeatOnce()
+    {
+        var context = CreateContext();
+        context.Trip.AvailableSeats = 1;
+        context.Booking.PaymentExpiresAt =
+            DateTime.UtcNow.AddMinutes(-1);
+        var service = new FinancialService(
+            context.UnitOfWork);
+
+        var first = await service
+            .ExpireUnpaidApprovedBookingAsync(
+                context.Booking.Id,
+                DateTime.UtcNow);
+        var second = await service
+            .ExpireUnpaidApprovedBookingAsync(
+                context.Booking.Id,
+                DateTime.UtcNow);
+
+        Assert.True(first);
+        Assert.False(second);
+        Assert.Equal(
+            BookingStatus.Cancelled,
+            context.Booking.Status);
+        Assert.Equal(2, context.Trip.AvailableSeats);
+    }
+
+    [Fact]
+    public async Task PaidBookingDoesNotExpire()
+    {
+        var context = CreateContext();
+        context.Booking.PaidAt =
+            DateTime.UtcNow.AddMinutes(-1);
+        context.Booking.PaymentExpiresAt =
+            DateTime.UtcNow.AddMinutes(-2);
+
+        var expired = await new FinancialService(
+                context.UnitOfWork)
+            .ExpireUnpaidApprovedBookingAsync(
+                context.Booking.Id,
+                DateTime.UtcNow);
+
+        Assert.False(expired);
+        Assert.Equal(
+            BookingStatus.Approved,
+            context.Booking.Status);
+    }
+
+    [Fact]
+    public async Task UnexpiredBookingDoesNotExpire()
+    {
+        var context = CreateContext();
+        context.Booking.PaymentExpiresAt =
+            DateTime.UtcNow.AddMinutes(1);
+
+        var expired = await new FinancialService(
+                context.UnitOfWork)
+            .ExpireUnpaidApprovedBookingAsync(
+                context.Booking.Id,
+                DateTime.UtcNow);
+
+        Assert.False(expired);
+        Assert.Equal(
+            BookingStatus.Approved,
+            context.Booking.Status);
+    }
+
+    [Fact]
+    public async Task PaymentAfterExpiryIsRejectedWithoutWalletDebit()
+    {
+        var context = CreateContext();
+        context.Trip.AvailableSeats = 1;
+        context.Booking.PaymentExpiresAt =
+            DateTime.UtcNow.AddMinutes(-1);
+        var originalBalance =
+            context.PassengerWallet.Balance;
+
+        var exception = await Assert.ThrowsAsync<
+            ConflictException>(() =>
+            new FinancialService(context.UnitOfWork)
+                .HoldBookingPaymentAsync(
+                    context.Passenger.Id,
+                    context.Booking.Id,
+                    "expired-payment"));
+
+        Assert.Equal(
+            "The booking payment window has expired.",
+            exception.Message);
+        Assert.Equal(
+            originalBalance,
+            context.PassengerWallet.Balance);
+        Assert.Equal(0m, context.PassengerWallet.EscrowBalance);
+        Assert.Empty(
+            context.UnitOfWork.EscrowRepository.Items);
+        Assert.Empty(
+            context.UnitOfWork.LedgerRepository.Transactions);
+        Assert.Equal(
+            BookingStatus.Cancelled,
+            context.Booking.Status);
+        Assert.Equal(2, context.Trip.AvailableSeats);
+    }
+
+    [Fact]
+    public async Task PaymentBeforeExpirySucceeds()
+    {
+        var context = CreateContext();
+        context.Booking.PaymentExpiresAt =
+            DateTime.UtcNow.AddMinutes(1);
+
+        var result = await new FinancialService(
+                context.UnitOfWork)
+            .HoldBookingPaymentAsync(
+                context.Passenger.Id,
+                context.Booking.Id,
+                "before-expiry");
+
+        Assert.Equal(EscrowStatus.Held, result.Status);
+        Assert.NotNull(context.Booking.PaidAt);
+        Assert.Equal(500m, context.PassengerWallet.Balance);
+    }
+
+    [Fact]
+    public async Task PaymentAndExpiryCannotBothSucceed()
+    {
+        var context = CreateContext();
+        context.Trip.AvailableSeats = 1;
+        context.Booking.PaymentExpiresAt =
+            DateTime.UtcNow.AddMinutes(-1);
+        var service = new FinancialService(
+            context.UnitOfWork);
+
+        var paymentTask = CaptureConflictAsync(() =>
+            service.HoldBookingPaymentAsync(
+                context.Passenger.Id,
+                context.Booking.Id,
+                "payment-expiry-race"));
+        var expiryTask =
+            service.ExpireUnpaidApprovedBookingAsync(
+                context.Booking.Id,
+                DateTime.UtcNow);
+
+        var results = await Task.WhenAll(
+            paymentTask,
+            expiryTask);
+
+        Assert.False(results[0]);
+        Assert.True(
+            results[1] ||
+            context.Booking.Status ==
+                BookingStatus.Cancelled);
+        Assert.Null(context.Booking.PaidAt);
+        Assert.Empty(
+            context.UnitOfWork.EscrowRepository.Items);
+        Assert.Equal(2, context.Trip.AvailableSeats);
+    }
+
+    private static async Task<bool> CaptureConflictAsync(
+        Func<Task<EscrowResponseDto>> action)
+    {
+        try
+        {
+            await action();
+            return true;
+        }
+        catch (ConflictException)
+        {
+            return false;
+        }
+    }
+
     private static FinancialContext CreateContext()
     {
         var unitOfWork = new TestUnitOfWork();
@@ -184,7 +355,9 @@ public class FinancialServiceTests
             SeatPrice = 2400m,
             ServiceCharge = 100m,
             TotalAmount = 2500m,
-            RequestedAt = DateTime.UtcNow.AddHours(-1)
+            RequestedAt = DateTime.UtcNow.AddHours(-1),
+            ApprovedAt = DateTime.UtcNow.AddMinutes(-1),
+            PaymentExpiresAt = DateTime.UtcNow.AddMinutes(14)
         };
         trip.Bookings.Add(booking);
         var passengerWallet = new Wallet { UserId = passenger.Id, User = passenger, Balance = 3000m };

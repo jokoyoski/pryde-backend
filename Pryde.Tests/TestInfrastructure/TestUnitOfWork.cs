@@ -32,6 +32,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         Escrows = new TestEscrowRepository((TestTripBookingRepository)TripBookings);
         Ledger = new TestLedgerRepository();
         DriverBankAccounts = new TestDriverBankAccountRepository();
+        Notifications = new TestNotificationRepository(
+            ((TestUserRepository)Users).Items);
     }
 
     public TestTripRepository TripRepository => (TestTripRepository)Trips;
@@ -57,6 +59,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         (TestVerificationCodeRepository)VerificationCodes;
     public TestDriverBankAccountRepository DriverBankAccountRepository =>
         (TestDriverBankAccountRepository)DriverBankAccounts;
+    public TestNotificationRepository NotificationRepository =>
+        (TestNotificationRepository)Notifications;
     public int SaveChangesCount { get; private set; }
 
     public IUserRepository Users { get; }
@@ -82,6 +86,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public IEscrowRepository Escrows { get; }
     public ILedgerRepository Ledger { get; }
     public IDriverBankAccountRepository DriverBankAccounts { get; }
+    public INotificationRepository Notifications { get; }
 
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
@@ -103,6 +108,223 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         {
             _transactionLock.Release();
         }
+    }
+
+    public Task<T> ExecuteInTransactionOnceAsync<T>(
+        Func<CancellationToken, Task<T>> action,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteInTransactionAsync(
+            action,
+            cancellationToken);
+    }
+}
+
+internal sealed class TestNotificationRepository(
+    List<User> users) : INotificationRepository
+{
+    public List<Notification> Items { get; } = [];
+
+    public Task<Notification> AddAsync(
+        Notification notification,
+        CancellationToken cancellationToken = default)
+    {
+        Items.Add(notification);
+        return Task.FromResult(notification);
+    }
+
+    public Task<Notification?> GetByIdAndUserIdAsync(
+        Guid notificationId,
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Items.FirstOrDefault(
+            notification =>
+                notification.Id == notificationId &&
+                notification.UserId == userId));
+    }
+
+    public Task<Notification?> GetByDeduplicationKeyAsync(
+        string deduplicationKey,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Items.FirstOrDefault(
+            notification =>
+                notification.DeduplicationKey ==
+                deduplicationKey));
+    }
+
+    public Task<(
+        IReadOnlyList<Notification> Items,
+        int TotalCount)> GetUserNotificationsAsync(
+            Guid userId,
+            int pageNumber,
+            int pageSize,
+            bool? isRead,
+            NotificationType? type,
+            CancellationToken cancellationToken = default)
+    {
+        var query = Items.Where(notification =>
+            notification.UserId == userId);
+        if (isRead.HasValue)
+        {
+            query = query.Where(notification =>
+                notification.IsRead == isRead.Value);
+        }
+
+        if (type.HasValue)
+        {
+            query = query.Where(notification =>
+                notification.Type == type.Value);
+        }
+
+        var materialized = query
+            .OrderByDescending(notification =>
+                notification.CreatedAt)
+            .ThenByDescending(notification =>
+                notification.Id)
+            .ToList();
+        return Task.FromResult((
+            (IReadOnlyList<Notification>)materialized
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToList(),
+            materialized.Count));
+    }
+
+    public Task<int> GetUnreadCountAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Items.Count(notification =>
+            notification.UserId == userId &&
+            !notification.IsRead));
+    }
+
+    public Task<int> MarkAllAsReadAsync(
+        Guid userId,
+        DateTime readAt,
+        CancellationToken cancellationToken = default)
+    {
+        var unread = Items.Where(notification =>
+            notification.UserId == userId &&
+            !notification.IsRead).ToList();
+        foreach (var notification in unread)
+        {
+            notification.IsRead = true;
+            notification.ReadAt = readAt;
+            notification.UpdatedAt = readAt;
+        }
+
+        return Task.FromResult(unread.Count);
+    }
+
+    public Task<bool> ExistsByDeduplicationKeyAsync(
+        string deduplicationKey,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Items.Any(notification =>
+            notification.DeduplicationKey ==
+            deduplicationKey));
+    }
+
+    public Task<(
+        IReadOnlyList<AdminNotificationRecord> Items,
+        int TotalCount)> AdminGetAllAsync(
+            int pageNumber,
+            int pageSize,
+            Guid? userId,
+            NotificationType? type,
+            bool? isRead,
+            DateTime? createdFrom,
+            DateTime? createdTo,
+            CancellationToken cancellationToken = default)
+    {
+        var query = Records();
+        if (userId.HasValue)
+        {
+            query = query.Where(notification =>
+                notification.UserId == userId.Value);
+        }
+
+        if (type.HasValue)
+        {
+            query = query.Where(notification =>
+                notification.Type == type.Value);
+        }
+
+        if (isRead.HasValue)
+        {
+            query = query.Where(notification =>
+                notification.IsRead == isRead.Value);
+        }
+
+        if (createdFrom.HasValue)
+        {
+            query = query.Where(notification =>
+                notification.CreatedAt >=
+                createdFrom.Value.ToUniversalTime());
+        }
+
+        if (createdTo.HasValue)
+        {
+            query = query.Where(notification =>
+                notification.CreatedAt <=
+                createdTo.Value.ToUniversalTime());
+        }
+
+        var materialized = query
+            .OrderByDescending(notification =>
+                notification.CreatedAt)
+            .ThenByDescending(notification =>
+                notification.Id)
+            .ToList();
+        return Task.FromResult((
+            (IReadOnlyList<AdminNotificationRecord>)
+                materialized
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList(),
+            materialized.Count));
+    }
+
+    public Task<AdminNotificationRecord?> AdminGetByIdAsync(
+        Guid notificationId,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Records().FirstOrDefault(
+            notification =>
+                notification.Id == notificationId));
+    }
+
+    public void Detach(Notification notification)
+    {
+    }
+
+    private IEnumerable<AdminNotificationRecord> Records()
+    {
+        return Items.Select(notification =>
+        {
+            var user = users.FirstOrDefault(item =>
+                item.Id == notification.UserId);
+            var recipientName = user?.Profile is null
+                ? string.Empty
+                : $"{user.Profile.FirstName} {user.Profile.LastName}".Trim();
+            return new AdminNotificationRecord(
+                notification.Id,
+                notification.UserId,
+                recipientName,
+                user?.Email ?? string.Empty,
+                notification.Type,
+                notification.Title,
+                notification.Message,
+                notification.IsRead,
+                notification.ReadAt,
+                notification.RelatedEntityId,
+                notification.RelatedEntityType,
+                notification.Action,
+                notification.CreatedAt);
+        });
     }
 }
 
@@ -489,6 +711,11 @@ internal sealed class TestTripRepository : ITripRepository
     public Task<Trip?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default) =>
         GetByIdAsync(id, cancellationToken);
 
+    public Task<Trip?> GetByIdWithVehicleForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default) =>
+        GetByIdAsync(id, cancellationToken);
+
     public Task<IReadOnlyList<Trip>> GetByDriverIdAsync(Guid driverId, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Trip>>(Items.Where(t => t.DriverId == driverId).ToList());
 
@@ -548,6 +775,11 @@ internal sealed class TestTripBookingRepository(TestTripRepository trips) : ITri
     public Task<TripBooking?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         Task.FromResult(Items.FirstOrDefault(b => b.Id == id));
 
+    public Task<TripBooking?> GetByIdForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default) =>
+        GetByIdAsync(id, cancellationToken);
+
     public Task<TripBooking?> GetByIdWithTripAsync(Guid id, CancellationToken cancellationToken = default) =>
         GetByIdAsync(id, cancellationToken);
 
@@ -572,6 +804,24 @@ internal sealed class TestTripBookingRepository(TestTripRepository trips) : ITri
             booking.Status == BookingStatus.Pending);
 
         return Task.FromResult(pendingBookingCount);
+    }
+
+    public Task<IReadOnlyList<Guid>>
+        GetExpiredUnpaidApprovedBookingIdsAsync(
+            DateTime utcNow,
+            CancellationToken cancellationToken = default)
+    {
+        var bookingIds = Items
+            .Where(booking =>
+                booking.Status == BookingStatus.Approved &&
+                !booking.PaidAt.HasValue &&
+                booking.PaymentExpiresAt.HasValue &&
+                booking.PaymentExpiresAt.Value <= utcNow)
+            .OrderBy(booking => booking.PaymentExpiresAt)
+            .Select(booking => booking.Id)
+            .ToList();
+        return Task.FromResult<IReadOnlyList<Guid>>(
+            bookingIds);
     }
 
     public Task<bool> HasActiveBookingAsync(Guid tripId, Guid passengerId, CancellationToken cancellationToken = default) =>

@@ -8,6 +8,7 @@ public class AdminKycResponseDto : KycVerificationResponseDto
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public List<string> Roles { get; set; } = [];
+    public DojahVerificationDetailsResponseDto? DojahDetails { get; set; }
 }
 
 public class AdminVehicleResponseDto : VehicleResponseDto

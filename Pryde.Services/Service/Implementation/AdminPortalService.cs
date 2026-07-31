@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
@@ -8,6 +9,7 @@ using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Notifications.Interface;
+using Pryde.Services.Providers.Dojah;
 using Pryde.Services.Security.Interface;
 using Pryde.Services.Service.Interface;
 
@@ -17,7 +19,9 @@ public class AdminPortalService(
     IUnitOfWork unitOfWork,
     IPasswordHasher passwordHasher,
     IEmailService emailService,
-    IFinancialService financialService) : IAdminPortalService
+    IFinancialService financialService,
+    IDojahApiClient dojahApiClient,
+    ILogger<AdminPortalService> logger) : IAdminPortalService
 {
     public async Task<StaffResponseDto> InviteStaffAsync(
         InviteStaffRequestDto request, CancellationToken cancellationToken = default)
@@ -180,7 +184,32 @@ public class AdminPortalService(
     {
         var kyc = await unitOfWork.AdminListings.GetKycDetailsAsync(kycId, cancellationToken)
             ?? throw new NotFoundException(nameof(KycVerification), kycId);
-        return MapKyc(kyc);
+        var response = MapKyc(kyc);
+        if (string.IsNullOrWhiteSpace(kyc.DojahReference))
+        {
+            logger.LogInformation(
+                "Dojah detail lookup skipped because KYC {KycId} has no Dojah reference.",
+                kyc.Id);
+            return response;
+        }
+
+        try
+        {
+            response.DojahDetails = await dojahApiClient.GetVerificationAsync(
+                kyc.DojahReference,
+                cancellationToken);
+        }
+        catch (ServiceUnavailableException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Dojah verification details are unavailable for KYC {KycId}. " +
+                "Returning local KYC information.",
+                kyc.Id);
+            response.DojahDetails = null;
+        }
+
+        return response;
     }
 
     public async Task<AdminVehicleResponseDto> GetVehicleAsync(

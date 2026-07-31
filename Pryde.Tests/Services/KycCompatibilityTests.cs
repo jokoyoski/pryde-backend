@@ -176,7 +176,8 @@ public class KycCompatibilityTests
 
         var dojahService = DojahService(unitOfWork);
         var newConfig = await dojahService.GetConfigAsync(kyc.UserId);
-        Assert.NotEqual(oldReference, newConfig.ReferenceId);
+        Assert.Null(newConfig.ReferenceId);
+        Assert.NotEqual(oldReference, newConfig.ProviderReference);
 
         var oldPayload = Encoding.UTF8.GetBytes(
             $"{{\"reference_id\":\"{oldReference}\",\"verification_status\":\"Completed\"}}");
@@ -185,7 +186,7 @@ public class KycCompatibilityTests
             dojahService.ProcessWebhookAsync(oldPayload, Sign(oldPayload), null));
 
         Assert.Equal(KycStatus.Pending, kyc.Status);
-        Assert.Equal(newConfig.ReferenceId, kyc.ProviderReference);
+        Assert.Equal(newConfig.ProviderReference, kyc.ProviderReference);
         Assert.Null(kyc.ProviderStatus);
         Assert.Null(kyc.LastProviderUpdatedAt);
     }

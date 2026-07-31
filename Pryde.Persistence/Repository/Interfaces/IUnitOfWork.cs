@@ -27,10 +27,14 @@ public interface IUnitOfWork
     IEscrowRepository Escrows { get; }
     ILedgerRepository Ledger { get; }
     IDriverBankAccountRepository DriverBankAccounts { get; }
+    INotificationRepository Notifications { get; }
 
     Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default);
     Task<T> ExecuteInTransactionAsync<T>(
+        Func<CancellationToken, Task<T>> action,
+        CancellationToken cancellationToken = default);
+    Task<T> ExecuteInTransactionOnceAsync<T>(
         Func<CancellationToken, Task<T>> action,
         CancellationToken cancellationToken = default);
 }

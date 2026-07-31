@@ -1,6 +1,8 @@
+using Microsoft.Extensions.Options;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Enums;
 using Pryde.Services.Service.Implementation;
+using Pryde.Services.Settings;
 using Pryde.Tests.TestInfrastructure;
 
 namespace Pryde.Tests.Services;
@@ -78,8 +80,40 @@ public class TripBookingServiceTests
             result.NextAction);
         Assert.Equal(WorkflowActor.Passenger, result.RequiredActor);
         Assert.NotNull(result.ApprovedAt);
+        Assert.Equal(
+            result.ApprovedAt.Value.AddMinutes(15),
+            result.PaymentExpiresAt);
         Assert.Equal(1, trip.AvailableSeats);
         Assert.Equal(1, unitOfWork.SaveChangesCount);
+    }
+
+    [Fact]
+    public async Task ApprovalUsesConfiguredPaymentWindow()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var trip = AddOpenTrip(
+            unitOfWork,
+            driverId,
+            vehicle);
+        var booking = AddBooking(unitOfWork, trip);
+        var service = new TripBookingService(
+            unitOfWork,
+            new FinancialService(unitOfWork),
+            Options.Create(new BookingPaymentSettings
+            {
+                PaymentWindowMinutes = 7,
+                ExpiryCheckIntervalMinutes = 1
+            }));
+
+        var result = await service.ApproveAsync(
+            booking.Id,
+            driverId);
+
+        Assert.NotNull(result.ApprovedAt);
+        Assert.Equal(
+            result.ApprovedAt.Value.AddMinutes(7),
+            result.PaymentExpiresAt);
     }
 
     [Fact]

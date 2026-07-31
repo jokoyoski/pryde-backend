@@ -1,16 +1,119 @@
 using Pryde.Contracts.RequestModels;
+using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Services.Notifications.Interface;
+using Pryde.Services.Providers.Dojah;
 using Pryde.Services.Security.Implementation;
 using Pryde.Services.Service.Implementation;
 using Pryde.Tests.TestInfrastructure;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Pryde.Tests.Services;
 
 public class AdminPortalServiceTests
 {
+    [Fact]
+    public async Task AdminReceivesLocalKycAndDojahDetails()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var user = CreateKycUser();
+        var kyc = new KycVerification
+        {
+            User = user,
+            UserId = user.Id,
+            Status = KycStatus.Approved,
+            ProviderName = "Dojah",
+            ProviderReference = "PRYDE-local-reference",
+            DojahReference = "provider-generated-reference"
+        };
+        unitOfWork.AdminListingRepository.Kyc.Add(kyc);
+        var dojahClient = new FakeDojahApiClient
+        {
+            Result = new DojahVerificationDetailsResponseDto
+            {
+                Reference = "provider-generated-reference",
+                Status = "Completed"
+            }
+        };
+        var service = CreateService(unitOfWork, new FakeEmailService(), dojahClient);
+
+        var result = await service.GetKycAsync(kyc.Id);
+
+        Assert.Equal(kyc.Id, result.Id);
+        Assert.Equal("driver.kyc@test.local", result.Email);
+        Assert.Equal("PRYDE-local-reference", result.ProviderReference);
+        Assert.Equal("provider-generated-reference", result.DojahReference);
+        Assert.NotNull(result.DojahDetails);
+        Assert.Equal("Completed", result.DojahDetails.Status);
+        Assert.Equal(
+            "provider-generated-reference",
+            dojahClient.RequestedReference);
+        Assert.NotEqual(
+            result.ProviderReference,
+            dojahClient.RequestedReference);
+        Assert.Equal(1, dojahClient.CallCount);
+    }
+
+    [Fact]
+    public async Task NoDojahReferenceReturnsLocalKycWithNullDojahDetailsWithoutProviderCall()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var user = CreateKycUser();
+        var kyc = new KycVerification
+        {
+            User = user,
+            UserId = user.Id,
+            Status = KycStatus.Pending,
+            ProviderReference = "pryde-reference"
+        };
+        unitOfWork.AdminListingRepository.Kyc.Add(kyc);
+        var dojahClient = new FakeDojahApiClient();
+        var service = CreateService(unitOfWork, new FakeEmailService(), dojahClient);
+
+        var result = await service.GetKycAsync(kyc.Id);
+
+        Assert.Equal(kyc.Id, result.Id);
+        Assert.Equal("pryde-reference", result.ProviderReference);
+        Assert.Null(result.DojahDetails);
+        Assert.Equal(0, dojahClient.CallCount);
+    }
+
+    [Fact]
+    public async Task ProviderFailureReturnsLocalKycWithNullDetailsWithoutModifyingState()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var user = CreateKycUser();
+        var kyc = new KycVerification
+        {
+            User = user,
+            UserId = user.Id,
+            Status = KycStatus.Approved,
+            ProviderStatus = "Completed",
+            ProviderReference = "PRYDE-local-reference",
+            DojahReference = "provider-generated-reference"
+        };
+        unitOfWork.AdminListingRepository.Kyc.Add(kyc);
+        var dojahClient = new FakeDojahApiClient
+        {
+            Exception = new ServiceUnavailableException(
+                "Dojah is unavailable.")
+        };
+        var service = CreateService(
+            unitOfWork,
+            new FakeEmailService(),
+            dojahClient);
+
+        var result = await service.GetKycAsync(kyc.Id);
+
+        Assert.Equal(kyc.Id, result.Id);
+        Assert.Null(result.DojahDetails);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
+        Assert.Equal("Completed", kyc.ProviderStatus);
+        Assert.Equal(0, unitOfWork.SaveChangesCount);
+    }
+
     [Fact]
     public async Task SuperAdminInvitationCreatesPendingStaffAndSendsExpiringCode()
     {
@@ -133,8 +236,40 @@ public class AdminPortalServiceTests
         Assert.Equal(1, result.TotalTransactions);
     }
 
-    private static AdminPortalService CreateService(TestUnitOfWork unitOfWork, IEmailService email) =>
-        new(unitOfWork, new PasswordHasher(), email, new FinancialService(unitOfWork));
+    private static AdminPortalService CreateService(
+        TestUnitOfWork unitOfWork,
+        IEmailService email,
+        IDojahApiClient? dojahApiClient = null) =>
+        new(
+            unitOfWork,
+            new PasswordHasher(),
+            email,
+            new FinancialService(unitOfWork),
+            dojahApiClient ?? new FakeDojahApiClient(),
+            NullLogger<AdminPortalService>.Instance);
+
+    private static User CreateKycUser()
+    {
+        var user = new User
+        {
+            Email = "driver.kyc@test.local",
+            PhoneNumber = "08000000001",
+            Profile = new Profile
+            {
+                FirstName = "Test",
+                LastName = "Driver"
+            }
+        };
+        var role = new Role { Name = "Driver" };
+        user.UserRoles.Add(new UserRole
+        {
+            User = user,
+            UserId = user.Id,
+            Role = role,
+            RoleId = role.Id
+        });
+        return user;
+    }
 
     private static User AddStaff(TestUnitOfWork unitOfWork, string roleName, UserStatus status)
     {
@@ -158,6 +293,32 @@ public class AdminPortalServiceTests
         {
             Messages.Add((toEmail, subject));
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeDojahApiClient : IDojahApiClient
+    {
+        public DojahVerificationDetailsResponseDto Result { get; set; } = new()
+        {
+            Reference = "unused"
+        };
+        public int CallCount { get; private set; }
+        public string? RequestedReference { get; private set; }
+        public Exception? Exception { get; set; }
+
+        public Task<DojahVerificationDetailsResponseDto> GetVerificationAsync(
+            string dojahReference,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            RequestedReference = dojahReference;
+            if (Exception is not null)
+            {
+                return Task.FromException<DojahVerificationDetailsResponseDto>(
+                    Exception);
+            }
+
+            return Task.FromResult(Result);
         }
     }
 }

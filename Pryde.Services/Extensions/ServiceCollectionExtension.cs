@@ -34,8 +34,11 @@ public static class ServiceCollectionExtension
         services.AddScoped<IDriverWithdrawalService, DriverWithdrawalService>();
         services.AddScoped<IAdminWalletService, AdminWalletService>();
         services.AddScoped<IAdminPortalService, AdminPortalService>();
+        services.AddScoped<INotificationService, NotificationService>();
         services.AddHostedService<
             TripAutoCompletionBackgroundService>();
+        services.AddHostedService<
+            BookingPaymentExpiryBackgroundService>();
 
         services.AddScoped<IFareCalculator, FareCalculator>();
         services.AddScoped<IRouteMatchingService, RouteMatchingService>();

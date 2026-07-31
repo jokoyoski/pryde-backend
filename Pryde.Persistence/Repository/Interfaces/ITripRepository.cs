@@ -8,6 +8,9 @@ public interface ITripRepository
     Task<Trip?> GetByIdWithBookingsAsync(Guid id, CancellationToken cancellationToken = default);
     Task<Trip?> GetByIdWithDetailsAsync(Guid id, CancellationToken cancellationToken = default);
     Task<Trip?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<Trip?> GetByIdWithVehicleForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Trip>> GetByDriverIdAsync(Guid driverId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Trip>> SearchAsync(
         DateTime utcNow,

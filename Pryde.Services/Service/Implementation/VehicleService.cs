@@ -1,16 +1,33 @@
 ﻿using Pryde.Domain.Common.Exceptions;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Service.Interface;
+using Pryde.Services.Settings;
+using Pryde.Services.Storage.Enums;
+using Pryde.Services.Storage.Interface;
+using Pryde.Services.Storage.Validation;
 
 namespace Pryde.Services.Service.Implementation;
 
-public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
+public class VehicleService(
+    IUnitOfWork unitOfWork,
+    IFileStorageService fileStorageService,
+    IOptions<VehicleUploadSettings> vehicleUploadSettings,
+    ILogger<VehicleService> logger) : IVehicleService
 {
     private static readonly HashSet<int> AllowedPassengerSeatCounts = [2, 4, 5, 6, 7];
+    private static readonly string[] AllowedImageContentTypes =
+        ["image/jpeg", "image/png", "image/webp"];
+    private static readonly string[] AllowedVideoContentTypes =
+        ["video/mp4", "video/quicktime", "video/webm"];
 
     public async Task<VehicleResponseDto> CreateAsync(
         Guid driverId, string licensePlateNumber, int capacity,
@@ -140,25 +157,201 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
         var vehicle = await GetEditableOwnedVehicleAsync(
             vehicleId, requestingUserId, cancellationToken);
         if (imageUrls.Count == 0 && string.IsNullOrWhiteSpace(walkAroundVideoUrl))
+        {
             throw new ValidationException("At least one vehicle media file is required.");
+        }
 
-        var existingImages = await unitOfWork.VehicleImages
-            .GetByVehicleIdAsync(vehicleId, cancellationToken);
+        var persistedImages = await PersistMediaAsync(
+            vehicle,
+            imageUrls,
+            walkAroundVideoUrl,
+            cancellationToken);
+        return await BuildWorkflowResponseAsync(
+            vehicle,
+            WorkflowNextAction.CompleteVehicleOnboarding,
+            WorkflowActor.Driver,
+            cancellationToken,
+            persistedImages);
+    }
+
+    public async Task<VehicleResponseDto> UploadMediaAsync(
+        Guid vehicleId,
+        Guid requestingUserId,
+        VehicleMediaRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var totalStopwatch = Stopwatch.StartNew();
+        var uploadedFiles = new ConcurrentBag<UploadedVehicleMedia>();
+        var databaseCommitted = false;
+
+        try
+        {
+            var ownershipStopwatch = Stopwatch.StartNew();
+            logger.LogInformation(
+                "Vehicle media operation started. VehicleId: {VehicleId}, UserId: {UserId}, Operation: {Operation}",
+                vehicleId,
+                requestingUserId,
+                "VehicleOwnershipLookup");
+            var vehicle = await GetEditableOwnedVehicleAsync(
+                vehicleId,
+                requestingUserId,
+                cancellationToken);
+            ownershipStopwatch.Stop();
+            logger.LogInformation(
+                "Vehicle media operation completed. VehicleId: {VehicleId}, UserId: {UserId}, Operation: {Operation}, DurationMilliseconds: {DurationMilliseconds}, Success: {Success}",
+                vehicleId,
+                requestingUserId,
+                "VehicleOwnershipLookup",
+                ownershipStopwatch.ElapsedMilliseconds,
+                true);
+
+            var validationStopwatch = Stopwatch.StartNew();
+            logger.LogInformation(
+                "Vehicle media operation started. VehicleId: {VehicleId}, UserId: {UserId}, Operation: {Operation}",
+                vehicleId,
+                requestingUserId,
+                "Validation");
+            var pendingFiles = BuildPendingMediaFiles(request);
+            if (pendingFiles.Count == 0)
+            {
+                throw new ValidationException("At least one vehicle media file is required.");
+            }
+
+            foreach (var pendingFile in pendingFiles)
+            {
+                FileUploadValidator.Validate(
+                    pendingFile.File,
+                    pendingFile.MaximumBytes,
+                    pendingFile.AllowedContentTypes,
+                    pendingFile.DisplayName);
+            }
+
+            validationStopwatch.Stop();
+            logger.LogInformation(
+                "Vehicle media operation completed. VehicleId: {VehicleId}, UserId: {UserId}, FileCount: {FileCount}, Operation: {Operation}, DurationMilliseconds: {DurationMilliseconds}, Success: {Success}",
+                vehicleId,
+                requestingUserId,
+                pendingFiles.Count,
+                "Validation",
+                validationStopwatch.ElapsedMilliseconds,
+                true);
+
+            var uploadsStopwatch = Stopwatch.StartNew();
+            using var uploadCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var uploadTasks = pendingFiles
+                .Select(pendingFile => UploadMediaFileAsync(
+                    pendingFile,
+                    vehicleId,
+                    requestingUserId,
+                    uploadedFiles,
+                    uploadCancellation))
+                .ToArray();
+
+            await Task.WhenAll(uploadTasks);
+            uploadsStopwatch.Stop();
+            logger.LogInformation(
+                "Vehicle media operation completed. VehicleId: {VehicleId}, UserId: {UserId}, FileCount: {FileCount}, Operation: {Operation}, DurationMilliseconds: {DurationMilliseconds}, Success: {Success}",
+                vehicleId,
+                requestingUserId,
+                pendingFiles.Count,
+                "AllProviderUploads",
+                uploadsStopwatch.ElapsedMilliseconds,
+                true);
+
+            var imageUrls = uploadedFiles
+                .Where(file => file.ImageType.HasValue)
+                .ToDictionary(
+                    file => file.ImageType!.Value,
+                    file => file.PublicUrl);
+            var videoUrl = uploadedFiles
+                .FirstOrDefault(file => file.Category == FileCategory.VehicleVideo)
+                ?.PublicUrl;
+
+            var persistedImages = await PersistMediaAsync(
+                vehicle,
+                imageUrls,
+                videoUrl,
+                cancellationToken);
+            databaseCommitted = true;
+
+            var response = await BuildWorkflowResponseAsync(
+                vehicle,
+                WorkflowNextAction.CompleteVehicleOnboarding,
+                WorkflowActor.Driver,
+                cancellationToken,
+                persistedImages);
+            totalStopwatch.Stop();
+            logger.LogInformation(
+                "Vehicle media request completed. VehicleId: {VehicleId}, UserId: {UserId}, FileCount: {FileCount}, Operation: {Operation}, DurationMilliseconds: {DurationMilliseconds}, Success: {Success}",
+                vehicleId,
+                requestingUserId,
+                pendingFiles.Count,
+                "TotalRequest",
+                totalStopwatch.ElapsedMilliseconds,
+                true);
+            return response;
+        }
+        catch
+        {
+            if (!databaseCommitted && !uploadedFiles.IsEmpty)
+            {
+                await DeleteUploadedFilesAsync(
+                    uploadedFiles,
+                    vehicleId,
+                    requestingUserId);
+            }
+
+            totalStopwatch.Stop();
+            logger.LogWarning(
+                "Vehicle media request failed. VehicleId: {VehicleId}, UserId: {UserId}, Operation: {Operation}, DurationMilliseconds: {DurationMilliseconds}, Success: {Success}",
+                vehicleId,
+                requestingUserId,
+                "TotalRequest",
+                totalStopwatch.ElapsedMilliseconds,
+                false);
+            throw;
+        }
+    }
+
+    private async Task<IReadOnlyList<VehicleImage>> PersistMediaAsync(
+        Vehicle vehicle,
+        IReadOnlyDictionary<VehicleImageType, string> imageUrls,
+        string? walkAroundVideoUrl,
+        CancellationToken cancellationToken)
+    {
+        var databaseStopwatch = Stopwatch.StartNew();
+        logger.LogInformation(
+            "Vehicle media operation started. VehicleId: {VehicleId}, UserId: {UserId}, Operation: {Operation}",
+            vehicle.Id,
+            vehicle.UserId,
+            "DatabaseWrite");
+        var existingImages = (await unitOfWork.VehicleImages
+                .GetByVehicleIdAsync(vehicle.Id, cancellationToken))
+            .ToList();
         foreach (var item in imageUrls)
         {
             if (!Enum.IsDefined(item.Key) || string.IsNullOrWhiteSpace(item.Value))
+            {
                 throw new ValidationException("Vehicle image data is invalid.");
+            }
 
             var existing = existingImages.FirstOrDefault(x => x.ImageType == item.Key);
             if (existing is null)
             {
-                await unitOfWork.VehicleImages.CreateAsync(new VehicleImage
+                var image = new VehicleImage
                 {
-                    VehicleId = vehicleId,
+                    VehicleId = vehicle.Id,
                     ImageType = item.Key,
                     ImageUrl = item.Value.Trim(),
                     IsPrimary = item.Key == VehicleImageType.FrontView
-                }, cancellationToken);
+                };
+                await unitOfWork.VehicleImages.CreateAsync(
+                    image,
+                    cancellationToken);
+                existingImages.Add(image);
             }
             else
             {
@@ -174,12 +367,31 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
             unitOfWork.Vehicles.Update(vehicle);
         }
 
+        databaseStopwatch.Stop();
+        logger.LogInformation(
+            "Vehicle media operation completed. VehicleId: {VehicleId}, UserId: {UserId}, Operation: {Operation}, DurationMilliseconds: {DurationMilliseconds}, Success: {Success}",
+            vehicle.Id,
+            vehicle.UserId,
+            "DatabaseWrite",
+            databaseStopwatch.ElapsedMilliseconds,
+            true);
+
+        var saveStopwatch = Stopwatch.StartNew();
+        logger.LogInformation(
+            "Vehicle media operation started. VehicleId: {VehicleId}, UserId: {UserId}, Operation: {Operation}",
+            vehicle.Id,
+            vehicle.UserId,
+            "SaveChanges");
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return await BuildWorkflowResponseAsync(
-            vehicle,
-            WorkflowNextAction.CompleteVehicleOnboarding,
-            WorkflowActor.Driver,
-            cancellationToken);
+        saveStopwatch.Stop();
+        logger.LogInformation(
+            "Vehicle media operation completed. VehicleId: {VehicleId}, UserId: {UserId}, Operation: {Operation}, DurationMilliseconds: {DurationMilliseconds}, Success: {Success}",
+            vehicle.Id,
+            vehicle.UserId,
+            "SaveChanges",
+            saveStopwatch.ElapsedMilliseconds,
+            true);
+        return existingImages;
     }
 
     public async Task<VehicleResponseDto> UpdateCapacityExtrasAsync(
@@ -395,9 +607,172 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
             cancellationToken);
     }
 
-    private async Task<VehicleResponseDto> BuildResponseAsync(Vehicle vehicle, CancellationToken cancellationToken)
+    private List<PendingVehicleMedia> BuildPendingMediaFiles(
+        VehicleMediaRequestDto request)
     {
-        var images = await unitOfWork.VehicleImages.GetByVehicleIdAsync(vehicle.Id, cancellationToken);
+        var settings = vehicleUploadSettings.Value;
+        var files = new List<PendingVehicleMedia>(5);
+
+        AddPendingImage(
+            files,
+            request.FrontView,
+            VehicleImageType.FrontView,
+            settings.VehicleImageMaxBytes,
+            "Front view image");
+        AddPendingImage(
+            files,
+            request.RearView,
+            VehicleImageType.RearView,
+            settings.VehicleImageMaxBytes,
+            "Rear view image");
+        AddPendingImage(
+            files,
+            request.SideProfile,
+            VehicleImageType.SideProfile,
+            settings.VehicleImageMaxBytes,
+            "Side profile image");
+        AddPendingImage(
+            files,
+            request.Interior,
+            VehicleImageType.Interior,
+            settings.VehicleImageMaxBytes,
+            "Interior image");
+
+        if (request.WalkAroundVideo is not null)
+        {
+            files.Add(new PendingVehicleMedia(
+                null,
+                request.WalkAroundVideo,
+                FileCategory.VehicleVideo,
+                settings.WalkAroundVideoMaxBytes,
+                AllowedVideoContentTypes,
+                "Walk-around video"));
+        }
+
+        return files;
+    }
+
+    private static void AddPendingImage(
+        ICollection<PendingVehicleMedia> files,
+        IFormFile? file,
+        VehicleImageType imageType,
+        long maximumBytes,
+        string displayName)
+    {
+        if (file is null)
+        {
+            return;
+        }
+
+        files.Add(new PendingVehicleMedia(
+            imageType,
+            file,
+            FileCategory.VehiclePhoto,
+            maximumBytes,
+            AllowedImageContentTypes,
+            displayName));
+    }
+
+    private async Task UploadMediaFileAsync(
+        PendingVehicleMedia pendingFile,
+        Guid vehicleId,
+        Guid requestingUserId,
+        ConcurrentBag<UploadedVehicleMedia> uploadedFiles,
+        CancellationTokenSource uploadCancellation)
+    {
+        var uploadStopwatch = Stopwatch.StartNew();
+        logger.LogInformation(
+            "Vehicle media upload started. VehicleId: {VehicleId}, UserId: {UserId}, FileName: {FileName}, FileSizeBytes: {FileSizeBytes}, ContentType: {ContentType}, Operation: {Operation}",
+            vehicleId,
+            requestingUserId,
+            pendingFile.File.FileName,
+            pendingFile.File.Length,
+            pendingFile.File.ContentType,
+            "ProviderUpload");
+
+        try
+        {
+            await using var stream = pendingFile.File.OpenReadStream();
+            var upload = await fileStorageService.UploadAsync(
+                stream,
+                pendingFile.File.FileName,
+                pendingFile.File.ContentType,
+                pendingFile.Category,
+                requestingUserId,
+                uploadCancellation.Token);
+            uploadedFiles.Add(new UploadedVehicleMedia(
+                pendingFile.ImageType,
+                pendingFile.Category,
+                upload.FileKey,
+                upload.PublicUrl));
+            uploadStopwatch.Stop();
+            logger.LogInformation(
+                "Vehicle media upload completed. VehicleId: {VehicleId}, UserId: {UserId}, FileName: {FileName}, FileSizeBytes: {FileSizeBytes}, ContentType: {ContentType}, Operation: {Operation}, DurationMilliseconds: {DurationMilliseconds}, Success: {Success}",
+                vehicleId,
+                requestingUserId,
+                pendingFile.File.FileName,
+                pendingFile.File.Length,
+                pendingFile.File.ContentType,
+                "ProviderUpload",
+                uploadStopwatch.ElapsedMilliseconds,
+                true);
+        }
+        catch
+        {
+            uploadCancellation.Cancel();
+            uploadStopwatch.Stop();
+            logger.LogWarning(
+                "Vehicle media upload failed. VehicleId: {VehicleId}, UserId: {UserId}, FileName: {FileName}, FileSizeBytes: {FileSizeBytes}, ContentType: {ContentType}, Operation: {Operation}, DurationMilliseconds: {DurationMilliseconds}, Success: {Success}",
+                vehicleId,
+                requestingUserId,
+                pendingFile.File.FileName,
+                pendingFile.File.Length,
+                pendingFile.File.ContentType,
+                "ProviderUpload",
+                uploadStopwatch.ElapsedMilliseconds,
+                false);
+            throw;
+        }
+    }
+
+    private async Task DeleteUploadedFilesAsync(
+        IEnumerable<UploadedVehicleMedia> uploadedFiles,
+        Guid vehicleId,
+        Guid requestingUserId)
+    {
+        var deleteTasks = uploadedFiles.Select(async uploadedFile =>
+        {
+            try
+            {
+                await fileStorageService.DeleteAsync(
+                    uploadedFile.FileKey,
+                    uploadedFile.Category,
+                    CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(
+                    exception,
+                    "Vehicle media cleanup failed. VehicleId: {VehicleId}, UserId: {UserId}, FileKey: {FileKey}, Operation: {Operation}",
+                    vehicleId,
+                    requestingUserId,
+                    uploadedFile.FileKey,
+                    "ProviderCleanup");
+            }
+        });
+
+        await Task.WhenAll(deleteTasks);
+    }
+
+    private async Task<VehicleResponseDto> BuildResponseAsync(
+        Vehicle vehicle,
+        CancellationToken cancellationToken,
+        IReadOnlyList<VehicleImage>? loadedImages = null)
+    {
+        var images = loadedImages ??
+            await unitOfWork.VehicleImages.GetByVehicleIdAsync(
+                vehicle.Id,
+                cancellationToken);
         var amenities = await unitOfWork.VehicleAmenities
             .GetByVehicleIdAsync(vehicle.Id, cancellationToken);
         return new VehicleResponseDto
@@ -440,11 +815,13 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
         Vehicle vehicle,
         WorkflowNextAction nextAction,
         WorkflowActor requiredActor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<VehicleImage>? loadedImages = null)
     {
         var response = await BuildResponseAsync(
             vehicle,
-            cancellationToken);
+            cancellationToken,
+            loadedImages);
         response.WorkflowStatus = vehicle.OnboardingStatus;
         response.NextAction = nextAction;
         response.RequiredActor = requiredActor;
@@ -606,4 +983,18 @@ public class VehicleService(IUnitOfWork unitOfWork) : IVehicleService
             (char[]?)null,
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
+
+    private sealed record PendingVehicleMedia(
+        VehicleImageType? ImageType,
+        IFormFile File,
+        FileCategory Category,
+        long MaximumBytes,
+        IReadOnlyCollection<string> AllowedContentTypes,
+        string DisplayName);
+
+    private sealed record UploadedVehicleMedia(
+        VehicleImageType? ImageType,
+        FileCategory Category,
+        string FileKey,
+        string PublicUrl);
 }

@@ -57,6 +57,25 @@ public class TripServiceTests
         Assert.Equal(TripStatus.Scheduled, result.Status);
     }
 
+    [Theory]
+    [InlineData(KycStatus.Pending)]
+    [InlineData(KycStatus.Rejected)]
+    [InlineData(KycStatus.Submitted)]
+    public async Task TripCreationRequiresApprovedKyc(KycStatus kycStatus)
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        unitOfWork.KycVerificationRepository.Items.Single().Status =
+            kycStatus;
+
+        await Assert.ThrowsAsync<ForbiddenException>(() =>
+            TestData.CreateTripService(unitOfWork).CreateAsync(
+                driverId,
+                TestData.ValidTripRequest(vehicle.Id)));
+
+        Assert.Empty(unitOfWork.TripRepository.Items);
+    }
+
     [Fact]
     public async Task DriverCannotCreateTripWithAnotherDriversVehicle()
     {

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
@@ -6,15 +7,34 @@ using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Service.Interface;
+using Pryde.Services.Settings;
 
 namespace Pryde.Services.Service.Implementation;
 
 public class TripBookingService(
     IUnitOfWork unitOfWork,
-    IFinancialService financialService) : ITripBookingService
+    IFinancialService financialService,
+    IOptions<BookingPaymentSettings> bookingPaymentOptions)
+    : ITripBookingService
 {
+    private readonly BookingPaymentSettings _bookingPaymentSettings =
+        bookingPaymentOptions.Value;
+
     public TripBookingService(IUnitOfWork unitOfWork)
-        : this(unitOfWork, new FinancialService(unitOfWork))
+        : this(
+            unitOfWork,
+            new FinancialService(unitOfWork),
+            Options.Create(new BookingPaymentSettings()))
+    {
+    }
+
+    public TripBookingService(
+        IUnitOfWork unitOfWork,
+        IFinancialService financialService)
+        : this(
+            unitOfWork,
+            financialService,
+            Options.Create(new BookingPaymentSettings()))
     {
     }
 
@@ -108,10 +128,15 @@ public class TripBookingService(
         EnsureTripOpenForBooking(booking.Trip);
 
         booking.Status = BookingStatus.Approved;
-        booking.ApprovedAt = DateTime.UtcNow;
+        var approvedAt = DateTime.UtcNow;
+        booking.ApprovedAt = approvedAt;
+        booking.PaymentExpiresAt = approvedAt.AddMinutes(
+            _bookingPaymentSettings.PaymentWindowMinutes);
         booking.Trip.AvailableSeats--;
         if (booking.Trip.AvailableSeats < 0)
+        {
             throw new ConflictException("No seats are available for this trip.");
+        }
 
         unitOfWork.TripBookings.Update(booking);
         unitOfWork.Trips.Update(booking.Trip);
@@ -179,13 +204,13 @@ public class TripBookingService(
 
         if (booking.Status == BookingStatus.Approved)
         {
-            booking.Trip.AvailableSeats = Math.Min(
-                booking.Trip.Vehicle.Capacity,
-                booking.Trip.AvailableSeats + 1);
+            BookingSeatReservation.CancelApprovedBooking(booking);
             unitOfWork.Trips.Update(booking.Trip);
         }
-
-        booking.Status = BookingStatus.Cancelled;
+        else
+        {
+            booking.Status = BookingStatus.Cancelled;
+        }
         unitOfWork.TripBookings.Update(booking);
         if (booking.PaidAt.HasValue)
         {
@@ -262,7 +287,8 @@ public class TripBookingService(
             TotalAmount = booking.TotalAmount,
             Status = booking.Status,
             RequestedAt = booking.RequestedAt,
-            ApprovedAt = booking.ApprovedAt
+            ApprovedAt = booking.ApprovedAt,
+            PaymentExpiresAt = booking.PaymentExpiresAt
         };
     }
 

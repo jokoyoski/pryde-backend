@@ -41,6 +41,7 @@ public class TripService(
             request.DepartureTime, request.AvailableSeats, request.BookingWindowHours);
 
         await EnsureDriverAsync(driverId, cancellationToken);
+        await EnsureApprovedKycAsync(driverId, cancellationToken);
         var vehicle = await GetOwnedActiveVehicleAsync(request.VehicleId, driverId, cancellationToken);
         if (request.AvailableSeats > vehicle.Capacity)
             throw new ValidationException("Available seats cannot exceed vehicle capacity.");
@@ -493,6 +494,20 @@ public class TripService(
         var roles = await unitOfWork.UserRoles.GetByUserIdAsync(userId, cancellationToken);
         if (!roles.Any(r => r.Role.Name == RoleType.Driver.ToString()))
             throw new ForbiddenException("Only users with the Driver role can create trips.");
+    }
+
+    private async Task EnsureApprovedKycAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var kyc = await unitOfWork.KycVerifications.GetByUserIdAsync(
+            userId,
+            cancellationToken);
+        if (kyc?.Status != KycStatus.Approved)
+        {
+            throw new ForbiddenException(
+                "Approved KYC is required before creating trips.");
+        }
     }
 
     private async Task<Vehicle> GetOwnedActiveVehicleAsync(Guid vehicleId, Guid driverId, CancellationToken cancellationToken)

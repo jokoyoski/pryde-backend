@@ -32,6 +32,7 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     public DbSet<LedgerTransaction> LedgerTransactions { get; set; }
     public DbSet<LedgerEntry> LedgerEntries { get; set; }
     public DbSet<DriverBankAccount> DriverBankAccounts { get; set; }
+    public DbSet<Notification> Notifications { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

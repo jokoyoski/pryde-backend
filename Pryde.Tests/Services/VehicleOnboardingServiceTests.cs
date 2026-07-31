@@ -3,6 +3,7 @@ using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pryde.Persistence.Context;
 using Pryde.Services.Service.Implementation;
 using Pryde.Tests.TestInfrastructure;
@@ -185,6 +186,33 @@ public class VehicleOnboardingServiceTests
         Assert.Equal(WorkflowActor.Admin, result.RequiredActor);
     }
 
+    [Fact]
+    public async Task NullManualKycUrlsDoNotBlockVehicleUpdateOrSubmission()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        unitOfWork.KycVerificationRepository.Items.Add(new KycVerification
+        {
+            UserId = ownerId,
+            Status = KycStatus.Approved,
+            ProviderName = "Dojah",
+            ProviderStatus = "Completed",
+            ProviderReference = "PRYDE-correlation",
+            DojahReference = "provider-generated-reference"
+        });
+        var service = Service(unitOfWork);
+
+        await service.UpdateDetailsAsync(
+            vehicle.Id,
+            ownerId,
+            DetailsRequest());
+        Complete(unitOfWork, vehicle);
+        var result = await service.SubmitAsync(vehicle.Id, ownerId);
+
+        Assert.Equal(
+            VehicleOnboardingStatus.PendingReview,
+            result.OnboardingStatus);
+    }
+
     [Theory]
     [InlineData("VehicleType")]
     [InlineData("Make")]
@@ -280,7 +308,11 @@ public class VehicleOnboardingServiceTests
         unitOfWork.KycVerificationRepository.Items.Add(new KycVerification
         {
             UserId = ownerId,
-            Status = KycStatus.Approved
+            Status = KycStatus.Approved,
+            ProviderName = "Dojah",
+            ProviderStatus = "Completed",
+            ProviderReference = "PRYDE-correlation",
+            DojahReference = "provider-generated-reference"
         });
         var result = await service.ActivateAsync(vehicle.Id);
 
@@ -288,6 +320,31 @@ public class VehicleOnboardingServiceTests
         Assert.Equal(VehicleOnboardingStatus.Approved, result.OnboardingStatus);
         Assert.Equal(WorkflowNextAction.CreateTrip, result.NextAction);
         Assert.Equal(WorkflowActor.Driver, result.RequiredActor);
+    }
+
+    [Theory]
+    [InlineData(KycStatus.Pending)]
+    [InlineData(KycStatus.Rejected)]
+    public async Task PendingOrRejectedKycBlocksVehicleApproval(
+        KycStatus kycStatus)
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        Complete(unitOfWork, vehicle);
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+        unitOfWork.KycVerificationRepository.Items.Add(new KycVerification
+        {
+            UserId = ownerId,
+            Status = kycStatus,
+            ProviderName = "Dojah"
+        });
+
+        await Assert.ThrowsAsync<ForbiddenException>(() =>
+            Service(unitOfWork).ActivateAsync(vehicle.Id));
+
+        Assert.Equal(
+            VehicleOnboardingStatus.PendingReview,
+            vehicle.OnboardingStatus);
+        Assert.False(vehicle.IsActive);
     }
 
     [Fact]
@@ -392,7 +449,11 @@ public class VehicleOnboardingServiceTests
     }
 
     private static VehicleService Service(TestUnitOfWork unitOfWork) =>
-        new(unitOfWork);
+        new(
+            unitOfWork,
+            null!,
+            null!,
+            NullLogger<VehicleService>.Instance);
 
     private static (TestUnitOfWork UnitOfWork, Guid OwnerId, Vehicle Vehicle) Context()
     {

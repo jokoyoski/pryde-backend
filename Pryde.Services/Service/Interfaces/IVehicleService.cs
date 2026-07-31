@@ -10,6 +10,7 @@ public interface IVehicleService
     Task<IReadOnlyList<VehicleResponseDto>> GetMyVehiclesAsync(Guid driverId, CancellationToken cancellationToken = default);
     Task<VehicleResponseDto> UpdateAsync(Guid vehicleId, Guid requestingUserId, int capacity, CancellationToken cancellationToken = default);
     Task<VehicleResponseDto> UpdateDetailsAsync(Guid vehicleId, Guid requestingUserId, VehicleDetailsRequestDto request, CancellationToken cancellationToken = default);
+    Task<VehicleResponseDto> UploadMediaAsync(Guid vehicleId, Guid requestingUserId, VehicleMediaRequestDto request, CancellationToken cancellationToken = default);
     Task<VehicleResponseDto> UpdateMediaAsync(Guid vehicleId, Guid requestingUserId, IReadOnlyDictionary<VehicleImageType, string> imageUrls, string? walkAroundVideoUrl, CancellationToken cancellationToken = default);
     Task<VehicleResponseDto> UpdateCapacityExtrasAsync(Guid vehicleId, Guid requestingUserId, VehicleCapacityExtrasRequestDto request, CancellationToken cancellationToken = default);
     Task<VehicleResponseDto> SubmitAsync(Guid vehicleId, Guid requestingUserId, CancellationToken cancellationToken = default);

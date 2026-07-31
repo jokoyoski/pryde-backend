@@ -52,6 +52,8 @@ public class ApiConfigurationTests
     [InlineData(typeof(AdminWalletsController), nameof(AdminWalletsController.Fund))]
     [InlineData(typeof(AdminLedgerController), nameof(AdminLedgerController.GetAll))]
     [InlineData(typeof(AdminEscrowsController), nameof(AdminEscrowsController.GetAll))]
+    [InlineData(typeof(AdminNotificationsController), nameof(AdminNotificationsController.GetAll))]
+    [InlineData(typeof(AdminNotificationsController), nameof(AdminNotificationsController.Get))]
     [InlineData(typeof(KycController), nameof(KycController.GetAdminKyc))]
     [InlineData(typeof(KycController), nameof(KycController.ApproveKyc))]
     [InlineData(typeof(KycController), nameof(KycController.RejectKyc))]
@@ -276,6 +278,22 @@ public class ApiConfigurationTests
         Assert.Equal(expected, result.Succeeded);
     }
 
+    [Theory]
+    [InlineData("Admin", true)]
+    [InlineData("SuperAdmin", true)]
+    [InlineData("Passenger", false)]
+    public async Task AdminKycDetailEndpointUsesRolesWithoutCustomerEmailVerification(
+        string role,
+        bool expected)
+    {
+        var result = await AuthorizeKycActionAsync(
+            nameof(KycController.GetAdminKycById),
+            isEmailVerified: false,
+            role);
+
+        Assert.Equal(expected, result.Succeeded);
+    }
+
     [Fact]
     public async Task UnauthenticatedRequestReturnsUnauthorizedApiError()
     {
@@ -348,6 +366,7 @@ public class ApiConfigurationTests
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<ITripService>());
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<ITripBookingService>());
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAdminWalletService>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<INotificationService>());
     }
 
     [Fact]
@@ -414,6 +433,12 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/admin/escrows/{escrowId}", paths);
         Assert.Contains("/api/v1/admin/ledger/transactions", paths);
         Assert.Contains("/api/v1/admin/ledger/transactions/{transactionId}", paths);
+        Assert.Contains("/api/v1/notifications", paths);
+        Assert.Contains("/api/v1/notifications/unread-count", paths);
+        Assert.Contains("/api/v1/notifications/{notificationId}/read", paths);
+        Assert.Contains("/api/v1/notifications/read-all", paths);
+        Assert.Contains("/api/v1/admin/notifications", paths);
+        Assert.Contains("/api/v1/admin/notifications/{notificationId}", paths);
         Assert.Contains("/api/v1/kyc/documents", paths);
         Assert.Contains("/api/v1/kyc/mine", paths);
         Assert.Contains("/api/v1/kyc/dojah/config", paths);
