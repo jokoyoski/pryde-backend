@@ -14,7 +14,8 @@ namespace Pryde.Services.Service.Implementation;
 public class TripBookingService(
     IUnitOfWork unitOfWork,
     IFinancialService financialService,
-    IOptions<BookingPaymentSettings> bookingPaymentOptions)
+    IOptions<BookingPaymentSettings> bookingPaymentOptions,
+    INotificationService notificationService)
     : ITripBookingService
 {
     private readonly BookingPaymentSettings _bookingPaymentSettings =
@@ -24,7 +25,8 @@ public class TripBookingService(
         : this(
             unitOfWork,
             new FinancialService(unitOfWork),
-            Options.Create(new BookingPaymentSettings()))
+            Options.Create(new BookingPaymentSettings()),
+            new NotificationService(unitOfWork))
     {
     }
 
@@ -34,7 +36,20 @@ public class TripBookingService(
         : this(
             unitOfWork,
             financialService,
-            Options.Create(new BookingPaymentSettings()))
+            Options.Create(new BookingPaymentSettings()),
+            new NotificationService(unitOfWork))
+    {
+    }
+
+    public TripBookingService(
+        IUnitOfWork unitOfWork,
+        IFinancialService financialService,
+        IOptions<BookingPaymentSettings> bookingPaymentOptions)
+        : this(
+            unitOfWork,
+            financialService,
+            bookingPaymentOptions,
+            new NotificationService(unitOfWork))
     {
     }
 
@@ -81,12 +96,22 @@ public class TripBookingService(
         }
 
         var profile = await unitOfWork.Profiles.GetByUserIdAsync(passengerId, cancellationToken);
-        return WorkflowResponse(
+        var response = WorkflowResponse(
             booking,
             trip,
             profile is null ? null : GetName(profile),
             WorkflowNextAction.AwaitDriverDecision,
             WorkflowActor.Driver);
+        await notificationService.TryCreateAsync(
+            NewNotification(
+                trip.DriverId,
+                NotificationType.BookingRequested,
+                "New booking request",
+                "A passenger requested a seat on your trip.",
+                booking.Id,
+                $"booking-request-received:{booking.Id}"),
+            cancellationToken);
+        return response;
     }
 
     public async Task<IReadOnlyList<TripBookingResponseDto>> GetMineAsync(
@@ -141,12 +166,22 @@ public class TripBookingService(
         unitOfWork.TripBookings.Update(booking);
         unitOfWork.Trips.Update(booking.Trip);
         await SaveWithConcurrencyHandlingAsync(cancellationToken);
-        return WorkflowResponse(
+        var response = WorkflowResponse(
             booking,
             booking.Trip,
             GetPassengerName(booking),
             WorkflowNextAction.PayForBooking,
             WorkflowActor.Passenger);
+        await notificationService.TryCreateAsync(
+            NewNotification(
+                booking.PassengerId,
+                NotificationType.BookingApproved,
+                "Booking approved",
+                "Your booking request was approved. Complete payment to confirm your seat.",
+                booking.Id,
+                $"booking-approved:{booking.Id}"),
+            cancellationToken);
+        return response;
     }
 
     public async Task<TripBookingResponseDto> DeclineAsync(
@@ -158,12 +193,22 @@ public class TripBookingService(
         booking.Status = BookingStatus.Declined;
         unitOfWork.TripBookings.Update(booking);
         await SaveWithConcurrencyHandlingAsync(cancellationToken);
-        return WorkflowResponse(
+        var response = WorkflowResponse(
             booking,
             booking.Trip,
             GetPassengerName(booking),
             WorkflowNextAction.None,
             WorkflowActor.None);
+        await notificationService.TryCreateAsync(
+            NewNotification(
+                booking.PassengerId,
+                NotificationType.BookingDeclined,
+                "Booking declined",
+                "Your booking request was declined.",
+                booking.Id,
+                $"booking-declined:{booking.Id}"),
+            cancellationToken);
+        return response;
     }
 
     public async Task<EscrowResponseDto> PayAsync(
@@ -221,7 +266,40 @@ public class TripBookingService(
             await SaveWithConcurrencyHandlingAsync(cancellationToken);
         }
 
-        return MapResponse(booking, booking.Trip, GetPassengerName(booking));
+        var response = MapResponse(
+            booking,
+            booking.Trip,
+            GetPassengerName(booking));
+        await notificationService.TryCreateAsync(
+            NewNotification(
+                booking.Trip.DriverId,
+                NotificationType.BookingCancelled,
+                "Booking cancelled",
+                "A passenger cancelled a booking on your trip.",
+                booking.Id,
+                $"booking-cancelled:{booking.Id}:{booking.Trip.DriverId}"),
+            cancellationToken);
+        return response;
+    }
+
+    private static CreateNotificationRequest NewNotification(
+        Guid userId,
+        NotificationType type,
+        string title,
+        string message,
+        Guid bookingId,
+        string deduplicationKey)
+    {
+        return new CreateNotificationRequest
+        {
+            UserId = userId,
+            Type = type,
+            Title = title,
+            Message = message,
+            RelatedEntityId = bookingId,
+            RelatedEntityType = nameof(TripBooking),
+            DeduplicationKey = deduplicationKey
+        };
     }
 
     private async Task EnsureTripOwnerAsync(Guid tripId, Guid driverId, CancellationToken cancellationToken)

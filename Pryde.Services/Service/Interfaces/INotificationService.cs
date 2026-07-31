@@ -9,6 +9,9 @@ public interface INotificationService
     Task<NotificationResponseDto> CreateAsync(
         CreateNotificationRequest request,
         CancellationToken cancellationToken = default);
+    Task<NotificationResponseDto?> TryCreateAsync(
+        CreateNotificationRequest request,
+        CancellationToken cancellationToken = default);
     Task<PagedResponseDto<NotificationResponseDto>>
         GetMineAsync(
             Guid userId,

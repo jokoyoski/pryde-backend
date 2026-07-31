@@ -203,6 +203,44 @@ public class VehicleMediaUploadPerformanceTests
             context.Response.StatusCode);
     }
 
+    [Fact]
+    public async Task VehicleApprovalNotifiesOwner()
+    {
+        var context = Context(VehicleOnboardingStatus.Approved);
+        context.UnitOfWork.KycVerificationRepository.Items.Add(
+            new KycVerification
+            {
+                UserId = context.OwnerId,
+                Status = KycStatus.Approved
+            });
+
+        await Service(
+            context.UnitOfWork,
+            new TrackingFileStorageService())
+            .ActivateAsync(context.Vehicle.Id);
+
+        var notification = Assert.Single(
+            context.UnitOfWork.NotificationRepository.Items);
+        Assert.Equal(context.OwnerId, notification.UserId);
+        Assert.Equal(NotificationType.VehicleApproved, notification.Type);
+    }
+
+    [Fact]
+    public async Task VehicleRejectionNotifiesOwner()
+    {
+        var context = Context(VehicleOnboardingStatus.PendingReview);
+
+        await Service(
+            context.UnitOfWork,
+            new TrackingFileStorageService())
+            .RejectAsync(context.Vehicle.Id, "Documents are unclear.");
+
+        var notification = Assert.Single(
+            context.UnitOfWork.NotificationRepository.Items);
+        Assert.Equal(context.OwnerId, notification.UserId);
+        Assert.Equal(NotificationType.VehicleRejected, notification.Type);
+    }
+
     private static VehicleService Service(
         TestUnitOfWork unitOfWork,
         IFileStorageService storage)

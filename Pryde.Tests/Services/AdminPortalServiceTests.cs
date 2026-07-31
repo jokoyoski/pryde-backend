@@ -236,6 +236,48 @@ public class AdminPortalServiceTests
         Assert.Equal(1, result.TotalTransactions);
     }
 
+    [Fact]
+    public async Task DriverApprovalAndRejectionUseSeparateNotificationTypes()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var driver = new User
+        {
+            Email = "driver-review@test.local",
+            Status = UserStatus.Pending,
+            Profile = new Profile
+            {
+                FirstName = "Review",
+                LastName = "Driver"
+            }
+        };
+        var role = new Role { Name = "Driver" };
+        driver.UserRoles.Add(new UserRole
+        {
+            UserId = driver.Id,
+            User = driver,
+            RoleId = role.Id,
+            Role = role
+        });
+        unitOfWork.UserRepository.Items.Add(driver);
+        var service = CreateService(
+            unitOfWork,
+            new FakeEmailService());
+
+        await service.ActivateDriverAsync(driver.Id);
+        await service.DeactivateDriverAsync(driver.Id);
+
+        Assert.Contains(
+            unitOfWork.NotificationRepository.Items,
+            notification =>
+                notification.UserId == driver.Id &&
+                notification.Type == NotificationType.DriverApproved);
+        Assert.Contains(
+            unitOfWork.NotificationRepository.Items,
+            notification =>
+                notification.UserId == driver.Id &&
+                notification.Type == NotificationType.DriverRejected);
+    }
+
     private static AdminPortalService CreateService(
         TestUnitOfWork unitOfWork,
         IEmailService email,

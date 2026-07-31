@@ -10,13 +10,20 @@ using Pryde.Services.Service.Interface;
 
 namespace Pryde.Services.Service.Implementation;
 
-public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
+public class FinancialService(
+    IUnitOfWork unitOfWork,
+    INotificationService notificationService) : IFinancialService
 {
     private const string Currency = "NGN";
     private const string EscrowAccountCode = "SYSTEM:ESCROW:NGN";
     private const string PlatformRevenueAccountCode = "SYSTEM:PLATFORM_REVENUE:NGN";
     private const string DriverWithdrawalAccountCode = "SYSTEM:DRIVER_WITHDRAWALS:NGN";
     private const string TestFundingAccountCode = "SYSTEM:TEST_FUNDING:NGN";
+
+    public FinancialService(IUnitOfWork unitOfWork)
+        : this(unitOfWork, new NotificationService(unitOfWork))
+    {
+    }
 
     public async Task<EscrowResponseDto> HoldBookingPaymentAsync(
         Guid passengerId, Guid bookingId, string idempotencyKey,
@@ -197,7 +204,28 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
                     "The booking payment window has expired.");
             }
 
-            return result.Response!;
+            var response = result.Response!;
+            await notificationService.TryCreateAsync(
+                NewNotification(
+                    response.PassengerId,
+                    NotificationType.BookingPaymentSuccessful,
+                    "Payment successful",
+                    "Your booking payment was processed successfully.",
+                    response.EscrowId,
+                    nameof(Escrow),
+                    $"payment-processed:{response.EscrowId}:{response.PassengerId}"),
+                cancellationToken);
+            await notificationService.TryCreateAsync(
+                NewNotification(
+                    response.DriverId,
+                    NotificationType.BookingPaymentSuccessful,
+                    "Booking payment received",
+                    "A passenger completed payment for a booking on your trip.",
+                    response.EscrowId,
+                    nameof(Escrow),
+                    $"payment-processed:{response.EscrowId}:{response.DriverId}"),
+                cancellationToken);
+            return response;
         }
         catch (Exception exception)
             when (IsConcurrencyFailure(exception))
@@ -333,14 +361,14 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
         bool isAutomaticCompletion,
         CancellationToken cancellationToken)
     {
-        await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
+        var completion = await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
         {
             var trip = await unitOfWork.Trips.GetByIdForUpdateAsync(tripId, transactionToken)
                 ?? throw new NotFoundException(nameof(Trip), tripId);
 
             if (trip.Status == TripStatus.Completed)
             {
-                return true;
+                return null;
             }
 
             if (trip.Status == TripStatus.Cancelled)
@@ -500,8 +528,79 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
 
             unitOfWork.Trips.Update(trip);
             await unitOfWork.SaveChangesAsync(transactionToken);
-            return true;
+            return new TripCompletionNotificationData(
+                trip.DriverId,
+                activeBookings
+                    .Select(booking => booking.PassengerId)
+                    .Distinct()
+                    .ToList(),
+                escrows.Select(escrow => escrow.Id).ToList());
         }, cancellationToken);
+
+        if (completion is null)
+        {
+            return;
+        }
+
+        await notificationService.TryCreateAsync(
+            NewNotification(
+                completion.DriverId,
+                NotificationType.TripCompleted,
+                "Trip completed",
+                "Your trip was completed successfully.",
+                tripId,
+                nameof(Trip),
+                $"trip-completed:{tripId}:{completion.DriverId}"),
+            cancellationToken);
+
+        foreach (var passengerId in completion.PassengerIds)
+        {
+            await notificationService.TryCreateAsync(
+                NewNotification(
+                    passengerId,
+                    NotificationType.TripCompleted,
+                    "Trip completed",
+                    "Your trip was completed successfully.",
+                    tripId,
+                    nameof(Trip),
+                    $"trip-completed:{tripId}:{passengerId}"),
+                cancellationToken);
+        }
+
+        foreach (var escrowId in completion.EscrowIds)
+        {
+            await notificationService.TryCreateAsync(
+                NewNotification(
+                    completion.DriverId,
+                    NotificationType.EscrowReleased,
+                    "Trip earnings released",
+                    "Trip earnings were released to your wallet.",
+                    escrowId,
+                    nameof(Escrow),
+                    $"escrow-released:{escrowId}:{completion.DriverId}"),
+                cancellationToken);
+        }
+    }
+
+    private static CreateNotificationRequest NewNotification(
+        Guid userId,
+        NotificationType type,
+        string title,
+        string message,
+        Guid relatedEntityId,
+        string relatedEntityType,
+        string deduplicationKey)
+    {
+        return new CreateNotificationRequest
+        {
+            UserId = userId,
+            Type = type,
+            Title = title,
+            Message = message,
+            RelatedEntityId = relatedEntityId,
+            RelatedEntityType = relatedEntityType,
+            DeduplicationKey = deduplicationKey
+        };
     }
 
     public async Task<FinancialSummaryResponseDto> GetSummaryAsync(
@@ -1005,4 +1104,9 @@ public class FinancialService(IUnitOfWork unitOfWork) : IFinancialService
     private sealed record PaymentHoldResult(
         EscrowResponseDto? Response,
         bool Expired);
+
+    private sealed record TripCompletionNotificationData(
+        Guid DriverId,
+        IReadOnlyList<Guid> PassengerIds,
+        IReadOnlyList<Guid> EscrowIds);
 }

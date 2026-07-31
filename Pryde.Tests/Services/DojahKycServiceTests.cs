@@ -466,6 +466,9 @@ public class DojahKycServiceTests
 
         await service.ProcessWebhookAsync(payload, signature, null);
         var saveCount = unitOfWork.SaveChangesCount;
+        var notification = Assert.Single(
+            unitOfWork.NotificationRepository.Items);
+        Assert.Equal(NotificationType.KycApproved, notification.Type);
         var updatedAt = unitOfWork.KycVerificationRepository.Items[0]
             .LastProviderUpdatedAt;
         await service.ProcessWebhookAsync(payload, signature, null);
@@ -474,6 +477,7 @@ public class DojahKycServiceTests
         Assert.Equal(
             updatedAt,
             unitOfWork.KycVerificationRepository.Items[0].LastProviderUpdatedAt);
+        Assert.Single(unitOfWork.NotificationRepository.Items);
     }
 
     [Fact]
@@ -498,6 +502,9 @@ public class DojahKycServiceTests
             "Document could not be verified.",
             kyc.RejectionReason);
         Assert.Null(kyc.VerifiedAt);
+        var notification = Assert.Single(
+            unitOfWork.NotificationRepository.Items);
+        Assert.Equal(NotificationType.KycRejected, notification.Type);
         Assert.NotNull(kyc.LastProviderUpdatedAt);
     }
 

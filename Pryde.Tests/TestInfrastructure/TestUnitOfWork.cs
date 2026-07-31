@@ -124,11 +124,17 @@ internal sealed class TestNotificationRepository(
     List<User> users) : INotificationRepository
 {
     public List<Notification> Items { get; } = [];
+    public Exception? AddException { get; set; }
 
     public Task<Notification> AddAsync(
         Notification notification,
         CancellationToken cancellationToken = default)
     {
+        if (AddException is not null)
+        {
+            throw AddException;
+        }
+
         Items.Add(notification);
         return Task.FromResult(notification);
     }

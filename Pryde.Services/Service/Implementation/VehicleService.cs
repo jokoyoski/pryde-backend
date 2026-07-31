@@ -21,13 +21,28 @@ public class VehicleService(
     IUnitOfWork unitOfWork,
     IFileStorageService fileStorageService,
     IOptions<VehicleUploadSettings> vehicleUploadSettings,
-    ILogger<VehicleService> logger) : IVehicleService
+    ILogger<VehicleService> logger,
+    INotificationService notificationService) : IVehicleService
 {
     private static readonly HashSet<int> AllowedPassengerSeatCounts = [2, 4, 5, 6, 7];
     private static readonly string[] AllowedImageContentTypes =
         ["image/jpeg", "image/png", "image/webp"];
     private static readonly string[] AllowedVideoContentTypes =
         ["video/mp4", "video/quicktime", "video/webm"];
+
+    public VehicleService(
+        IUnitOfWork unitOfWork,
+        IFileStorageService fileStorageService,
+        IOptions<VehicleUploadSettings> vehicleUploadSettings,
+        ILogger<VehicleService> logger)
+        : this(
+            unitOfWork,
+            fileStorageService,
+            vehicleUploadSettings,
+            logger,
+            new NotificationService(unitOfWork))
+    {
+    }
 
     public async Task<VehicleResponseDto> CreateAsync(
         Guid driverId, string licensePlateNumber, int capacity,
@@ -547,11 +562,17 @@ public class VehicleService(
             vehicle.IsActive = true;
             unitOfWork.Vehicles.Update(vehicle);
             await unitOfWork.SaveChangesAsync(cancellationToken);
-            return await BuildWorkflowResponseAsync(
+            var response = await BuildWorkflowResponseAsync(
                 vehicle,
                 WorkflowNextAction.CreateTrip,
                 WorkflowActor.Driver,
                 cancellationToken);
+            await NotifyVehicleReviewAsync(
+                vehicle,
+                true,
+                null,
+                cancellationToken);
+            return response;
         }
 
         await ValidateCompletenessAsync(vehicle, cancellationToken);
@@ -561,11 +582,17 @@ public class VehicleService(
         vehicle.RejectionReason = null;
         unitOfWork.Vehicles.Update(vehicle);
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return await BuildWorkflowResponseAsync(
+        var approvalResponse = await BuildWorkflowResponseAsync(
             vehicle,
             WorkflowNextAction.CreateTrip,
             WorkflowActor.Driver,
             cancellationToken);
+        await NotifyVehicleReviewAsync(
+            vehicle,
+            true,
+            null,
+            cancellationToken);
+        return approvalResponse;
     }
 
     public async Task<VehicleResponseDto> DeactivateAsync(Guid vehicleId, CancellationToken cancellationToken = default)
@@ -600,10 +627,44 @@ public class VehicleService(
 
         unitOfWork.Vehicles.Update(vehicle);
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return await BuildWorkflowResponseAsync(
+        var response = await BuildWorkflowResponseAsync(
             vehicle,
             WorkflowNextAction.CompleteVehicleOnboarding,
             WorkflowActor.Driver,
+            cancellationToken);
+        await NotifyVehicleReviewAsync(
+            vehicle,
+            false,
+            vehicle.RejectionReason,
+            cancellationToken);
+        return response;
+    }
+
+    private Task NotifyVehicleReviewAsync(
+        Vehicle vehicle,
+        bool approved,
+        string? rejectionReason,
+        CancellationToken cancellationToken)
+    {
+        return notificationService.TryCreateAsync(
+            new CreateNotificationRequest
+            {
+                UserId = vehicle.UserId,
+                Type = approved
+                    ? NotificationType.VehicleApproved
+                    : NotificationType.VehicleRejected,
+                Title = approved
+                    ? "Vehicle approved"
+                    : "Vehicle rejected",
+                Message = approved
+                    ? "Your vehicle was approved."
+                    : $"Your vehicle was rejected: {rejectionReason}",
+                RelatedEntityId = vehicle.Id,
+                RelatedEntityType = nameof(Vehicle),
+                DeduplicationKey = approved
+                    ? $"vehicle-approved:{vehicle.Id}"
+                    : $"vehicle-rejected:{vehicle.Id}"
+            },
             cancellationToken);
     }
 

@@ -6,11 +6,44 @@ using Pryde.Domain.Enums;
 using Pryde.Services.Service.Implementation;
 using Pryde.Services.Service.Interface;
 using Pryde.Tests.TestInfrastructure;
+using Microsoft.Extensions.Logging;
 
 namespace Pryde.Tests.Services;
 
 public class NotificationServiceTests
 {
+    [Fact]
+    public void ExistingNotificationTypeValuesRemainStable()
+    {
+        Assert.Equal(1, (int)NotificationType.BookingRequested);
+        Assert.Equal(2, (int)NotificationType.BookingApproved);
+        Assert.Equal(3, (int)NotificationType.BookingDeclined);
+        Assert.Equal(9, (int)NotificationType.PickupConfirmationRequired);
+        Assert.Equal(14, (int)NotificationType.WithdrawalSubmitted);
+        Assert.Equal(19, (int)NotificationType.DriverApproved);
+        Assert.Equal(20, (int)NotificationType.DriverRejected);
+        Assert.Equal(21, (int)NotificationType.VehicleApproved);
+        Assert.Equal(22, (int)NotificationType.VehicleRejected);
+        Assert.Equal(23, (int)NotificationType.SystemAnnouncement);
+    }
+
+    [Fact]
+    public async Task BestEffortCreationLogsFailureAndReturnsNull()
+    {
+        var unitOfWork = Context(out var user);
+        unitOfWork.NotificationRepository.AddException =
+            new InvalidOperationException("notification storage failed");
+        var logger = new TestLogger<NotificationService>();
+        var service = new NotificationService(unitOfWork, logger);
+
+        var result = await service.TryCreateAsync(
+            Request(user.Id, NotificationType.BookingApproved));
+
+        Assert.Null(result);
+        Assert.Single(logger.Messages);
+        Assert.Contains("BookingApproved", logger.Messages[0]);
+    }
+
     [Fact]
     public async Task NotificationCreationWorks()
     {
@@ -336,5 +369,31 @@ public class NotificationServiceTests
             Message = "Notification message",
             DeduplicationKey = deduplicationKey
         };
+    }
+
+    private sealed class TestLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception));
+        }
     }
 }

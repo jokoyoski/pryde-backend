@@ -15,8 +15,19 @@ namespace Pryde.Services.Service.Implementation;
 
 public class KycService(
     IUnitOfWork unitOfWork,
-    IFileStorageService fileStorageService) : IKycService
+    IFileStorageService fileStorageService,
+    INotificationService notificationService) : IKycService
 {
+    public KycService(
+        IUnitOfWork unitOfWork,
+        IFileStorageService fileStorageService)
+        : this(
+            unitOfWork,
+            fileStorageService,
+            new NotificationService(unitOfWork))
+    {
+    }
+
     public async Task<KycVerificationResponseDto> UploadDocumentsAsync(
         Guid userId,
         KycDocumentUploadRequest request,
@@ -246,7 +257,7 @@ public class KycService(
         unitOfWork.KycVerifications.Update(kyc);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return WorkflowResponse(
+        var response = WorkflowResponse(
             kyc,
             requiresDriverOnboarding
                 ? WorkflowNextAction.CompleteVehicleOnboarding
@@ -254,6 +265,16 @@ public class KycService(
             requiresDriverOnboarding
                 ? WorkflowActor.Driver
                 : WorkflowActor.None);
+        await notificationService.TryCreateAsync(
+            NewNotification(
+                userId,
+                NotificationType.KycApproved,
+                "KYC approved",
+                "Your identity verification was approved.",
+                kyc.Id,
+                $"kyc-approved:{kyc.Id}"),
+            cancellationToken);
+        return response;
     }
 
     private async Task<bool> ValidateCompletenessAsync(
@@ -312,10 +333,40 @@ public class KycService(
         unitOfWork.KycVerifications.Update(kyc);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return WorkflowResponse(
+        var response = WorkflowResponse(
             kyc,
             WorkflowNextAction.CompleteKyc,
             WorkflowActor.User);
+        await notificationService.TryCreateAsync(
+            NewNotification(
+                userId,
+                NotificationType.KycRejected,
+                "KYC rejected",
+                $"Your identity verification was rejected: {sanitizedReason}",
+                kyc.Id,
+                $"kyc-rejected:{kyc.Id}"),
+            cancellationToken);
+        return response;
+    }
+
+    private static CreateNotificationRequest NewNotification(
+        Guid userId,
+        NotificationType type,
+        string title,
+        string message,
+        Guid kycId,
+        string deduplicationKey)
+    {
+        return new CreateNotificationRequest
+        {
+            UserId = userId,
+            Type = type,
+            Title = title,
+            Message = message,
+            RelatedEntityId = kycId,
+            RelatedEntityType = nameof(KycVerification),
+            DeduplicationKey = deduplicationKey
+        };
     }
 
     private static KycVerificationResponseDto WorkflowResponse(

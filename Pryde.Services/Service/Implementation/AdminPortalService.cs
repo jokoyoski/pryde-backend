@@ -21,8 +21,27 @@ public class AdminPortalService(
     IEmailService emailService,
     IFinancialService financialService,
     IDojahApiClient dojahApiClient,
-    ILogger<AdminPortalService> logger) : IAdminPortalService
+    ILogger<AdminPortalService> logger,
+    INotificationService notificationService) : IAdminPortalService
 {
+    public AdminPortalService(
+        IUnitOfWork unitOfWork,
+        IPasswordHasher passwordHasher,
+        IEmailService emailService,
+        IFinancialService financialService,
+        IDojahApiClient dojahApiClient,
+        ILogger<AdminPortalService> logger)
+        : this(
+            unitOfWork,
+            passwordHasher,
+            emailService,
+            financialService,
+            dojahApiClient,
+            logger,
+            new NotificationService(unitOfWork))
+    {
+    }
+
     public async Task<StaffResponseDto> InviteStaffAsync(
         InviteStaffRequestDto request, CancellationToken cancellationToken = default)
     {
@@ -173,11 +192,62 @@ public class AdminPortalService(
         return MapDriverDetail(user, tripSummary);
     }
 
-    public Task<AdminDriverDetailResponseDto> ActivateDriverAsync(Guid driverId, CancellationToken cancellationToken = default) =>
-        SetDriverStatusAsync(driverId, UserStatus.Active, cancellationToken);
+    public async Task<AdminDriverDetailResponseDto> ActivateDriverAsync(
+        Guid driverId,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await SetDriverStatusAsync(
+            driverId,
+            UserStatus.Active,
+            cancellationToken);
+        await NotifyDriverReviewAsync(
+            driverId,
+            true,
+            cancellationToken);
+        return response;
+    }
 
-    public Task<AdminDriverDetailResponseDto> DeactivateDriverAsync(Guid driverId, CancellationToken cancellationToken = default) =>
-        SetDriverStatusAsync(driverId, UserStatus.Deactivated, cancellationToken);
+    public async Task<AdminDriverDetailResponseDto> DeactivateDriverAsync(
+        Guid driverId,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await SetDriverStatusAsync(
+            driverId,
+            UserStatus.Deactivated,
+            cancellationToken);
+        await NotifyDriverReviewAsync(
+            driverId,
+            false,
+            cancellationToken);
+        return response;
+    }
+
+    private Task NotifyDriverReviewAsync(
+        Guid driverId,
+        bool approved,
+        CancellationToken cancellationToken)
+    {
+        return notificationService.TryCreateAsync(
+            new CreateNotificationRequest
+            {
+                UserId = driverId,
+                Type = approved
+                    ? NotificationType.DriverApproved
+                    : NotificationType.DriverRejected,
+                Title = approved
+                    ? "Driver onboarding approved"
+                    : "Driver onboarding rejected",
+                Message = approved
+                    ? "Your driver onboarding was approved."
+                    : "Your driver onboarding was rejected.",
+                RelatedEntityId = driverId,
+                RelatedEntityType = "Driver",
+                DeduplicationKey = approved
+                    ? $"driver-approved:{driverId}"
+                    : $"driver-rejected:{driverId}"
+            },
+            cancellationToken);
+    }
 
     public async Task<AdminKycResponseDto> GetKycAsync(
         Guid kycId, CancellationToken cancellationToken = default)

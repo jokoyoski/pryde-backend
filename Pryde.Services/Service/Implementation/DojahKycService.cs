@@ -16,10 +16,23 @@ namespace Pryde.Services.Service.Implementation;
 public class DojahKycService(
     IUnitOfWork unitOfWork,
     IOptions<DojahSettings> options,
-    ILogger<DojahKycService> logger) : IDojahKycService
+    ILogger<DojahKycService> logger,
+    INotificationService notificationService) : IDojahKycService
 {
     private const string ProviderName = "Dojah";
     private readonly DojahSettings _settings = options.Value;
+
+    public DojahKycService(
+        IUnitOfWork unitOfWork,
+        IOptions<DojahSettings> options,
+        ILogger<DojahKycService> logger)
+        : this(
+            unitOfWork,
+            options,
+            logger,
+            new NotificationService(unitOfWork))
+    {
+    }
 
     public async Task<DojahKycConfigResponseDto> GetConfigAsync(
         Guid userId,
@@ -154,6 +167,7 @@ public class DojahKycService(
             return;
         }
 
+        var previousStatus = kyc.Status;
         var nextStatus = MapStatus(webhook.Status, kyc.Status);
         var rejectionReason = nextStatus == KycStatus.Rejected
             ? SanitizeReason(webhook.Message)
@@ -192,6 +206,34 @@ public class DojahKycService(
             logger.LogInformation(
                 "Legacy Pryde-reference-only Dojah webhook processed for KYC {KycId}.",
                 kyc.Id);
+        }
+
+        if (previousStatus != nextStatus &&
+            nextStatus is KycStatus.Approved or KycStatus.Rejected)
+        {
+            var isApproved = nextStatus == KycStatus.Approved;
+            await notificationService.TryCreateAsync(
+                new CreateNotificationRequest
+                {
+                    UserId = kyc.UserId,
+                    Type = isApproved
+                        ? NotificationType.KycApproved
+                        : NotificationType.KycRejected,
+                    Title = isApproved
+                        ? "KYC approved"
+                        : "KYC rejected",
+                    Message = isApproved
+                        ? "Your identity verification was approved."
+                        : string.IsNullOrWhiteSpace(rejectionReason)
+                            ? "Your identity verification was rejected."
+                            : $"Your identity verification was rejected: {rejectionReason}",
+                    RelatedEntityId = kyc.Id,
+                    RelatedEntityType = nameof(KycVerification),
+                    DeduplicationKey = isApproved
+                        ? $"kyc-approved:{kyc.Id}"
+                        : $"kyc-rejected:{kyc.Id}"
+                },
+                cancellationToken);
         }
     }
 

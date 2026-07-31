@@ -126,7 +126,11 @@ public class TripServiceTests
         Assert.Equal(TripStatus.Cancelled, trip.Status);
         Assert.Equal(BookingStatus.Cancelled, booking.Status);
         Assert.Equal(2, trip.AvailableSeats);
-        Assert.Equal(1, unitOfWork.SaveChangesCount);
+        Assert.Equal(2, unitOfWork.SaveChangesCount);
+        var notification = Assert.Single(
+            unitOfWork.NotificationRepository.Items);
+        Assert.Equal(booking.PassengerId, notification.UserId);
+        Assert.Equal(NotificationType.BookingCancelled, notification.Type);
     }
 
     [Fact]
@@ -168,6 +172,16 @@ public class TripServiceTests
         Assert.Equal(
             WorkflowActor.Passenger,
             response.RequiredActor);
+        var notifications = context.UnitOfWork.NotificationRepository.Items
+            .Where(notification =>
+                notification.Type == NotificationType.PickupConfirmationRequired)
+            .ToList();
+        Assert.Equal(2, notifications.Count);
+        Assert.All(
+            context.Bookings,
+            booking => Assert.Contains(
+                notifications,
+                notification => notification.UserId == booking.PassengerId));
     }
 
     [Fact]
@@ -279,6 +293,11 @@ public class TripServiceTests
             escrow => Assert.Equal(
                 EscrowStatus.Held,
                 escrow.Status));
+        var notifications = context.UnitOfWork.NotificationRepository.Items
+            .Where(notification =>
+                notification.Type == NotificationType.DropoffConfirmationRequired)
+            .ToList();
+        Assert.Equal(2, notifications.Count);
     }
 
     [Fact]
@@ -373,6 +392,11 @@ public class TripServiceTests
         Assert.Equal(
             2,
             context.UnitOfWork.LedgerRepository.Transactions.Count);
+        Assert.Equal(
+            3,
+            context.UnitOfWork.NotificationRepository.Items.Count(
+                notification =>
+                    notification.Type == NotificationType.TripCompleted));
     }
 
     [Fact]

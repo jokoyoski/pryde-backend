@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
@@ -10,9 +12,10 @@ using Pryde.Services.Service.Interface;
 
 namespace Pryde.Services.Service.Implementation;
 
-public class NotificationService(
-    IUnitOfWork unitOfWork) : INotificationService
+public class NotificationService : INotificationService
 {
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<NotificationService> _logger;
     private const int MaximumTitleLength = 150;
     private const int MaximumMessageLength = 1000;
     private const int MaximumRelatedEntityTypeLength = 100;
@@ -20,6 +23,19 @@ public class NotificationService(
     private const int MaximumDeduplicationKeyLength = 200;
     private const string DeduplicationIndexName =
         "IX_Notifications_DeduplicationKey";
+
+    public NotificationService(
+        IUnitOfWork unitOfWork,
+        ILogger<NotificationService> logger)
+    {
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
+
+    public NotificationService(IUnitOfWork unitOfWork)
+        : this(unitOfWork, NullLogger<NotificationService>.Instance)
+    {
+    }
 
     public async Task<NotificationResponseDto> CreateAsync(
         CreateNotificationRequest request,
@@ -31,7 +47,7 @@ public class NotificationService(
             request.DeduplicationKey);
         if (deduplicationKey is not null)
         {
-            var existing = await unitOfWork.Notifications
+            var existing = await _unitOfWork.Notifications
                 .GetByDeduplicationKeyAsync(
                     deduplicationKey,
                     cancellationToken);
@@ -56,13 +72,13 @@ public class NotificationService(
             CreatedAt = DateTime.UtcNow
         };
 
-        await unitOfWork.Notifications.AddAsync(
+        await _unitOfWork.Notifications.AddAsync(
             notification,
             cancellationToken);
 
         try
         {
-            await unitOfWork.SaveChangesAsync(
+            await _unitOfWork.SaveChangesAsync(
                 cancellationToken);
             return Map(notification);
         }
@@ -70,8 +86,8 @@ public class NotificationService(
             when (deduplicationKey is not null &&
                   IsDeduplicationConflict(exception))
         {
-            unitOfWork.Notifications.Detach(notification);
-            var existing = await unitOfWork.Notifications
+            _unitOfWork.Notifications.Detach(notification);
+            var existing = await _unitOfWork.Notifications
                 .GetByDeduplicationKeyAsync(
                     deduplicationKey,
                     cancellationToken);
@@ -84,6 +100,25 @@ public class NotificationService(
         }
     }
 
+    public async Task<NotificationResponseDto?> TryCreateAsync(
+        CreateNotificationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await CreateAsync(request, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Notification creation failed for event {NotificationType} and resource {ResourceId}.",
+                request.Type,
+                request.RelatedEntityId);
+            return null;
+        }
+    }
+
     public async Task<
         PagedResponseDto<NotificationResponseDto>>
         GetMineAsync(
@@ -92,7 +127,7 @@ public class NotificationService(
             CancellationToken cancellationToken = default)
     {
         request ??= new UserNotificationsRequestDto();
-        var result = await unitOfWork.Notifications
+        var result = await _unitOfWork.Notifications
             .GetUserNotificationsAsync(
                 userId,
                 request.PageNumber,
@@ -114,7 +149,7 @@ public class NotificationService(
     {
         return new NotificationCountResponseDto
         {
-            Count = await unitOfWork.Notifications
+            Count = await _unitOfWork.Notifications
                 .GetUnreadCountAsync(
                     userId,
                     cancellationToken)
@@ -127,7 +162,7 @@ public class NotificationService(
             Guid userId,
             CancellationToken cancellationToken = default)
     {
-        var notification = await unitOfWork.Notifications
+        var notification = await _unitOfWork.Notifications
             .GetByIdAndUserIdAsync(
                 notificationId,
                 userId,
@@ -140,7 +175,7 @@ public class NotificationService(
         {
             notification.IsRead = true;
             notification.ReadAt = DateTime.UtcNow;
-            await unitOfWork.SaveChangesAsync(
+            await _unitOfWork.SaveChangesAsync(
                 cancellationToken);
         }
 
@@ -152,7 +187,7 @@ public class NotificationService(
             Guid userId,
             CancellationToken cancellationToken = default)
     {
-        var count = await unitOfWork.Notifications
+        var count = await _unitOfWork.Notifications
             .MarkAllAsReadAsync(
                 userId,
                 DateTime.UtcNow,
@@ -174,7 +209,7 @@ public class NotificationService(
             request.CreatedFrom,
             request.CreatedTo);
 
-        var result = await unitOfWork.Notifications
+        var result = await _unitOfWork.Notifications
             .AdminGetAllAsync(
                 request.PageNumber,
                 request.PageSize,
@@ -196,7 +231,7 @@ public class NotificationService(
             Guid notificationId,
             CancellationToken cancellationToken = default)
     {
-        var notification = await unitOfWork.Notifications
+        var notification = await _unitOfWork.Notifications
             .AdminGetByIdAsync(
                 notificationId,
                 cancellationToken)

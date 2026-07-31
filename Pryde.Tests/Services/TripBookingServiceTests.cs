@@ -27,7 +27,11 @@ public class TripBookingServiceTests
         Assert.Equal(118.75m, result.ServiceCharge);
         Assert.Equal(2493.75m, result.TotalAmount);
         Assert.Equal(2, trip.AvailableSeats);
-        Assert.Equal(1, unitOfWork.SaveChangesCount);
+        Assert.Equal(2, unitOfWork.SaveChangesCount);
+        var notification = Assert.Single(
+            unitOfWork.NotificationRepository.Items);
+        Assert.Equal(driverId, notification.UserId);
+        Assert.Equal(NotificationType.BookingRequested, notification.Type);
     }
 
     [Fact]
@@ -84,7 +88,11 @@ public class TripBookingServiceTests
             result.ApprovedAt.Value.AddMinutes(15),
             result.PaymentExpiresAt);
         Assert.Equal(1, trip.AvailableSeats);
-        Assert.Equal(1, unitOfWork.SaveChangesCount);
+        Assert.Equal(2, unitOfWork.SaveChangesCount);
+        var notification = Assert.Single(
+            unitOfWork.NotificationRepository.Items);
+        Assert.Equal(booking.PassengerId, notification.UserId);
+        Assert.Equal(NotificationType.BookingApproved, notification.Type);
     }
 
     [Fact]
@@ -128,6 +136,7 @@ public class TripBookingServiceTests
         await Assert.ThrowsAsync<ConflictException>(() => service.ApproveAsync(booking.Id, driverId));
 
         Assert.Equal(1, trip.AvailableSeats);
+        Assert.Single(unitOfWork.NotificationRepository.Items);
     }
 
     [Fact]
@@ -151,6 +160,7 @@ public class TripBookingServiceTests
 
         await Assert.ThrowsAsync<ForbiddenException>(() =>
             new TripBookingService(unitOfWork).ApproveAsync(booking.Id, Guid.NewGuid()));
+        Assert.Empty(unitOfWork.NotificationRepository.Items);
     }
 
     [Fact]
@@ -166,6 +176,10 @@ public class TripBookingServiceTests
         Assert.Equal(WorkflowNextAction.None, result.NextAction);
         Assert.Equal(WorkflowActor.None, result.RequiredActor);
         Assert.Equal(2, trip.AvailableSeats);
+        var notification = Assert.Single(
+            unitOfWork.NotificationRepository.Items);
+        Assert.Equal(booking.PassengerId, notification.UserId);
+        Assert.Equal(NotificationType.BookingDeclined, notification.Type);
     }
 
     [Fact]
@@ -180,6 +194,10 @@ public class TripBookingServiceTests
 
         Assert.Equal(BookingStatus.Cancelled, result.Status);
         Assert.Equal(2, trip.AvailableSeats);
+        var notification = Assert.Single(
+            unitOfWork.NotificationRepository.Items);
+        Assert.Equal(driverId, notification.UserId);
+        Assert.Equal(NotificationType.BookingCancelled, notification.Type);
     }
 
     [Fact]

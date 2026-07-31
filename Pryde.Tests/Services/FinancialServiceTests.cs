@@ -25,6 +25,14 @@ public class FinancialServiceTests
         Assert.Equal(2, context.UnitOfWork.LedgerRepository.Entries.Count);
         AssertBalanced(context.UnitOfWork.LedgerRepository.Transactions.Single());
         Assert.NotNull(context.Booking.PaidAt);
+        Assert.Equal(
+            2,
+            context.UnitOfWork.NotificationRepository.Items.Count);
+        Assert.All(
+            context.UnitOfWork.NotificationRepository.Items,
+            notification => Assert.Equal(
+                NotificationType.BookingPaymentSuccessful,
+                notification.Type));
     }
 
     [Fact]
@@ -135,6 +143,20 @@ public class FinancialServiceTests
         Assert.Equal(BookingStatus.Completed, context.Booking.Status);
         Assert.Equal(2, context.UnitOfWork.LedgerRepository.Transactions.Count);
         Assert.All(context.UnitOfWork.LedgerRepository.Transactions, AssertBalanced);
+        Assert.Contains(
+            context.UnitOfWork.NotificationRepository.Items,
+            notification =>
+                notification.UserId == context.Driver.Id &&
+                notification.Type == NotificationType.TripCompleted);
+        Assert.Contains(
+            context.UnitOfWork.NotificationRepository.Items,
+            notification =>
+                notification.UserId == context.Passenger.Id &&
+                notification.Type == NotificationType.TripCompleted);
+        Assert.Single(
+            context.UnitOfWork.NotificationRepository.Items,
+            notification =>
+                notification.Type == NotificationType.EscrowReleased);
     }
 
     [Fact]

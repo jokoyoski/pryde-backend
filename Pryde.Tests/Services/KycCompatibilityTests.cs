@@ -51,6 +51,29 @@ public class KycCompatibilityTests
 
         Assert.Equal(KycStatus.Approved, result.Status);
         Assert.NotNull(result.VerifiedAt);
+        var notification = Assert.Single(
+            unitOfWork.NotificationRepository.Items);
+        Assert.Equal(kyc.UserId, notification.UserId);
+        Assert.Equal(NotificationType.KycApproved, notification.Type);
+    }
+
+    [Fact]
+    public async Task NotificationFailureDoesNotReverseKycApproval()
+    {
+        var unitOfWork = Context(out var kyc);
+        kyc.BiometricVerificationUrl = "https://files.test/selfie.jpg";
+        kyc.Status = KycStatus.Submitted;
+        unitOfWork.NotificationRepository.AddException =
+            new InvalidOperationException("notification storage failed");
+
+        var result = await new KycService(
+            unitOfWork,
+            null!,
+            new NotificationService(unitOfWork))
+            .ApproveAsync(kyc.UserId);
+
+        Assert.Equal(KycStatus.Approved, result.Status);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
     }
 
     [Fact]
@@ -64,6 +87,11 @@ public class KycCompatibilityTests
 
         Assert.Equal(KycStatus.Rejected, result.Status);
         Assert.Equal("document mismatch", result.RejectionReason);
+        var notification = Assert.Single(
+            unitOfWork.NotificationRepository.Items);
+        Assert.Equal(kyc.UserId, notification.UserId);
+        Assert.Equal(NotificationType.KycRejected, notification.Type);
+        Assert.Contains("document mismatch", notification.Message);
     }
 
     [Fact]

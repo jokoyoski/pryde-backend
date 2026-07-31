@@ -16,7 +16,8 @@ public class TripService(
     IFareCalculator fareCalculator,
     IRouteMatchingService routeMatchingService,
     IOptions<PricingSettings> pricingSettings,
-    IFinancialService financialService) : ITripService
+    IFinancialService financialService,
+    INotificationService notificationService) : ITripService
 {
     private readonly PricingSettings _pricingSettings = pricingSettings.Value;
 
@@ -25,7 +26,29 @@ public class TripService(
         IFareCalculator fareCalculator,
         IRouteMatchingService routeMatchingService,
         IOptions<PricingSettings> pricingSettings)
-        : this(unitOfWork, fareCalculator, routeMatchingService, pricingSettings, new FinancialService(unitOfWork))
+        : this(
+            unitOfWork,
+            fareCalculator,
+            routeMatchingService,
+            pricingSettings,
+            new FinancialService(unitOfWork),
+            new NotificationService(unitOfWork))
+    {
+    }
+
+    public TripService(
+        IUnitOfWork unitOfWork,
+        IFareCalculator fareCalculator,
+        IRouteMatchingService routeMatchingService,
+        IOptions<PricingSettings> pricingSettings,
+        IFinancialService financialService)
+        : this(
+            unitOfWork,
+            fareCalculator,
+            routeMatchingService,
+            pricingSettings,
+            financialService,
+            new NotificationService(unitOfWork))
     {
     }
 
@@ -187,6 +210,10 @@ public class TripService(
             || trip.DepartureTime <= DateTime.UtcNow)
             throw new ConflictException("This trip can no longer be cancelled.");
 
+        var affectedBookings = trip.Bookings
+            .Where(booking => booking.Status is BookingStatus.Pending or BookingStatus.Approved)
+            .Select(booking => (booking.Id, booking.PassengerId))
+            .ToList();
         var approvedCount = 0;
         foreach (var booking in trip.Bookings.Where(b => b.Status is BookingStatus.Pending or BookingStatus.Approved))
         {
@@ -203,6 +230,20 @@ public class TripService(
             await financialService.RefundTripAsync(trip.Id, cancellationToken);
         else
             await SaveWithConcurrencyHandlingAsync(cancellationToken);
+
+        foreach (var booking in affectedBookings)
+        {
+            await notificationService.TryCreateAsync(
+                NewNotification(
+                    booking.PassengerId,
+                    NotificationType.BookingCancelled,
+                    "Trip cancelled",
+                    "The driver cancelled a trip connected to your booking.",
+                    booking.Id,
+                    nameof(TripBooking),
+                    $"booking-cancelled:{booking.Id}:{booking.PassengerId}"),
+                cancellationToken);
+        }
     }
 
     public async Task<TripDetailsResponseDto> CompleteAsync(
@@ -217,7 +258,7 @@ public class TripService(
         Guid driverId,
         CancellationToken cancellationToken = default)
     {
-        await unitOfWork.ExecuteInTransactionAsync(
+        var passengerIds = await unitOfWork.ExecuteInTransactionAsync(
             async transactionToken =>
             {
                 var trip = await GetTripForLifecycleAsync(
@@ -247,13 +288,31 @@ public class TripService(
                 trip.Status = TripStatus.PickupConfirmationPending;
                 unitOfWork.Trips.Update(trip);
                 await unitOfWork.SaveChangesAsync(transactionToken);
-                return true;
+                return activeBookings
+                    .Select(booking => booking.PassengerId)
+                    .Distinct()
+                    .ToList();
             },
             cancellationToken);
 
-        return await GetLifecycleResponseAsync(
+        var response = await GetLifecycleResponseAsync(
             tripId,
             cancellationToken);
+        foreach (var passengerId in passengerIds)
+        {
+            await notificationService.TryCreateAsync(
+                NewNotification(
+                    passengerId,
+                    NotificationType.PickupConfirmationRequired,
+                    "Confirm your pickup",
+                    "The driver started the trip. Please confirm your pickup.",
+                    tripId,
+                    nameof(Trip),
+                    $"pickup-confirmation-required:{tripId}:{passengerId}"),
+                cancellationToken);
+        }
+
+        return response;
     }
 
     public async Task<TripDetailsResponseDto> ConfirmPickupAsync(
@@ -316,7 +375,7 @@ public class TripService(
         Guid driverId,
         CancellationToken cancellationToken = default)
     {
-        await unitOfWork.ExecuteInTransactionAsync(
+        var passengerIds = await unitOfWork.ExecuteInTransactionAsync(
             async transactionToken =>
             {
                 var trip = await GetTripForLifecycleAsync(
@@ -335,6 +394,7 @@ public class TripService(
                         "Only an in-progress trip can be ended.");
                 }
 
+                var activeBookings = GetActiveBookings(trip);
                 var driverEndedAt = DateTime.UtcNow;
                 trip.Status =
                     TripStatus.DropoffConfirmationPending;
@@ -343,13 +403,52 @@ public class TripService(
                     driverEndedAt.AddHours(24);
                 unitOfWork.Trips.Update(trip);
                 await unitOfWork.SaveChangesAsync(transactionToken);
-                return true;
+                return activeBookings
+                    .Select(booking => booking.PassengerId)
+                    .Distinct()
+                    .ToList();
             },
             cancellationToken);
 
-        return await GetLifecycleResponseAsync(
+        var response = await GetLifecycleResponseAsync(
             tripId,
             cancellationToken);
+        foreach (var passengerId in passengerIds)
+        {
+            await notificationService.TryCreateAsync(
+                NewNotification(
+                    passengerId,
+                    NotificationType.DropoffConfirmationRequired,
+                    "Confirm your drop-off",
+                    "The driver ended the trip. Please confirm your drop-off.",
+                    tripId,
+                    nameof(Trip),
+                    $"dropoff-confirmation-required:{tripId}:{passengerId}"),
+                cancellationToken);
+        }
+
+        return response;
+    }
+
+    private static CreateNotificationRequest NewNotification(
+        Guid userId,
+        NotificationType type,
+        string title,
+        string message,
+        Guid relatedEntityId,
+        string relatedEntityType,
+        string deduplicationKey)
+    {
+        return new CreateNotificationRequest
+        {
+            UserId = userId,
+            Type = type,
+            Title = title,
+            Message = message,
+            RelatedEntityId = relatedEntityId,
+            RelatedEntityType = relatedEntityType,
+            DeduplicationKey = deduplicationKey
+        };
     }
 
     public async Task<TripDetailsResponseDto> ConfirmDropoffAsync(
