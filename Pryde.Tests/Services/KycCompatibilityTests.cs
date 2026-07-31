@@ -51,6 +51,29 @@ public class KycCompatibilityTests
 
         Assert.Equal(KycStatus.Approved, result.Status);
         Assert.NotNull(result.VerifiedAt);
+        var notification = Assert.Single(
+            unitOfWork.NotificationRepository.Items);
+        Assert.Equal(kyc.UserId, notification.UserId);
+        Assert.Equal(NotificationType.KycApproved, notification.Type);
+    }
+
+    [Fact]
+    public async Task NotificationFailureDoesNotReverseKycApproval()
+    {
+        var unitOfWork = Context(out var kyc);
+        kyc.BiometricVerificationUrl = "https://files.test/selfie.jpg";
+        kyc.Status = KycStatus.Submitted;
+        unitOfWork.NotificationRepository.AddException =
+            new InvalidOperationException("notification storage failed");
+
+        var result = await new KycService(
+            unitOfWork,
+            null!,
+            new NotificationService(unitOfWork))
+            .ApproveAsync(kyc.UserId);
+
+        Assert.Equal(KycStatus.Approved, result.Status);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
     }
 
     [Fact]
@@ -64,6 +87,11 @@ public class KycCompatibilityTests
 
         Assert.Equal(KycStatus.Rejected, result.Status);
         Assert.Equal("document mismatch", result.RejectionReason);
+        var notification = Assert.Single(
+            unitOfWork.NotificationRepository.Items);
+        Assert.Equal(kyc.UserId, notification.UserId);
+        Assert.Equal(NotificationType.KycRejected, notification.Type);
+        Assert.Contains("document mismatch", notification.Message);
     }
 
     [Fact]
@@ -176,7 +204,8 @@ public class KycCompatibilityTests
 
         var dojahService = DojahService(unitOfWork);
         var newConfig = await dojahService.GetConfigAsync(kyc.UserId);
-        Assert.NotEqual(oldReference, newConfig.ReferenceId);
+        Assert.Null(newConfig.ReferenceId);
+        Assert.NotEqual(oldReference, newConfig.ProviderReference);
 
         var oldPayload = Encoding.UTF8.GetBytes(
             $"{{\"reference_id\":\"{oldReference}\",\"verification_status\":\"Completed\"}}");
@@ -185,7 +214,7 @@ public class KycCompatibilityTests
             dojahService.ProcessWebhookAsync(oldPayload, Sign(oldPayload), null));
 
         Assert.Equal(KycStatus.Pending, kyc.Status);
-        Assert.Equal(newConfig.ReferenceId, kyc.ProviderReference);
+        Assert.Equal(newConfig.ProviderReference, kyc.ProviderReference);
         Assert.Null(kyc.ProviderStatus);
         Assert.Null(kyc.LastProviderUpdatedAt);
     }

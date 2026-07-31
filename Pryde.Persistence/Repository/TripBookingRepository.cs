@@ -12,6 +12,21 @@ public class TripBookingRepository(PrydeDbContext context) : ITripBookingReposit
         return await context.TripBookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
     }
 
+    public async Task<TripBooking?> GetByIdForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        return await context.TripBookings
+            .FromSqlInterpolated(
+                $"""
+                SELECT *
+                FROM "TripBookings"
+                WHERE "Id" = {id}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<TripBooking?> GetByIdWithTripAsync(Guid id, CancellationToken cancellationToken = default)
     {
         return await context.TripBookings
@@ -79,6 +94,24 @@ public class TripBookingRepository(PrydeDbContext context) : ITripBookingReposit
                     booking.Trip.DriverId == driverId &&
                     booking.Status == Pryde.Domain.Enums.BookingStatus.Pending,
                 cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Guid>>
+        GetExpiredUnpaidApprovedBookingIdsAsync(
+            DateTime utcNow,
+            CancellationToken cancellationToken = default)
+    {
+        return await context.TripBookings
+            .AsNoTracking()
+            .Where(booking =>
+                booking.Status ==
+                    Pryde.Domain.Enums.BookingStatus.Approved &&
+                booking.PaidAt == null &&
+                booking.PaymentExpiresAt.HasValue &&
+                booking.PaymentExpiresAt.Value <= utcNow)
+            .OrderBy(booking => booking.PaymentExpiresAt)
+            .Select(booking => booking.Id)
+            .ToListAsync(cancellationToken);
     }
 
     public async Task<bool> HasActiveBookingAsync(Guid tripId, Guid passengerId, CancellationToken cancellationToken = default)

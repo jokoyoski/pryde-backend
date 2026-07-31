@@ -1,6 +1,7 @@
 ﻿using CloudinaryDotNet;
 using CloudinaryDotNet.Actions;
 using Microsoft.Extensions.Options;
+using Pryde.Domain.Common.Exceptions;
 using Pryde.Services.Settings;
 using Pryde.Services.Storage.Enums;
 using Pryde.Services.Storage.Interface;
@@ -39,63 +40,79 @@ public sealed class CloudinaryFileStorageService : IFileStorageService
         string? publicUrl;
         string? errorMessage;
 
-        if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        try
         {
-            var uploadParams = new ImageUploadParams
+            if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
             {
-                File = new FileDescription(fileName, fileStream),
-                PublicId = publicId,
-                Overwrite = false
-            };
+                var uploadParams = new ImageUploadParams
+                {
+                    File = new FileDescription(fileName, fileStream),
+                    PublicId = publicId,
+                    Overwrite = false
+                };
 
-            var result = await _cloudinary.UploadAsync(uploadParams, cancellationToken);
-            fileKey = result.PublicId;
-            publicUrl = result.SecureUrl?.ToString();
-            errorMessage = result.Error?.Message;
+                var result = await _cloudinary.UploadAsync(uploadParams, cancellationToken);
+                fileKey = result.PublicId;
+                publicUrl = result.SecureUrl?.ToString();
+                errorMessage = result.Error?.Message;
+            }
+            else if (contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase))
+            {
+                var uploadParams = new VideoUploadParams
+                {
+                    File = new FileDescription(fileName, fileStream),
+                    PublicId = publicId,
+                    Overwrite = false
+                };
+
+                var result = await _cloudinary.UploadAsync(uploadParams, cancellationToken);
+                fileKey = result.PublicId;
+                publicUrl = result.SecureUrl?.ToString();
+                errorMessage = result.Error?.Message;
+            }
+            else
+            {
+                var uploadParams = new RawUploadParams
+                {
+                    File = new FileDescription(fileName, fileStream),
+                    PublicId = publicId,
+                    Overwrite = false
+                };
+
+                var result = await _cloudinary.UploadAsync(uploadParams, "raw", cancellationToken);
+                fileKey = result.PublicId;
+                publicUrl = result.SecureUrl?.ToString();
+                errorMessage = result.Error?.Message;
+            }
         }
-        else if (contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase))
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            var uploadParams = new VideoUploadParams
-            {
-                File = new FileDescription(fileName, fileStream),
-                PublicId = publicId,
-                Overwrite = false
-            };
-
-            var result = await _cloudinary.UploadAsync(uploadParams, cancellationToken);
-            fileKey = result.PublicId;
-            publicUrl = result.SecureUrl?.ToString();
-            errorMessage = result.Error?.Message;
+            throw new ServiceUnavailableException(
+                "File storage is temporarily unavailable.");
         }
-        else
+        catch (HttpRequestException)
         {
-            var uploadParams = new RawUploadParams
-            {
-                File = new FileDescription(fileName, fileStream),
-                PublicId = publicId,
-                Overwrite = false
-            };
-
-            var result = await _cloudinary.UploadAsync(uploadParams, "raw", cancellationToken);
-            fileKey = result.PublicId;
-            publicUrl = result.SecureUrl?.ToString();
-            errorMessage = result.Error?.Message;
+            throw new ServiceUnavailableException(
+                "File storage is temporarily unavailable.");
         }
 
         if (!string.IsNullOrWhiteSpace(errorMessage))
         {
-            throw new InvalidOperationException(errorMessage);
+            throw new ServiceUnavailableException(
+                "File storage is temporarily unavailable.");
         }
 
         if (string.IsNullOrWhiteSpace(fileKey))
         {
-            throw new InvalidOperationException("Cloudinary upload failed.");
+            throw new ServiceUnavailableException(
+                "File storage is temporarily unavailable.");
         }
 
         return new FileUploadResult(
             fileKey,
             publicUrl
-                ?? throw new InvalidOperationException("Cloudinary did not return a secure URL."));
+                ?? throw new ServiceUnavailableException(
+                    "File storage is temporarily unavailable."));
     }
 
     public Task<string> GetReadUrlAsync(

@@ -43,7 +43,17 @@ public class DriverWithdrawalServiceTests
         Assert.Equal(1500m, context.Wallet.Balance);
         Assert.Single(
             context.UnitOfWork.WalletTransactionRepository.Items);
-        Assert.Equal(2, context.UnitOfWork.SaveChangesCount);
+        Assert.Equal(4, context.UnitOfWork.SaveChangesCount);
+        Assert.Contains(
+            context.UnitOfWork.NotificationRepository.Items,
+            notification =>
+                notification.UserId == context.DriverId &&
+                notification.Type == NotificationType.WithdrawalSubmitted);
+        Assert.Contains(
+            context.UnitOfWork.NotificationRepository.Items,
+            notification =>
+                notification.UserId == context.DriverId &&
+                notification.Type == NotificationType.WithdrawalSuccessful);
     }
 
     [Theory]

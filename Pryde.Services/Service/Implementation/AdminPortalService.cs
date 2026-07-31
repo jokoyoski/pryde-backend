@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
@@ -8,6 +9,7 @@ using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Notifications.Interface;
+using Pryde.Services.Providers.Dojah;
 using Pryde.Services.Security.Interface;
 using Pryde.Services.Service.Interface;
 
@@ -17,8 +19,29 @@ public class AdminPortalService(
     IUnitOfWork unitOfWork,
     IPasswordHasher passwordHasher,
     IEmailService emailService,
-    IFinancialService financialService) : IAdminPortalService
+    IFinancialService financialService,
+    IDojahApiClient dojahApiClient,
+    ILogger<AdminPortalService> logger,
+    INotificationService notificationService) : IAdminPortalService
 {
+    public AdminPortalService(
+        IUnitOfWork unitOfWork,
+        IPasswordHasher passwordHasher,
+        IEmailService emailService,
+        IFinancialService financialService,
+        IDojahApiClient dojahApiClient,
+        ILogger<AdminPortalService> logger)
+        : this(
+            unitOfWork,
+            passwordHasher,
+            emailService,
+            financialService,
+            dojahApiClient,
+            logger,
+            new NotificationService(unitOfWork))
+    {
+    }
+
     public async Task<StaffResponseDto> InviteStaffAsync(
         InviteStaffRequestDto request, CancellationToken cancellationToken = default)
     {
@@ -169,18 +192,94 @@ public class AdminPortalService(
         return MapDriverDetail(user, tripSummary);
     }
 
-    public Task<AdminDriverDetailResponseDto> ActivateDriverAsync(Guid driverId, CancellationToken cancellationToken = default) =>
-        SetDriverStatusAsync(driverId, UserStatus.Active, cancellationToken);
+    public async Task<AdminDriverDetailResponseDto> ActivateDriverAsync(
+        Guid driverId,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await SetDriverStatusAsync(
+            driverId,
+            UserStatus.Active,
+            cancellationToken);
+        await NotifyDriverReviewAsync(
+            driverId,
+            true,
+            cancellationToken);
+        return response;
+    }
 
-    public Task<AdminDriverDetailResponseDto> DeactivateDriverAsync(Guid driverId, CancellationToken cancellationToken = default) =>
-        SetDriverStatusAsync(driverId, UserStatus.Deactivated, cancellationToken);
+    public async Task<AdminDriverDetailResponseDto> DeactivateDriverAsync(
+        Guid driverId,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await SetDriverStatusAsync(
+            driverId,
+            UserStatus.Deactivated,
+            cancellationToken);
+        await NotifyDriverReviewAsync(
+            driverId,
+            false,
+            cancellationToken);
+        return response;
+    }
+
+    private Task NotifyDriverReviewAsync(
+        Guid driverId,
+        bool approved,
+        CancellationToken cancellationToken)
+    {
+        return notificationService.TryCreateAsync(
+            new CreateNotificationRequest
+            {
+                UserId = driverId,
+                Type = approved
+                    ? NotificationType.DriverApproved
+                    : NotificationType.DriverRejected,
+                Title = approved
+                    ? "Driver onboarding approved"
+                    : "Driver onboarding rejected",
+                Message = approved
+                    ? "Your driver onboarding was approved."
+                    : "Your driver onboarding was rejected.",
+                RelatedEntityId = driverId,
+                RelatedEntityType = "Driver",
+                DeduplicationKey = approved
+                    ? $"driver-approved:{driverId}"
+                    : $"driver-rejected:{driverId}"
+            },
+            cancellationToken);
+    }
 
     public async Task<AdminKycResponseDto> GetKycAsync(
         Guid kycId, CancellationToken cancellationToken = default)
     {
         var kyc = await unitOfWork.AdminListings.GetKycDetailsAsync(kycId, cancellationToken)
             ?? throw new NotFoundException(nameof(KycVerification), kycId);
-        return MapKyc(kyc);
+        var response = MapKyc(kyc);
+        if (string.IsNullOrWhiteSpace(kyc.DojahReference))
+        {
+            logger.LogInformation(
+                "Dojah detail lookup skipped because KYC {KycId} has no Dojah reference.",
+                kyc.Id);
+            return response;
+        }
+
+        try
+        {
+            response.DojahDetails = await dojahApiClient.GetVerificationAsync(
+                kyc.DojahReference,
+                cancellationToken);
+        }
+        catch (ServiceUnavailableException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Dojah verification details are unavailable for KYC {KycId}. " +
+                "Returning local KYC information.",
+                kyc.Id);
+            response.DojahDetails = null;
+        }
+
+        return response;
     }
 
     public async Task<AdminVehicleResponseDto> GetVehicleAsync(

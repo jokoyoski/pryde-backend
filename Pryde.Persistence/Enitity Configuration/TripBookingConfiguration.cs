@@ -11,6 +11,12 @@ public class TripBookingConfiguration : IEntityTypeConfiguration<TripBooking>
         builder.Property(x => x.ServiceCharge).HasPrecision(18, 2);
         builder.Property(x => x.TotalAmount).HasPrecision(18, 2);
         builder.Property(x => x.Status).IsConcurrencyToken();
+        builder.HasIndex(x => new
+        {
+            x.Status,
+            x.PaidAt,
+            x.PaymentExpiresAt
+        });
 
         builder.HasOne(x => x.Trip)
             .WithMany(t => t.Bookings)

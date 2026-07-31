@@ -375,6 +375,75 @@ namespace Pryde.Persistence.Migrations
                     b.ToTable("LedgerTransactions");
                 });
 
+            modelBuilder.Entity("Pryde.Domain.Entities.Notification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeduplicationKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsRead")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("ReadAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RelatedEntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RelatedEntityType")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeduplicationKey")
+                        .IsUnique()
+                        .HasFilter("\"DeduplicationKey\" IS NOT NULL");
+
+                    b.HasIndex("Type", "CreatedAt");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.HasIndex("UserId", "IsRead", "CreatedAt");
+
+                    b.ToTable("Notifications");
+                });
+
             modelBuilder.Entity("Pryde.Domain.Entities.PasswordResetCode", b =>
                 {
                     b.Property<Guid>("Id")
@@ -593,12 +662,18 @@ namespace Pryde.Persistence.Migrations
                     b.Property<bool>("AllowLuggage")
                         .HasColumnType("boolean");
 
+                    b.Property<DateTime?>("AutoCompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("AvailableSeats")
                         .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.Property<int>("BookingWindowHours")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ConfirmationDeadline")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -619,6 +694,9 @@ namespace Pryde.Persistence.Migrations
 
                     b.Property<double>("DistanceKm")
                         .HasColumnType("double precision");
+
+                    b.Property<DateTime?>("DriverEndedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("DriverId")
                         .HasColumnType("uuid");
@@ -654,6 +732,7 @@ namespace Pryde.Persistence.Migrations
                         .HasColumnType("numeric(5,2)");
 
                     b.Property<int>("Status")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.Property<decimal>("TripFare")
@@ -666,6 +745,9 @@ namespace Pryde.Persistence.Migrations
                     b.Property<Guid>("VehicleId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("WasAutoCompleted")
+                        .HasColumnType("boolean");
+
                     b.HasKey("Id");
 
                     b.HasIndex("DepartureTime");
@@ -677,6 +759,8 @@ namespace Pryde.Persistence.Migrations
                     b.HasIndex("Status");
 
                     b.HasIndex("VehicleId");
+
+                    b.HasIndex("Status", "ConfirmationDeadline");
 
                     b.ToTable("Trips");
                 });
@@ -704,6 +788,9 @@ namespace Pryde.Persistence.Migrations
 
                     b.Property<Guid>("PassengerId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("PaymentExpiresAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("PickupConfirmed")
                         .HasColumnType("boolean");
@@ -740,6 +827,8 @@ namespace Pryde.Persistence.Migrations
                     b.HasIndex("TripId", "PassengerId")
                         .IsUnique()
                         .HasFilter("\"Status\" IN (1, 2)");
+
+                    b.HasIndex("Status", "PaidAt", "PaymentExpiresAt");
 
                     b.ToTable("TripBookings");
                 });
@@ -1321,6 +1410,15 @@ namespace Pryde.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Escrow");
+                });
+
+            modelBuilder.Entity("Pryde.Domain.Entities.Notification", b =>
+                {
+                    b.HasOne("Pryde.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Pryde.Domain.Entities.PasswordResetCode", b =>

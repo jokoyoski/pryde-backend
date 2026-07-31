@@ -38,6 +38,11 @@ internal static class TestData
             UserId = driverId,
             Role = new Role { Name = RoleType.Driver.ToString() }
         });
+        unitOfWork.KycVerificationRepository.Items.Add(new KycVerification
+        {
+            UserId = driverId,
+            Status = KycStatus.Approved
+        });
         unitOfWork.VehicleRepository.Items.Add(vehicle);
         unitOfWork.ProfileRepository.Items.Add(profile);
         unitOfWork.TripRepository.DefaultDriver = driver;
@@ -106,6 +111,13 @@ internal static class TestData
             Passenger = passenger,
             Status = status,
             RequestedAt = DateTime.UtcNow,
+            ApprovedAt = status == BookingStatus.Approved
+                ? DateTime.UtcNow
+                : null,
+            PaymentExpiresAt =
+                status == BookingStatus.Approved
+                    ? DateTime.UtcNow.AddMinutes(15)
+                    : null,
             SeatPrice = trip.SeatPrice,
             ServiceCharge = 118.75m,
             TotalAmount = 2493.75m

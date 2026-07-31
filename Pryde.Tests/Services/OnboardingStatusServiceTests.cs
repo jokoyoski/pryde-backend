@@ -57,6 +57,33 @@ public class OnboardingStatusServiceTests
     }
 
     [Fact]
+    public async Task DojahApprovedDriverWithNullManualUrlsProceedsToVehicleOnboarding()
+    {
+        var (unitOfWork, user) = Context(RoleNames.Driver);
+        var kyc = new KycVerification
+        {
+            UserId = user.Id,
+            Status = KycStatus.Approved,
+            ProviderName = "Dojah",
+            ProviderStatus = "Completed",
+            ProviderReference = "PRYDE-correlation",
+            DojahReference = "provider-generated-reference"
+        };
+        unitOfWork.KycVerificationRepository.Items.Add(kyc);
+
+        var result = await Service(unitOfWork).GetAsync(user.Id);
+
+        Assert.Null(kyc.BiometricVerificationUrl);
+        Assert.Null(kyc.DriverLicenseUrl);
+        Assert.Null(kyc.SecondaryIdentificationUrl);
+        Assert.Equal(OnboardingStage.DriverDocuments, result.CurrentStage);
+        Assert.Contains(
+            OnboardingStage.IdentityVerification,
+            result.CompletedStages);
+        Assert.Equal(OnboardingStage.DriverDocuments, result.NextStage);
+    }
+
+    [Fact]
     public async Task VehicleRegistrationCompletesDriverDocumentsStage()
     {
         var (unitOfWork, user) = Context(RoleNames.Driver);

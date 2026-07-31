@@ -37,7 +37,32 @@ public class TripRepository(PrydeDbContext context) : ITripRepository
         return await context.Trips
             .Include(t => t.Vehicle)
             .Include(t => t.Bookings)
+                .ThenInclude(booking => booking.Escrow)
             .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+    }
+
+    public async Task<Trip?> GetByIdWithVehicleForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var trip = await context.Trips
+            .FromSqlInterpolated(
+                $"""
+                SELECT *
+                FROM "Trips"
+                WHERE "Id" = {id}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (trip is not null)
+        {
+            await context.Entry(trip)
+                .Reference(item => item.Vehicle)
+                .LoadAsync(cancellationToken);
+        }
+
+        return trip;
     }
 
     public async Task<IReadOnlyList<Trip>> GetByDriverIdAsync(Guid driverId, CancellationToken cancellationToken = default)
@@ -91,6 +116,24 @@ public class TripRepository(PrydeDbContext context) : ITripRepository
         return await context.Trips
             .AsNoTracking()
             .Where(t => t.Status == TripStatus.Scheduled && t.AvailableSeats > 0)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Guid>>
+        GetExpiredConfirmationTripIdsAsync(
+            DateTime utcNow,
+            CancellationToken cancellationToken = default)
+    {
+        return await context.Trips
+            .AsNoTracking()
+            .Where(trip =>
+                trip.Status ==
+                    TripStatus.DropoffConfirmationPending &&
+                trip.DriverEndedAt.HasValue &&
+                trip.ConfirmationDeadline.HasValue &&
+                trip.ConfirmationDeadline.Value <= utcNow)
+            .OrderBy(trip => trip.ConfirmationDeadline)
+            .Select(trip => trip.Id)
             .ToListAsync(cancellationToken);
     }
 

@@ -27,6 +27,23 @@ public class DriverWithdrawalService : IDriverWithdrawalService
     private readonly ILogger<DriverWithdrawalService> _logger;
     private readonly IPaystackClient _paystackClient;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly INotificationService _notificationService;
+
+    public DriverWithdrawalService(
+        IEmailService emailService,
+        IFinancialService financialService,
+        ILogger<DriverWithdrawalService> logger,
+        IPaystackClient paystackClient,
+        IUnitOfWork unitOfWork,
+        INotificationService notificationService)
+    {
+        _emailService = emailService;
+        _financialService = financialService;
+        _logger = logger;
+        _paystackClient = paystackClient;
+        _unitOfWork = unitOfWork;
+        _notificationService = notificationService;
+    }
 
     public DriverWithdrawalService(
         IEmailService emailService,
@@ -34,12 +51,14 @@ public class DriverWithdrawalService : IDriverWithdrawalService
         ILogger<DriverWithdrawalService> logger,
         IPaystackClient paystackClient,
         IUnitOfWork unitOfWork)
+        : this(
+            emailService,
+            financialService,
+            logger,
+            paystackClient,
+            unitOfWork,
+            new NotificationService(unitOfWork))
     {
-        _emailService = emailService;
-        _financialService = financialService;
-        _logger = logger;
-        _paystackClient = paystackClient;
-        _unitOfWork = unitOfWork;
     }
 
     public async Task<DriverWithdrawalOtpResponseDto> RequestOtpAsync(
@@ -222,6 +241,29 @@ public class DriverWithdrawalService : IDriverWithdrawalService
                 walletTransaction.Adapt<DriverWithdrawalResponseDto>();
             response.NextAction = WorkflowNextAction.None;
             response.RequiredActor = WorkflowActor.None;
+            await _notificationService.TryCreateAsync(
+                NewWithdrawalNotification(
+                    userId,
+                    walletTransaction.Id,
+                    NotificationType.WithdrawalSubmitted,
+                    "Withdrawal submitted",
+                    "Your withdrawal request was submitted successfully.",
+                    $"withdrawal-submitted:{walletTransaction.Id}"),
+                cancellationToken);
+
+            if (transactionStatus == WalletTransactionStatus.Successful)
+            {
+                await _notificationService.TryCreateAsync(
+                    NewWithdrawalNotification(
+                        userId,
+                        walletTransaction.Id,
+                        NotificationType.WithdrawalSuccessful,
+                        "Withdrawal sent",
+                        "Your withdrawal payout was sent successfully.",
+                        $"withdrawal-completed:{walletTransaction.Id}"),
+                    cancellationToken);
+            }
+
             return response;
         }
         catch (Exception exception)
@@ -233,6 +275,26 @@ public class DriverWithdrawalService : IDriverWithdrawalService
 
             throw;
         }
+    }
+
+    private static CreateNotificationRequest NewWithdrawalNotification(
+        Guid userId,
+        Guid withdrawalId,
+        NotificationType type,
+        string title,
+        string message,
+        string deduplicationKey)
+    {
+        return new CreateNotificationRequest
+        {
+            UserId = userId,
+            Type = type,
+            Title = title,
+            Message = message,
+            RelatedEntityId = withdrawalId,
+            RelatedEntityType = nameof(WalletTransaction),
+            DeduplicationKey = deduplicationKey
+        };
     }
 
     public async Task<IReadOnlyList<DriverWithdrawalResponseDto>> GetMineAsync(

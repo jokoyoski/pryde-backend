@@ -1,6 +1,7 @@
 ﻿using Pryde.Domain.Entities;
 using Pryde.Persistence.Context;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Pryde.Persistence.Repository.Interfaces;
 
 namespace Pryde.Persistence.Repository.Implementations;
@@ -29,7 +30,8 @@ public class UnitOfWork(
     IAdminListingRepository adminListings,
     IEscrowRepository escrows,
     ILedgerRepository ledger,
-    IDriverBankAccountRepository driverBankAccounts)
+    IDriverBankAccountRepository driverBankAccounts,
+    INotificationRepository notifications)
     : IUnitOfWork
 {
     public IUserRepository Users { get; } = users;
@@ -55,6 +57,8 @@ public class UnitOfWork(
     public IEscrowRepository Escrows { get; } = escrows;
     public ILedgerRepository Ledger { get; } = ledger;
     public IDriverBankAccountRepository DriverBankAccounts { get; } = driverBankAccounts;
+    public INotificationRepository Notifications { get; } =
+        notifications;
 
 
     public async Task<int> SaveChangesAsync(
@@ -82,6 +86,34 @@ public class UnitOfWork(
             catch
             {
                 await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        });
+    }
+
+    public async Task<T> ExecuteInTransactionOnceAsync<T>(
+        Func<CancellationToken, Task<T>> action,
+        CancellationToken cancellationToken = default)
+    {
+        var strategy = new NonRetryingExecutionStrategy(
+            context);
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction =
+                await context.Database.BeginTransactionAsync(
+                    System.Data.IsolationLevel.Serializable,
+                    cancellationToken);
+            try
+            {
+                var result = await action(cancellationToken);
+                await transaction.CommitAsync(
+                    cancellationToken);
+                return result;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
                 throw;
             }
         });

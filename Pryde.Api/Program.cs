@@ -66,6 +66,17 @@ builder.Services.AddAuthenticationConfiguration(
 builder.Services.Configure<PricingSettings>(
     builder.Configuration.GetSection("PricingSettings"));
 
+builder.Services
+    .AddOptions<BookingPaymentSettings>()
+    .Bind(builder.Configuration.GetSection(
+        BookingPaymentSettings.SectionName))
+    .Validate(
+        settings =>
+            settings.PaymentWindowMinutes > 0 &&
+            settings.ExpiryCheckIntervalMinutes > 0,
+        "Booking payment settings must be greater than zero.")
+    .ValidateOnStart();
+
 builder.Services.Configure<BootstrapUsersSettings>(
     builder.Configuration.GetSection(
         BootstrapUsersSettings.SectionName));
@@ -102,6 +113,11 @@ if (app.Configuration.GetValue<bool>(
 
 app.UseSwagger();
 app.UseSwaggerUI();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseMiddleware<VehicleMediaRequestTimingMiddleware>();
+}
 
 app.UseMiddleware<ExceptionMiddleware>();
 
