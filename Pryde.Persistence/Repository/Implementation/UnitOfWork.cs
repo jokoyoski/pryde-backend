@@ -95,8 +95,7 @@ public class UnitOfWork(
         Func<CancellationToken, Task<T>> action,
         CancellationToken cancellationToken = default)
     {
-        var strategy = new NonRetryingExecutionStrategy(
-            context);
+        var strategy = context.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
             await using var transaction =
