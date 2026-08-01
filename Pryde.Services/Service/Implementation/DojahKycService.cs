@@ -126,7 +126,7 @@ public class DojahKycService(
                 _settings.ShareableLink,
                 kyc.ProviderReference!),
             WidgetId = widgetId,
-            ReferenceId = null,
+            ReferenceId = kyc.ProviderReference,
             ProviderReference = kyc.ProviderReference!,
             Metadata = new Dictionary<string, string>
             {
@@ -243,7 +243,7 @@ public class DojahKycService(
         var previousStatus = kyc.Status;
         var nextStatus = MapStatus(webhook.Status, kyc.Status);
         var rejectionReason = nextStatus == KycStatus.Rejected
-            ? SanitizeReason(webhook.Message)
+            ? SanitizeReason(webhook.Message, webhook.Status)
             : null;
 
         if (!dojahReferenceChanged &&
@@ -382,7 +382,11 @@ public class DojahKycService(
             ? messageElement.GetString()
             : null;
 
-        var providerReference = GetMetadataReference(root);
+        var providerReference =
+            GetOptionalString(root, "vendor_reference") ??
+            GetOptionalString(root, "customer_reference") ??
+            GetOptionalString(root, "custom_reference") ??
+            GetMetadataReference(root);
 
         return new DojahWebhookData(
             referenceId,
@@ -425,7 +429,12 @@ public class DojahKycService(
             return null;
         }
 
-        return GetOptionalString(metadata, "kyc_reference");
+        return GetOptionalString(metadata, "kyc_reference") ??
+               GetOptionalString(metadata, "vendor_reference") ??
+               GetOptionalString(metadata, "customer_reference") ??
+               GetOptionalString(metadata, "custom_reference") ??
+               GetOptionalString(metadata, "reference_id") ??
+               GetOptionalString(metadata, "user_id");
     }
 
     private static string ValidateReferenceLength(
@@ -447,7 +456,8 @@ public class DojahKycService(
             return KycStatus.Approved;
         }
 
-        if (providerStatus.Equals("Failed", StringComparison.OrdinalIgnoreCase))
+        if (providerStatus.Equals("Failed", StringComparison.OrdinalIgnoreCase) ||
+            providerStatus.Equals("Abandoned", StringComparison.OrdinalIgnoreCase))
         {
             return KycStatus.Rejected;
         }
@@ -457,12 +467,17 @@ public class DojahKycService(
             : KycStatus.Pending;
     }
 
-    private static string SanitizeReason(string? reason)
+    private static string SanitizeReason(
+        string? reason,
+        string providerStatus)
     {
-        const string fallback = "Dojah verification checks were not completed successfully.";
         if (string.IsNullOrWhiteSpace(reason))
         {
-            return fallback;
+            return providerStatus.Equals(
+                "Abandoned",
+                StringComparison.OrdinalIgnoreCase)
+                ? "Verification was abandoned."
+                : "Dojah verification checks were not completed successfully.";
         }
 
         var sanitized = string.Join(' ', reason.Split(
@@ -496,6 +511,9 @@ public class DojahKycService(
             queryParts.Add(pair);
         }
 
+        queryParts.Add(
+            $"{Uri.EscapeDataString("reference_id")}=" +
+            $"{Uri.EscapeDataString(customReference)}");
         queryParts.Add(
             $"{Uri.EscapeDataString("metadata[kyc_reference]")}=" +
             $"{Uri.EscapeDataString(customReference)}");
