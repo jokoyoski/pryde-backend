@@ -15,6 +15,10 @@ public class WalletTransactionsRequestDto : PaginationRequestDto
 {
 }
 
+public class DriverBookingRequestsRequestDto : PaginationRequestDto
+{
+}
+
 public class AdminUsersRequestDto : PaginationRequestDto
 {
     public string? Role { get; set; }

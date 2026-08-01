@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Pryde.Contracts.RequestModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Enums;
 using Pryde.Services.Service.Implementation;
@@ -336,6 +337,75 @@ public class TripBookingServiceTests
 
         Assert.Single(result);
         Assert.Equal(BookingStatus.Approved, result[0].Status);
+    }
+
+    [Fact]
+    public async Task DriverCanViewAllPendingBookingRequestsNewestFirst()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var firstTrip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        var secondTrip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        var otherDriverTrip = AddOpenTrip(
+            unitOfWork,
+            Guid.NewGuid(),
+            vehicle);
+        var older = AddBooking(unitOfWork, firstTrip);
+        older.RequestedAt = DateTime.UtcNow.AddMinutes(-2);
+        older.Passenger.Profile!.ProfilePhotoUrl =
+            "https://files.test/passenger.jpg";
+        var newer = AddBooking(unitOfWork, secondTrip);
+        newer.RequestedAt = DateTime.UtcNow.AddMinutes(-1);
+        AddBooking(
+            unitOfWork,
+            firstTrip,
+            status: BookingStatus.Approved);
+        AddBooking(unitOfWork, otherDriverTrip);
+
+        var result = await new TripBookingService(unitOfWork)
+            .GetPendingForDriverAsync(
+                driverId,
+                new DriverBookingRequestsRequestDto());
+
+        Assert.Equal(2, result.Items.Count);
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal(1, result.PageNumber);
+        Assert.Equal(20, result.PageSize);
+        Assert.Equal(1, result.TotalPages);
+        Assert.Equal(newer.Id, result.Items[0].BookingId);
+        Assert.Equal(older.Id, result.Items[1].BookingId);
+        Assert.All(
+            result.Items,
+            booking => Assert.Equal(1, booking.RequestedSeats));
+        Assert.Equal("Pat Passenger", result.Items[1].PassengerName);
+        Assert.Equal(
+            "https://files.test/passenger.jpg",
+            result.Items[1].PassengerProfileImageUrl);
+        Assert.Equal(
+            firstTrip.OriginAddress,
+            result.Items[1].PickupLocation);
+        Assert.Equal(
+            firstTrip.DestinationAddress,
+            result.Items[1].Destination);
+        Assert.Equal(
+            firstTrip.DepartureTime,
+            result.Items[1].TripDepartureTime);
+
+        var secondPage = await new TripBookingService(unitOfWork)
+            .GetPendingForDriverAsync(
+                driverId,
+                new DriverBookingRequestsRequestDto
+                {
+                    PageNumber = 2,
+                    PageSize = 1
+                });
+
+        Assert.Single(secondPage.Items);
+        Assert.Equal(older.Id, secondPage.Items[0].BookingId);
+        Assert.Equal(2, secondPage.TotalCount);
+        Assert.Equal(2, secondPage.PageNumber);
+        Assert.Equal(1, secondPage.PageSize);
+        Assert.Equal(2, secondPage.TotalPages);
     }
 
     private static Pryde.Domain.Entities.Trip AddOpenTrip(

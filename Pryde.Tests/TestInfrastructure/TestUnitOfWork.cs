@@ -953,6 +953,46 @@ internal sealed class TestTripBookingRepository(TestTripRepository trips) : ITri
     public Task<IReadOnlyList<TripBooking>> GetPendingByTripIdAsync(Guid tripId, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<TripBooking>>(Items.Where(b => b.TripId == tripId && b.Status == BookingStatus.Pending).ToList());
 
+    public Task<(IReadOnlyList<DriverPendingBookingRequestData> Items,
+        int TotalCount)>
+        GetPendingByDriverIdAsync(
+            Guid driverId,
+            int pageNumber,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+    {
+        var query = Items
+            .Where(booking =>
+                booking.Trip.DriverId == driverId &&
+                booking.Status == BookingStatus.Pending)
+            .OrderByDescending(booking => booking.RequestedAt);
+        var totalCount = query.Count();
+        var bookings = query
+            .Select(booking => new DriverPendingBookingRequestData
+            {
+                BookingId = booking.Id,
+                TripId = booking.TripId,
+                PassengerId = booking.PassengerId,
+                PassengerName = booking.Passenger.Profile is null
+                    ? null
+                    : $"{booking.Passenger.Profile.FirstName} " +
+                      $"{booking.Passenger.Profile.LastName}".Trim(),
+                PassengerProfileImageUrl =
+                    booking.Passenger.Profile?.ProfilePhotoUrl,
+                PickupLocation = booking.Trip.OriginAddress,
+                Destination = booking.Trip.DestinationAddress,
+                TripDepartureTime = booking.Trip.DepartureTime,
+                RequestedAt = booking.RequestedAt
+            })
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        return Task.FromResult<
+            (IReadOnlyList<DriverPendingBookingRequestData> Items,
+                int TotalCount)>((bookings, totalCount));
+    }
+
     public Task<IReadOnlyList<TripBooking>> GetApprovedByTripIdAsync(Guid tripId, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<TripBooking>>(Items.Where(b => b.TripId == tripId && b.Status == BookingStatus.Approved).ToList());
 

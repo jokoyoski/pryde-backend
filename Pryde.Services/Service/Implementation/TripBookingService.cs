@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
@@ -132,6 +133,46 @@ public class TripBookingService(
         await EnsureTripOwnerAsync(tripId, driverId, cancellationToken);
         var bookings = await unitOfWork.TripBookings.GetPendingByTripIdAsync(tripId, cancellationToken);
         return bookings.Select(b => MapResponse(b, b.Trip, GetPassengerName(b))).ToList();
+    }
+
+    public async Task<PagedResponseDto<DriverPendingBookingRequestResponseDto>>
+        GetPendingForDriverAsync(
+            Guid driverId,
+            DriverBookingRequestsRequestDto request,
+            CancellationToken cancellationToken = default)
+    {
+        var result = await unitOfWork.TripBookings
+            .GetPendingByDriverIdAsync(
+                driverId,
+                request.PageNumber,
+                request.PageSize,
+                cancellationToken);
+
+        var items = result.Items.Select(booking =>
+            new DriverPendingBookingRequestResponseDto
+            {
+                BookingId = booking.BookingId,
+                TripId = booking.TripId,
+                PassengerId = booking.PassengerId,
+                PassengerName = booking.PassengerName,
+                PassengerProfileImageUrl =
+                    booking.PassengerProfileImageUrl,
+                RequestedSeats = 1,
+                PickupLocation = booking.PickupLocation,
+                Destination = booking.Destination,
+                TripDepartureTime = booking.TripDepartureTime,
+                RequestedAt = booking.RequestedAt
+            }).ToList();
+
+        return new PagedResponseDto<DriverPendingBookingRequestResponseDto>
+        {
+            Items = items,
+            TotalCount = result.TotalCount,
+            PageNumber = request.PageNumber,
+            PageSize = request.PageSize,
+            TotalPages = (int)Math.Ceiling(
+                result.TotalCount / (double)request.PageSize)
+        };
     }
 
     public async Task<IReadOnlyList<TripBookingResponseDto>> GetConfirmedPassengersAsync(
