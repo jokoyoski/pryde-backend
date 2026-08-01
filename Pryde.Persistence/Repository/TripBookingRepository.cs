@@ -114,6 +114,47 @@ public class TripBookingRepository(PrydeDbContext context) : ITripBookingReposit
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<(IReadOnlyList<DriverPendingBookingRequestData> Items,
+        int TotalCount)>
+        GetPendingByDriverIdAsync(
+            Guid driverId,
+            int pageNumber,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+    {
+        var query = context.TripBookings
+            .AsNoTracking()
+            .Where(booking =>
+                booking.Trip.DriverId == driverId &&
+                booking.Status ==
+                    Pryde.Domain.Enums.BookingStatus.Pending);
+        var totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
+            .OrderByDescending(booking => booking.RequestedAt)
+            .Select(booking => new DriverPendingBookingRequestData
+            {
+                BookingId = booking.Id,
+                TripId = booking.TripId,
+                PassengerId = booking.PassengerId,
+                PassengerName = booking.Passenger.Profile == null
+                    ? null
+                    : (booking.Passenger.Profile.FirstName + " " +
+                       booking.Passenger.Profile.LastName).Trim(),
+                PassengerProfileImageUrl = booking.Passenger.Profile == null
+                    ? null
+                    : booking.Passenger.Profile.ProfilePhotoUrl,
+                PickupLocation = booking.Trip.OriginAddress,
+                Destination = booking.Trip.DestinationAddress,
+                TripDepartureTime = booking.Trip.DepartureTime,
+                RequestedAt = booking.RequestedAt
+            })
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return (items, totalCount);
+    }
+
     public async Task<bool> HasActiveBookingAsync(Guid tripId, Guid passengerId, CancellationToken cancellationToken = default)
     {
         return await context.TripBookings.AnyAsync(

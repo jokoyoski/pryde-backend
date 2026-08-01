@@ -37,6 +37,18 @@ public class TripBookingsController(ITripBookingService tripBookingService) : Co
         return Ok(await tripBookingService.GetPendingForTripAsync(tripId, GetUserId(), cancellationToken));
     }
 
+    [HttpGet("driver/booking-requests")]
+    [Authorize(Roles = "Driver")]
+    public async Task<IActionResult> GetPendingForDriver(
+        [FromQuery] DriverBookingRequestsRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await tripBookingService.GetPendingForDriverAsync(
+            GetUserId(),
+            request,
+            cancellationToken));
+    }
+
     [HttpGet("trips/{tripId:guid}/passengers")]
     [Authorize(Roles = "Driver")]
     public async Task<IActionResult> GetPassengers(Guid tripId, CancellationToken cancellationToken)
