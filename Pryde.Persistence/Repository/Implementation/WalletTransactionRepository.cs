@@ -14,13 +14,55 @@ public class WalletTransactionRepository(PrydeDbContext context) : IWalletTransa
         return transaction;
     }
 
-    public async Task<IReadOnlyList<WalletTransaction>> GetByWalletIdAsync(Guid walletId, CancellationToken cancellationToken = default)
+    public async Task<(
+        IReadOnlyList<WalletTransaction> Items,
+        int TotalCount)> GetByWalletIdAsync(
+            Guid walletId,
+            int pageNumber,
+            int pageSize,
+            CancellationToken cancellationToken = default)
     {
-        return await context.WalletTransactions
+        var query = context.WalletTransactions
             .AsNoTracking()
-            .Where(t => t.WalletId == walletId)
-            .OrderByDescending(t => t.CreatedAt)
+            .Where(transaction => transaction.WalletId == walletId);
+        var totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
+            .OrderByDescending(transaction => transaction.CreatedAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(cancellationToken);
+
+        return (items, totalCount);
+    }
+
+    public async Task<decimal> SumByUserIdAndTypeAsync(
+        Guid userId,
+        WalletTransactionType transactionType,
+        DateTime? createdFrom,
+        DateTime? createdTo,
+        CancellationToken cancellationToken = default)
+    {
+        var query = context.WalletTransactions
+            .AsNoTracking()
+            .Where(transaction =>
+                transaction.Wallet.UserId == userId &&
+                transaction.Type == transactionType);
+
+        if (createdFrom.HasValue)
+        {
+            query = query.Where(transaction =>
+                transaction.CreatedAt >= createdFrom.Value);
+        }
+
+        if (createdTo.HasValue)
+        {
+            query = query.Where(transaction =>
+                transaction.CreatedAt <= createdTo.Value);
+        }
+
+        return await query.SumAsync(
+            transaction => (decimal?)transaction.Amount,
+            cancellationToken) ?? 0m;
     }
 
     public async Task<IReadOnlyList<WalletTransaction>> GetWithdrawalsByUserIdAsync(

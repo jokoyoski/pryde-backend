@@ -11,11 +11,15 @@ public sealed class DojahVerificationDetailsResponseDto
     public bool? GovernmentDataResult { get; set; }
     public string? DocumentType { get; set; }
     public string? FullName { get; set; }
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
     public string? DateOfBirth { get; set; }
+    public string? Gender { get; set; }
     public string? Country { get; set; }
     public string? IssueDate { get; set; }
     public string? ExpiryDate { get; set; }
     public string? MaskedDocumentNumber { get; set; }
     public string? FrontDocumentImageUrl { get; set; }
     public string? BackDocumentImageUrl { get; set; }
+    public string? SelfieImageUrl { get; set; }
 }

@@ -13,6 +13,14 @@ public interface IKycVerificationRepository
         Guid userId,
         CancellationToken cancellationToken = default);
 
+    Task<KycVerification?> GetByUserIdForUpdateAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
+    Task<KycVerification?> GetByIdForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+
     Task<KycVerification?> GetByProviderReferenceAsync(
         string providerReference,
         CancellationToken cancellationToken = default);

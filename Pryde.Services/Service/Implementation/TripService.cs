@@ -152,6 +152,33 @@ public class TripService(
         return trips.Select(MapSummary).ToList();
     }
 
+    public async Task<DriverDashboardTripSummaryResponseDto?> GetNextUpcomingAsync(
+        Guid driverId,
+        DateTime utcNow,
+        CancellationToken cancellationToken = default)
+    {
+        var trip = await unitOfWork.Trips.GetNextUpcomingByDriverIdAsync(
+            driverId,
+            utcNow,
+            cancellationToken);
+
+        return trip is null ? null : MapDashboardSummary(trip);
+    }
+
+    public async Task<IReadOnlyList<DriverDashboardTripSummaryResponseDto>>
+        GetLatestCompletedAsync(
+        Guid driverId,
+        int count,
+        CancellationToken cancellationToken = default)
+    {
+        var trips = await unitOfWork.Trips.GetLatestCompletedByDriverIdAsync(
+            driverId,
+            count,
+            cancellationToken);
+
+        return trips.Select(MapDashboardSummary).ToList();
+    }
+
     public async Task<TripDetailsResponseDto> UpdateAsync(
         Guid tripId,
         Guid driverId,
@@ -698,6 +725,23 @@ public class TripService(
             BookingWindowHours = trip.BookingWindowHours,
             Status = trip.Status,
             CreatedAt = trip.CreatedAt
+        };
+    }
+
+    private static DriverDashboardTripSummaryResponseDto MapDashboardSummary(
+        DriverDashboardTripSummaryData trip)
+    {
+        return new DriverDashboardTripSummaryResponseDto
+        {
+            TripId = trip.TripId,
+            OriginAddress = trip.OriginAddress,
+            DestinationAddress = trip.DestinationAddress,
+            DepartureTime = trip.DepartureTime,
+            Status = trip.Status,
+            SeatPrice = trip.SeatPrice,
+            AvailableSeats = trip.AvailableSeats,
+            VehicleLicensePlateNumber = trip.VehicleLicensePlateNumber,
+            VehicleImageUrl = trip.VehicleImageUrl
         };
     }
 

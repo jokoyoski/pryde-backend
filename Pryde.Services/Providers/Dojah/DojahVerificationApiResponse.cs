@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Pryde.Services.Providers.Dojah;
@@ -21,6 +22,9 @@ internal sealed class DojahVerificationEnvelope
 
     [JsonPropertyName("back_url")]
     public string? BackUrl { get; set; }
+
+    [JsonPropertyName("selfie_url")]
+    public string? SelfieUrl { get; set; }
 
     [JsonPropertyName("reference_id")]
     public string? ReferenceId { get; set; }
@@ -53,6 +57,7 @@ internal sealed class DojahVerificationEnvelope
             Status = Status,
             IdType = IdType,
             BackUrl = BackUrl,
+            SelfieUrl = SelfieUrl,
             ReferenceId = ReferenceId,
             VerificationMode = VerificationMode,
             VerificationType = VerificationType,
@@ -78,6 +83,9 @@ internal sealed class DojahVerificationApiResponse
     [JsonPropertyName("back_url")]
     public string? BackUrl { get; set; }
 
+    [JsonPropertyName("selfie_url")]
+    public string? SelfieUrl { get; set; }
+
     [JsonPropertyName("reference_id")]
     public string? ReferenceId { get; set; }
 
@@ -97,7 +105,7 @@ internal sealed class DojahVerificationSteps
     public DojahIdStep? Id { get; set; }
 
     [JsonPropertyName("selfie")]
-    public DojahStatusStep? Selfie { get; set; }
+    public DojahSelfieStep? Selfie { get; set; }
 
     [JsonPropertyName("countries")]
     public DojahCountryStep? Countries { get; set; }
@@ -106,7 +114,7 @@ internal sealed class DojahVerificationSteps
     public DojahUserDataStep? UserData { get; set; }
 
     [JsonPropertyName("government_data")]
-    public DojahStatusStep? GovernmentData { get; set; }
+    public DojahGovernmentDataStep? GovernmentData { get; set; }
 }
 
 internal sealed class DojahIdStep
@@ -155,12 +163,48 @@ internal sealed class DojahIdentityData
 
     [JsonPropertyName("document_number")]
     public string? DocumentNumber { get; set; }
+
+    [JsonPropertyName("nationality")]
+    public string? Nationality { get; set; }
 }
 
 internal sealed class DojahStatusStep
 {
     [JsonPropertyName("status")]
     public bool? Status { get; set; }
+}
+
+internal sealed class DojahSelfieStep
+{
+    [JsonPropertyName("status")]
+    public bool? Status { get; set; }
+
+    [JsonPropertyName("data")]
+    public DojahSelfieData? Data { get; set; }
+}
+
+internal sealed class DojahSelfieData
+{
+    [JsonPropertyName("selfie_url")]
+    public string? SelfieUrl { get; set; }
+}
+
+internal sealed class DojahGovernmentDataStep
+{
+    [JsonPropertyName("status")]
+    public bool? Status { get; set; }
+
+    [JsonPropertyName("data")]
+    public DojahGovernmentData? Data { get; set; }
+}
+
+internal sealed class DojahGovernmentData
+{
+    [JsonPropertyName("bvn")]
+    public JsonElement Bvn { get; set; }
+
+    [JsonPropertyName("nin")]
+    public JsonElement Nin { get; set; }
 }
 
 internal sealed class DojahCountryStep

@@ -107,6 +107,18 @@ public class KycController(
         return Ok(result);
     }
 
+    [HttpPost("dojah/retry")]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
+    public async Task<IActionResult> RetryDojahVerification(
+        CancellationToken cancellationToken)
+    {
+        var result = await dojahKycService.RetryAsync(
+            GetUserId(),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
     [HttpPost("dojah/webhook")]
     [AllowAnonymous]
     public async Task<IActionResult> ProcessDojahWebhook(

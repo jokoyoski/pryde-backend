@@ -70,7 +70,7 @@ public class DriverBankAccountService : IDriverBankAccountService
         return new ResolvedBankAccountResponseDto
         {
             BankCode = bankCode,
-            AccountNumber = accountNumber,
+            AccountNumber = MaskAccountNumber(accountNumber),
             AccountName = resolvedAccount.AccountName.Trim()
         };
     }
@@ -129,9 +129,6 @@ public class DriverBankAccountService : IDriverBankAccountService
                 "Paystack did not create a transfer recipient.");
         }
 
-        var hasActiveAccount = await _unitOfWork.DriverBankAccounts
-            .HasAnyActiveAsync(userId, cancellationToken);
-
         var bankAccount = new DriverBankAccount
         {
             UserId = userId,
@@ -140,16 +137,33 @@ public class DriverBankAccountService : IDriverBankAccountService
             AccountNumber = accountNumber,
             AccountName = resolvedAccount.AccountName.Trim(),
             RecipientCode = transferRecipient.RecipientCode.Trim(),
-            IsDefault = !hasActiveAccount,
+            IsDefault = true,
             IsActive = true
         };
 
-        await _unitOfWork.DriverBankAccounts.CreateAsync(
-            bankAccount,
-            cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return await _unitOfWork.ExecuteInTransactionOnceAsync(
+            async transactionToken =>
+            {
+                var activeAccounts = await _unitOfWork.DriverBankAccounts
+                    .GetActiveByUserIdForUpdateAsync(
+                        userId,
+                        transactionToken);
 
-        return bankAccount.Adapt<DriverBankAccountResponseDto>();
+                foreach (var activeAccount in activeAccounts)
+                {
+                    activeAccount.IsActive = false;
+                    activeAccount.IsDefault = false;
+                    _unitOfWork.DriverBankAccounts.Update(activeAccount);
+                }
+
+                await _unitOfWork.DriverBankAccounts.CreateAsync(
+                    bankAccount,
+                    transactionToken);
+                await _unitOfWork.SaveChangesAsync(transactionToken);
+
+                return bankAccount.Adapt<DriverBankAccountResponseDto>();
+            },
+            cancellationToken);
     }
 
     public async Task<IReadOnlyList<DriverBankAccountResponseDto>> GetMineAsync(
@@ -253,5 +267,10 @@ public class DriverBankAccountService : IDriverBankAccountService
             throw new ServiceUnavailableException(
                 "Paystack did not return an account name.");
         }
+    }
+
+    private static string MaskAccountNumber(string accountNumber)
+    {
+        return $"******{accountNumber[^4..]}";
     }
 }

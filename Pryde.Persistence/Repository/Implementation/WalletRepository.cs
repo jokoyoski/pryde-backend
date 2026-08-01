@@ -12,6 +12,17 @@ public class WalletRepository(PrydeDbContext context) : IWalletRepository
         return await context.Wallets.FirstOrDefaultAsync(w => w.UserId == userId, cancellationToken);
     }
 
+    public async Task<decimal?> GetBalanceByUserIdAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        return await context.Wallets
+            .AsNoTracking()
+            .Where(wallet => wallet.UserId == userId)
+            .Select(wallet => (decimal?)wallet.Balance)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<Wallet> CreateAsync(Wallet wallet, CancellationToken cancellationToken = default)
     {
         await context.Wallets.AddAsync(wallet, cancellationToken);

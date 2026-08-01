@@ -1,5 +1,4 @@
 using Pryde.Contracts.ResponseModels;
-using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Service.Interface;
@@ -8,7 +7,6 @@ namespace Pryde.Services.Service.Implementation;
 
 public class DriverDashboardService(
     IProfileService profileService,
-    IWalletService walletService,
     ITripService tripService,
     IUnitOfWork unitOfWork) : IDriverDashboardService
 {
@@ -22,65 +20,53 @@ public class DriverDashboardService(
             driverId,
             cancellationToken);
 
-        var driverTrips = await tripService.GetMineAsync(
-            driverId,
-            cancellationToken);
-
-        var walletBalance = 0m;
+        var walletBalanceResult = await unitOfWork.Wallets
+            .GetBalanceByUserIdAsync(driverId, cancellationToken);
+        var walletBalance = walletBalanceResult ?? 0m;
         var todayEarnings = 0m;
+        var thisWeekEarnings = 0m;
         var totalEarnings = 0m;
+        var utcNow = DateTime.UtcNow;
 
-        try
+        if (walletBalanceResult.HasValue)
         {
-            var wallet = await walletService.GetMineAsync(
-                driverId,
-                cancellationToken);
+            var todayStart = utcNow.Date;
+            var daysSinceMonday = ((int)utcNow.DayOfWeek + 6) % 7;
+            var weekStart = todayStart.AddDays(-daysSinceMonday);
 
-            walletBalance = wallet.Balance;
-
-            var walletTransactions = await walletService.GetTransactionsAsync(
-                driverId,
-                cancellationToken);
-
-            var earningsTransactions = walletTransactions
-                .Where(transaction =>
-                    transaction.Type == WalletTransactionType.EscrowRelease)
-                .ToList();
-
-            totalEarnings = earningsTransactions.Sum(transaction =>
-                transaction.Amount);
-
-            var today = DateTime.UtcNow.Date;
-            var tomorrow = today.AddDays(1);
-
-            todayEarnings = earningsTransactions
-                .Where(transaction =>
-                    transaction.CreatedAt >= today &&
-                    transaction.CreatedAt < tomorrow)
-                .Sum(transaction => transaction.Amount);
-        }
-        catch (NotFoundException)
-        {
-            walletBalance = 0m;
-            todayEarnings = 0m;
-            totalEarnings = 0m;
+            todayEarnings = await unitOfWork.WalletTransactions
+                .SumByUserIdAndTypeAsync(
+                    driverId,
+                    WalletTransactionType.EscrowRelease,
+                    todayStart,
+                    utcNow,
+                    cancellationToken);
+            thisWeekEarnings = await unitOfWork.WalletTransactions
+                .SumByUserIdAndTypeAsync(
+                    driverId,
+                    WalletTransactionType.EscrowRelease,
+                    weekStart,
+                    utcNow,
+                    cancellationToken);
+            totalEarnings = await unitOfWork.WalletTransactions
+                .SumByUserIdAndTypeAsync(
+                    driverId,
+                    WalletTransactionType.EscrowRelease,
+                    null,
+                    utcNow,
+                    cancellationToken);
         }
 
-        var now = DateTime.UtcNow;
-
-        var upcomingTrip = driverTrips
-            .Where(trip =>
-                trip.DepartureTime > now &&
-                trip.Status != TripStatus.Completed &&
-                trip.Status != TripStatus.Cancelled)
-            .OrderBy(trip => trip.DepartureTime)
-            .FirstOrDefault();
-
-        var recentTrips = driverTrips
-            .Where(trip => trip.Status == TripStatus.Completed)
-            .OrderByDescending(trip => trip.DepartureTime)
-            .Take(RecentTripCount)
-            .ToList();
+        var completedTripCount = await unitOfWork.Trips
+            .CountCompletedByDriverIdAsync(driverId, cancellationToken);
+        var upcomingTrip = await tripService.GetNextUpcomingAsync(
+            driverId,
+            utcNow,
+            cancellationToken);
+        var recentTrips = await tripService.GetLatestCompletedAsync(
+            driverId,
+            RecentTripCount,
+            cancellationToken);
 
         var pendingBookingRequestCount = await unitOfWork.TripBookings
             .CountPendingByDriverIdAsync(driverId, cancellationToken);
@@ -90,7 +76,9 @@ public class DriverDashboardService(
             DriverProfile = driverProfile,
             WalletBalance = walletBalance,
             TodayEarnings = todayEarnings,
+            ThisWeekEarnings = thisWeekEarnings,
             TotalEarnings = totalEarnings,
+            CompletedTripCount = completedTripCount,
             UpcomingTrip = upcomingTrip,
             RecentTrips = recentTrips,
             PendingBookingRequestCount = pendingBookingRequestCount

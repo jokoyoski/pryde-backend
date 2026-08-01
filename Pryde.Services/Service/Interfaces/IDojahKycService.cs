@@ -8,6 +8,10 @@ public interface IDojahKycService
         Guid userId,
         CancellationToken cancellationToken = default);
 
+    Task<DojahKycConfigResponseDto> RetryAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
     Task ProcessWebhookAsync(
         ReadOnlyMemory<byte> payload,
         string? signatureV1,

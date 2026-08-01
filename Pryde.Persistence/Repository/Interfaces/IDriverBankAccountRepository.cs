@@ -13,6 +13,10 @@ public interface IDriverBankAccountRepository
         Guid userId,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<DriverBankAccount>> GetActiveByUserIdForUpdateAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
     Task<bool> ExistsAsync(
         Guid userId,
         string bankCode,
@@ -26,4 +30,6 @@ public interface IDriverBankAccountRepository
     Task<DriverBankAccount> CreateAsync(
         DriverBankAccount bankAccount,
         CancellationToken cancellationToken = default);
+
+    void Update(DriverBankAccount bankAccount);
 }

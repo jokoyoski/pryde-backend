@@ -19,7 +19,9 @@ public class DriverDashboardServiceTests
         Assert.Equal(driverId, response.DriverProfile.UserId);
         Assert.Equal(15000m, response.WalletBalance);
         Assert.Equal(2500m, response.TodayEarnings);
+        Assert.Equal(2500m, response.ThisWeekEarnings);
         Assert.Equal(2500m, response.TotalEarnings);
+        Assert.Equal(0, response.CompletedTripCount);
         Assert.Empty(response.RecentTrips);
         Assert.Null(response.UpcomingTrip);
         Assert.Equal(0, response.PendingBookingRequestCount);
@@ -34,7 +36,9 @@ public class DriverDashboardServiceTests
 
         Assert.Equal(0m, response.WalletBalance);
         Assert.Equal(0m, response.TodayEarnings);
+        Assert.Equal(0m, response.ThisWeekEarnings);
         Assert.Equal(0m, response.TotalEarnings);
+        Assert.Equal(0, response.CompletedTripCount);
         Assert.Empty(response.RecentTrips);
         Assert.Null(response.UpcomingTrip);
         Assert.Equal(0, response.PendingBookingRequestCount);
@@ -90,8 +94,10 @@ public class DriverDashboardServiceTests
 
         Assert.Equal(2, response.RecentTrips.Count);
         Assert.Equal(recentTrip.Id, response.RecentTrips[0].TripId);
+        AssertDashboardSummaryContract(response.RecentTrips[0]);
         Assert.Equal(1800m, response.TodayEarnings);
         Assert.Equal(3000m, response.TotalEarnings);
+        Assert.Equal(2, response.CompletedTripCount);
     }
 
     [Fact]
@@ -114,6 +120,7 @@ public class DriverDashboardServiceTests
 
         Assert.NotNull(response.UpcomingTrip);
         Assert.Equal(nearestTrip.Id, response.UpcomingTrip.TripId);
+        AssertDashboardSummaryContract(response.UpcomingTrip);
     }
 
     [Fact]
@@ -144,9 +151,137 @@ public class DriverDashboardServiceTests
 
         Assert.Single(response.RecentTrips);
         Assert.Equal(ownCompletedTrip.Id, response.RecentTrips[0].TripId);
+        Assert.Equal(1, response.CompletedTripCount);
         Assert.NotNull(response.UpcomingTrip);
         Assert.Equal(ownUpcomingTrip.Id, response.UpcomingTrip.TripId);
         Assert.Equal(0, response.PendingBookingRequestCount);
+    }
+
+    [Fact]
+    public async Task ThisWeekEarningsIncludeOnlyCurrentWeekDriverEarnings()
+    {
+        var (unitOfWork, driverId, _) = TestData.CreateDriverContext();
+        var wallet = AddWallet(unitOfWork, driverId, 5000m);
+        var otherWallet = AddWallet(unitOfWork, Guid.NewGuid(), 5000m);
+        var now = DateTime.UtcNow;
+        var daysSinceMonday = ((int)now.DayOfWeek + 6) % 7;
+        var weekStart = now.Date.AddDays(-daysSinceMonday);
+        var currentWeekTime = weekStart.AddTicks(
+            (now - weekStart).Ticks / 2);
+
+        AddEarning(unitOfWork, wallet, 1200m, currentWeekTime);
+        AddEarning(unitOfWork, wallet, 800m, weekStart.AddDays(-1));
+        AddEarning(unitOfWork, otherWallet, 900m, currentWeekTime);
+        AddWalletTransaction(
+            unitOfWork,
+            wallet,
+            700m,
+            WalletTransactionType.Credit,
+            currentWeekTime);
+
+        var response = await CreateService(unitOfWork).GetAsync(driverId);
+
+        Assert.Equal(1200m, response.ThisWeekEarnings);
+        Assert.Equal(2000m, response.TotalEarnings);
+    }
+
+    [Fact]
+    public async Task DashboardUsesBoundedRepositoryQueries()
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        var wallet = AddWallet(unitOfWork, driverId, 5000m);
+
+        for (var index = 0; index < 20; index++)
+        {
+            unitOfWork.TripRepository.Items.Add(CompletedTrip(
+                driverId,
+                vehicle,
+                DateTime.UtcNow.AddDays(-index)));
+            AddEarning(
+                unitOfWork,
+                wallet,
+                100m,
+                DateTime.UtcNow.AddDays(-index));
+        }
+
+        var response = await CreateService(unitOfWork).GetAsync(driverId);
+
+        Assert.Equal(20, response.CompletedTripCount);
+        Assert.Equal(5, response.RecentTrips.Count);
+        Assert.Equal(0, unitOfWork.TripRepository.GetAllByDriverQueryCount);
+        Assert.Equal(3, unitOfWork.TripRepository.DashboardQueryCount);
+        Assert.Equal(0, unitOfWork.WalletTransactionRepository.PagedQueryCount);
+        Assert.Equal(3, unitOfWork.WalletTransactionRepository.SumQueryCount);
+    }
+
+    [Fact]
+    public async Task DashboardReturnsOneDeterministicVehicleImage()
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        vehicle.Images.Add(new VehicleImage
+        {
+            Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            VehicleId = vehicle.Id,
+            ImageType = VehicleImageType.RearView,
+            ImageUrl = "https://files.test/rear.jpg"
+        });
+        vehicle.Images.Add(new VehicleImage
+        {
+            Id = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            VehicleId = vehicle.Id,
+            ImageType = VehicleImageType.FrontView,
+            ImageUrl = "https://files.test/front.jpg"
+        });
+        var trip = CompletedTrip(
+            driverId,
+            vehicle,
+            DateTime.UtcNow.AddDays(-1));
+        unitOfWork.TripRepository.Items.Add(trip);
+
+        var response = await CreateService(unitOfWork).GetAsync(driverId);
+
+        var recentTrip = Assert.Single(response.RecentTrips);
+        Assert.Equal("https://files.test/front.jpg", recentTrip.VehicleImageUrl);
+    }
+
+    [Fact]
+    public async Task DashboardReturnsNullVehicleImageWhenNoneExists()
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        var trip = CompletedTrip(
+            driverId,
+            vehicle,
+            DateTime.UtcNow.AddDays(-1));
+        unitOfWork.TripRepository.Items.Add(trip);
+
+        var response = await CreateService(unitOfWork).GetAsync(driverId);
+
+        Assert.Null(Assert.Single(response.RecentTrips).VehicleImageUrl);
+    }
+
+    private static void AssertDashboardSummaryContract(
+        Pryde.Contracts.ResponseModels.DriverDashboardTripSummaryResponseDto summary)
+    {
+        var properties = summary.GetType()
+            .GetProperties()
+            .Select(property => property.Name)
+            .OrderBy(name => name)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "AvailableSeats",
+                "DepartureTime",
+                "DestinationAddress",
+                "OriginAddress",
+                "SeatPrice",
+                "Status",
+                "TripId",
+                "VehicleImageUrl",
+                "VehicleLicensePlateNumber"
+            },
+            properties);
     }
 
     private static DriverDashboardService CreateService(
@@ -154,7 +289,6 @@ public class DriverDashboardServiceTests
     {
         return new DriverDashboardService(
             new ProfileService(unitOfWork),
-            new WalletService(unitOfWork),
             TestData.CreateTripService(unitOfWork),
             unitOfWork);
     }

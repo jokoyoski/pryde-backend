@@ -11,6 +11,10 @@ public abstract class PaginationRequestDto
     public int PageSize { get => _pageSize; set => _pageSize = Math.Clamp(value, 1, 100); }
 }
 
+public class WalletTransactionsRequestDto : PaginationRequestDto
+{
+}
+
 public class AdminUsersRequestDto : PaginationRequestDto
 {
     public string? Role { get; set; }

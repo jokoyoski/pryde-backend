@@ -52,6 +52,18 @@ public class DriverBankAccountRepository : IDriverBankAccountRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<DriverBankAccount>>
+        GetActiveByUserIdForUpdateAsync(
+            Guid userId,
+            CancellationToken cancellationToken = default)
+    {
+        return await _context.DriverBankAccounts
+            .Where(bankAccount =>
+                bankAccount.UserId == userId &&
+                bankAccount.IsActive)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<bool> ExistsAsync(
         Guid userId,
         string bankCode,
@@ -90,5 +102,10 @@ public class DriverBankAccountRepository : IDriverBankAccountRepository
             cancellationToken);
 
         return bankAccount;
+    }
+
+    public void Update(DriverBankAccount bankAccount)
+    {
+        _context.DriverBankAccounts.Update(bankAccount);
     }
 }

@@ -269,7 +269,8 @@ public class AdminPortalService(
                 kyc.DojahReference,
                 cancellationToken);
         }
-        catch (ServiceUnavailableException exception)
+        catch (Exception exception) when (
+            exception is ServiceUnavailableException or NotFoundException)
         {
             logger.LogWarning(
                 exception,

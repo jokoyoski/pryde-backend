@@ -368,6 +368,18 @@ internal sealed class TestDriverBankAccountRepository
             bankAccounts);
     }
 
+    public Task<IReadOnlyList<DriverBankAccount>>
+        GetActiveByUserIdForUpdateAsync(
+            Guid userId,
+            CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<IReadOnlyList<DriverBankAccount>>(
+            Items.Where(bankAccount =>
+                    bankAccount.UserId == userId &&
+                    bankAccount.IsActive)
+                .ToList());
+    }
+
     public Task<bool> ExistsAsync(
         Guid userId,
         string bankCode,
@@ -400,6 +412,10 @@ internal sealed class TestDriverBankAccountRepository
         Items.Add(bankAccount);
         return Task.FromResult(bankAccount);
     }
+
+    public void Update(DriverBankAccount bankAccount)
+    {
+    }
 }
 
 internal sealed class TestKycVerificationRepository : IKycVerificationRepository
@@ -408,6 +424,8 @@ internal sealed class TestKycVerificationRepository : IKycVerificationRepository
 
     public Task<KycVerification?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(kyc => kyc.Id == id));
     public Task<KycVerification?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(kyc => kyc.UserId == userId));
+    public Task<KycVerification?> GetByUserIdForUpdateAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(kyc => kyc.UserId == userId));
+    public Task<KycVerification?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(kyc => kyc.Id == id));
     public Task<KycVerification?> GetByProviderReferenceAsync(string providerReference, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(kyc => kyc.ProviderReference == providerReference));
     public Task<KycVerification?> GetByDojahReferenceAsync(string dojahReference, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(kyc => kyc.DojahReference == dojahReference));
     public Task<IReadOnlyList<KycVerification>> GetAllAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<KycVerification>>(Items.ToList());
@@ -540,6 +558,15 @@ internal sealed class TestWalletRepository : IWalletRepository
 {
     public List<Wallet> Items { get; } = [];
     public Task<Wallet?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(wallet => wallet.UserId == userId));
+    public Task<decimal?> GetBalanceByUserIdAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Items
+            .Where(wallet => wallet.UserId == userId)
+            .Select(wallet => (decimal?)wallet.Balance)
+            .FirstOrDefault());
+    }
     public Task<Wallet> CreateAsync(Wallet wallet, CancellationToken cancellationToken = default) { Items.Add(wallet); return Task.FromResult(wallet); }
     public void Update(Wallet wallet) { }
 }
@@ -549,7 +576,60 @@ internal sealed class TestWalletTransactionRepository(
 {
     public List<WalletTransaction> Items { get; } = [];
     public Task<WalletTransaction> CreateAsync(WalletTransaction transaction, CancellationToken cancellationToken = default) { Items.Add(transaction); return Task.FromResult(transaction); }
-    public Task<IReadOnlyList<WalletTransaction>> GetByWalletIdAsync(Guid walletId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<WalletTransaction>>(Items.Where(transaction => transaction.WalletId == walletId).OrderByDescending(transaction => transaction.CreatedAt).ToList());
+    public int PagedQueryCount { get; private set; }
+    public int SumQueryCount { get; private set; }
+
+    public Task<(
+        IReadOnlyList<WalletTransaction> Items,
+        int TotalCount)> GetByWalletIdAsync(
+            Guid walletId,
+            int pageNumber,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+    {
+        PagedQueryCount++;
+        var transactions = Items
+            .Where(transaction => transaction.WalletId == walletId)
+            .OrderByDescending(transaction => transaction.CreatedAt)
+            .ToList();
+        return Task.FromResult((
+            (IReadOnlyList<WalletTransaction>)transactions
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToList(),
+            transactions.Count));
+    }
+
+    public Task<decimal> SumByUserIdAndTypeAsync(
+        Guid userId,
+        WalletTransactionType transactionType,
+        DateTime? createdFrom,
+        DateTime? createdTo,
+        CancellationToken cancellationToken = default)
+    {
+        SumQueryCount++;
+        var walletIds = wallets.Items
+            .Where(wallet => wallet.UserId == userId)
+            .Select(wallet => wallet.Id)
+            .ToHashSet();
+        var query = Items.Where(transaction =>
+            walletIds.Contains(transaction.WalletId) &&
+            transaction.Type == transactionType);
+
+        if (createdFrom.HasValue)
+        {
+            query = query.Where(transaction =>
+                transaction.CreatedAt >= createdFrom.Value);
+        }
+
+        if (createdTo.HasValue)
+        {
+            query = query.Where(transaction =>
+                transaction.CreatedAt <= createdTo.Value);
+        }
+
+        return Task.FromResult(query.Sum(transaction => transaction.Amount));
+    }
 
     public Task<IReadOnlyList<WalletTransaction>> GetWithdrawalsByUserIdAsync(
         Guid userId,
@@ -704,6 +784,8 @@ internal sealed class TestTripRepository : ITripRepository
     public List<Trip> Items { get; } = [];
     public User? DefaultDriver { get; set; }
     public Vehicle? DefaultVehicle { get; set; }
+    public int GetAllByDriverQueryCount { get; private set; }
+    public int DashboardQueryCount { get; private set; }
 
     public Task<Trip?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         Task.FromResult(Items.FirstOrDefault(t => t.Id == id));
@@ -722,8 +804,84 @@ internal sealed class TestTripRepository : ITripRepository
         CancellationToken cancellationToken = default) =>
         GetByIdAsync(id, cancellationToken);
 
-    public Task<IReadOnlyList<Trip>> GetByDriverIdAsync(Guid driverId, CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<Trip>>(Items.Where(t => t.DriverId == driverId).ToList());
+    public Task<IReadOnlyList<Trip>> GetByDriverIdAsync(Guid driverId, CancellationToken cancellationToken = default)
+    {
+        GetAllByDriverQueryCount++;
+        return Task.FromResult<IReadOnlyList<Trip>>(
+            Items.Where(trip => trip.DriverId == driverId).ToList());
+    }
+
+    public Task<int> CountCompletedByDriverIdAsync(
+        Guid driverId,
+        CancellationToken cancellationToken = default)
+    {
+        DashboardQueryCount++;
+        return Task.FromResult(Items.Count(trip =>
+            trip.DriverId == driverId &&
+            trip.Status == TripStatus.Completed));
+    }
+
+    public Task<DriverDashboardTripSummaryData?> GetNextUpcomingByDriverIdAsync(
+        Guid driverId,
+        DateTime utcNow,
+        CancellationToken cancellationToken = default)
+    {
+        DashboardQueryCount++;
+        var trip = Items
+            .Where(trip =>
+                trip.DriverId == driverId &&
+                trip.DepartureTime > utcNow &&
+                trip.Status != TripStatus.Completed &&
+                trip.Status != TripStatus.Cancelled)
+            .OrderBy(trip => trip.DepartureTime)
+            .FirstOrDefault();
+        return Task.FromResult(
+            trip is null ? null : DashboardSummary(trip));
+    }
+
+    public Task<IReadOnlyList<DriverDashboardTripSummaryData>>
+        GetLatestCompletedByDriverIdAsync(
+        Guid driverId,
+        int count,
+        CancellationToken cancellationToken = default)
+    {
+        DashboardQueryCount++;
+        return Task.FromResult<IReadOnlyList<DriverDashboardTripSummaryData>>(
+            Items
+            .Where(trip =>
+                trip.DriverId == driverId &&
+                trip.Status == TripStatus.Completed)
+            .OrderByDescending(trip => trip.DepartureTime)
+            .Take(count)
+            .Select(DashboardSummary)
+            .ToList());
+    }
+
+    private static DriverDashboardTripSummaryData DashboardSummary(
+        Trip trip)
+    {
+        var imageUrl = trip.Vehicle.Images
+            .OrderByDescending(image => image.IsPrimary)
+            .ThenBy(image =>
+                image.ImageType == VehicleImageType.FrontView ? 0 : 1)
+            .ThenBy(image => image.ImageType)
+            .ThenBy(image => image.Id)
+            .Select(image => image.ImageUrl)
+            .FirstOrDefault();
+
+        return new DriverDashboardTripSummaryData
+        {
+            TripId = trip.Id,
+            OriginAddress = trip.OriginAddress,
+            DestinationAddress = trip.DestinationAddress,
+            DepartureTime = trip.DepartureTime,
+            Status = trip.Status,
+            SeatPrice = trip.SeatPrice,
+            AvailableSeats = trip.AvailableSeats,
+            VehicleLicensePlateNumber = trip.Vehicle.LicensePlateNumber,
+            VehicleImageUrl = imageUrl
+        };
+    }
 
     public Task<IReadOnlyList<Trip>> SearchAsync(
         DateTime utcNow, DateTime? departureDate, bool? requiresLuggage,

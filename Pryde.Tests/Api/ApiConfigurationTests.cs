@@ -203,6 +203,16 @@ public class ApiConfigurationTests
                 .Cast<AuthorizeAttribute>(),
             attribute => attribute.Policy == AuthorizationPolicies.EmailVerified);
 
+        var retry = typeof(KycController).GetMethod(
+            nameof(KycController.RetryDojahVerification));
+        Assert.NotNull(retry);
+        var retryRoute = retry.GetCustomAttributes(
+                typeof(HttpPostAttribute),
+                true)
+            .Cast<HttpPostAttribute>()
+            .Single();
+        Assert.Equal("dojah/retry", retryRoute.Template);
+
         var webhook = typeof(KycController).GetMethod(nameof(KycController.ProcessDojahWebhook));
         Assert.NotNull(webhook);
         Assert.NotEmpty(webhook.GetCustomAttributes(typeof(AllowAnonymousAttribute), true));
@@ -213,6 +223,7 @@ public class ApiConfigurationTests
     [InlineData(nameof(KycController.Submit))]
     [InlineData(nameof(KycController.GetMine))]
     [InlineData(nameof(KycController.GetDojahConfig))]
+    [InlineData(nameof(KycController.RetryDojahVerification))]
     public void CustomerKycActionsRequireEmailVerification(string actionName)
     {
         var action = typeof(KycController).GetMethod(actionName);
