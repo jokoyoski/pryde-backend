@@ -8,7 +8,7 @@ public class DojahKycConfigResponseDto
     public string PublicKey { get; set; } = string.Empty;
     public string ShareableLink { get; set; } = string.Empty;
     public string WidgetId { get; set; } = string.Empty;
-    public string? ReferenceId { get; set; }
+    public string ReferenceId { get; set; } = string.Empty;
     public string ProviderReference { get; set; } = string.Empty;
     public IReadOnlyDictionary<string, string> Metadata { get; set; } =
         new Dictionary<string, string>();

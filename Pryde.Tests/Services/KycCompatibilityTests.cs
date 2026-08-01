@@ -204,7 +204,7 @@ public class KycCompatibilityTests
 
         var dojahService = DojahService(unitOfWork);
         var newConfig = await dojahService.GetConfigAsync(kyc.UserId);
-        Assert.Null(newConfig.ReferenceId);
+        Assert.Equal(newConfig.ProviderReference, newConfig.ReferenceId);
         Assert.NotEqual(oldReference, newConfig.ProviderReference);
 
         var oldPayload = Encoding.UTF8.GetBytes(

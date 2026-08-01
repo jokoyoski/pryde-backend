@@ -135,15 +135,17 @@ public class DojahKycServiceTests
         var first = await service.GetConfigAsync(userId);
         var second = await service.GetConfigAsync(userId);
 
-        Assert.Null(first.ReferenceId);
-        Assert.Null(second.ReferenceId);
+        Assert.NotNull(first.ReferenceId);
+        Assert.Equal(first.ProviderReference, first.ReferenceId);
+        Assert.Equal(second.ProviderReference, second.ReferenceId);
         Assert.Equal(first.ProviderReference, second.ProviderReference);
+        Assert.StartsWith("PRYDE-", first.ReferenceId);
         Assert.StartsWith("PRYDE-", first.ProviderReference);
         Assert.Equal(
             first.ProviderReference,
             first.Metadata["kyc_reference"]);
-        Assert.DoesNotContain(
-            "reference_id=",
+        Assert.Contains(
+            $"reference_id={first.ProviderReference}",
             first.ShareableLink,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
@@ -180,7 +182,11 @@ public class DojahKycServiceTests
         var result = await service.RetryAsync(kyc.UserId);
 
         Assert.NotEqual(previousReference, result.ProviderReference);
+        Assert.StartsWith("PRYDE-", result.ProviderReference);
+        Assert.Equal(result.ProviderReference, result.ReferenceId);
+        Assert.NotEqual(previousReference, result.ReferenceId);
         Assert.NotEqual(previousConfig.ShareableLink, result.ShareableLink);
+        Assert.DoesNotContain(previousReference!, result.ShareableLink);
         Assert.Equal(result.ProviderReference, kyc.ProviderReference);
         Assert.Equal(
             result.ProviderReference,
@@ -396,7 +402,7 @@ public class DojahKycServiceTests
     }
 
     [Fact]
-    public async Task ShareableLinkReplacesOldCorrelationAndEncodesMetadata()
+    public async Task ShareableLinkReplacesOldCorrelationAndEncodesReferences()
     {
         const string providerReference = "PRYDE-value with/+characters";
         var unitOfWork = new TestUnitOfWork();
@@ -417,8 +423,8 @@ public class DojahKycServiceTests
         var result = await service.GetConfigAsync(
             Guid.Parse("74462e4a-98c5-4a1d-a480-ee5e45244a1e"));
 
-        Assert.DoesNotContain(
-            "reference_id=",
+        Assert.Contains(
+            "reference_id=PRYDE-value%20with%2F%2Bcharacters",
             result.ShareableLink,
             StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("PRYDE-old", result.ShareableLink);
@@ -430,6 +436,7 @@ public class DojahKycServiceTests
             "return_url=https%3A%2F%2Fpryde.test%2Fcomplete",
             result.ShareableLink);
         Assert.Equal(providerReference, result.ProviderReference);
+        Assert.Equal(providerReference, result.ReferenceId);
     }
 
     [Fact]
@@ -462,7 +469,7 @@ public class DojahKycServiceTests
     [InlineData("Failed", KycStatus.Rejected)]
     [InlineData("Ongoing", KycStatus.Pending)]
     [InlineData("Pending", KycStatus.Pending)]
-    [InlineData("Abandoned", KycStatus.Pending)]
+    [InlineData("Abandoned", KycStatus.Rejected)]
     [InlineData("FutureStatus", KycStatus.Pending)]
     public async Task VerifiedWebhookMapsProviderStatus(string providerStatus, KycStatus expectedStatus)
     {
@@ -477,7 +484,9 @@ public class DojahKycServiceTests
         Assert.Equal(expectedStatus, kyc.Status);
         Assert.Equal(providerStatus, kyc.ProviderStatus);
         if (expectedStatus == KycStatus.Rejected)
+        {
             Assert.Equal("provider check failed", kyc.RejectionReason);
+        }
     }
 
     [Fact]
@@ -517,6 +526,116 @@ public class DojahKycServiceTests
         Assert.Equal(config.ProviderReference, kyc.ProviderReference);
         Assert.Equal(dojahReference, kyc.DojahReference);
         Assert.Equal(KycStatus.Approved, kyc.Status);
+    }
+
+    [Theory]
+    [InlineData("vendor_reference")]
+    [InlineData("customer_reference")]
+    [InlineData("custom_reference")]
+    public async Task ExistingTopLevelCorrelationFallbacksRemainSupported(
+        string correlationField)
+    {
+        const string dojahReference = "DJ-FALLBACK001";
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Encoding.UTF8.GetBytes(
+            $"{{\"reference_id\":\"{dojahReference}\",\"verification_status\":\"Ongoing\",\"{correlationField}\":\"{config.ProviderReference}\"}}");
+
+        await service.ProcessWebhookAsync(payload, SignV1(payload), null);
+
+        var kyc = Assert.Single(
+            unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(config.ProviderReference, kyc.ProviderReference);
+        Assert.Equal(dojahReference, kyc.DojahReference);
+        Assert.Equal(KycStatus.Pending, kyc.Status);
+    }
+
+    [Fact]
+    public async Task ExistingMetadataReferenceIdFallbackRemainsSupported()
+    {
+        const string dojahReference = "DJ-FALLBACK002";
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Encoding.UTF8.GetBytes(
+            $"{{\"reference_id\":\"{dojahReference}\",\"verification_status\":\"Ongoing\",\"metadata\":{{\"reference_id\":\"{config.ProviderReference}\"}}}}");
+
+        await service.ProcessWebhookAsync(payload, SignV1(payload), null);
+
+        var kyc = Assert.Single(
+            unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(config.ProviderReference, kyc.ProviderReference);
+        Assert.Equal(dojahReference, kyc.DojahReference);
+        Assert.Equal(KycStatus.Pending, kyc.Status);
+    }
+
+    [Fact]
+    public async Task RealisticCompletedWebhookPersistsSuccessfulDecision()
+    {
+        const string dojahReference = "DJ-1212364EF1";
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Encoding.UTF8.GetBytes($$"""
+        {
+          "data": {
+            "id": {
+              "status": true,
+              "data": {
+                "id_data": {
+                  "first_name": "Test",
+                  "last_name": "User",
+                  "document_type": "Driver License"
+                }
+              }
+            },
+            "selfie": {
+              "status": true
+            },
+            "government_data": {
+              "status": true
+            }
+          },
+          "status": true,
+          "message": "Successfully completed the verification.",
+          "metadata": {
+            "kyc_reference": "{{config.ProviderReference}}",
+            "device_info": "test-device",
+            "ipinfo": {
+              "country": "Nigeria"
+            }
+          },
+          "reference_id": "{{dojahReference}}",
+          "verification_mode": "LIVENESS",
+          "verification_type": "DL_ID",
+          "verification_status": "Completed"
+        }
+        """);
+        var beforeProcessing = DateTime.UtcNow;
+
+        await service.ProcessWebhookAsync(
+            payload,
+            SignV1(payload),
+            null);
+
+        var afterProcessing = DateTime.UtcNow;
+        var kyc = Assert.Single(
+            unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(config.ProviderReference, kyc.ProviderReference);
+        Assert.Equal(dojahReference, kyc.DojahReference);
+        Assert.NotEqual(kyc.ProviderReference, kyc.DojahReference);
+        Assert.Equal("Completed", kyc.ProviderStatus);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
+        Assert.Null(kyc.RejectionReason);
+        Assert.InRange(
+            kyc.VerifiedAt!.Value,
+            beforeProcessing,
+            afterProcessing);
+        Assert.InRange(
+            kyc.LastProviderUpdatedAt!.Value,
+            beforeProcessing,
+            afterProcessing);
     }
 
     [Fact]
@@ -746,6 +865,81 @@ public class DojahKycServiceTests
             unitOfWork.NotificationRepository.Items);
         Assert.Equal(NotificationType.KycRejected, notification.Type);
         Assert.NotNull(kyc.LastProviderUpdatedAt);
+    }
+
+    [Fact]
+    public async Task AbandonedDojahWebhookRejectsVerificationAndAllowsRetry()
+    {
+        const string dojahReference = "DJ-2A5B47E2B4";
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var abandonedPayload = Encoding.UTF8.GetBytes($$"""
+        {
+          "data": {
+            "id": {
+              "status": true
+            },
+            "selfie": {
+              "status": false
+            }
+          },
+          "status": false,
+          "message": "Abandoned at Otp/Selfie step",
+          "metadata": {
+            "kyc_reference": "{{config.ProviderReference}}"
+          },
+          "reference_id": "{{dojahReference}}",
+          "verification_mode": "LIVENESS",
+          "verification_status": "Abandoned"
+        }
+        """);
+
+        await service.ProcessWebhookAsync(
+            abandonedPayload,
+            SignV1(abandonedPayload),
+            null);
+
+        var kyc = Assert.Single(
+            unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(KycStatus.Rejected, kyc.Status);
+        Assert.Equal("Abandoned", kyc.ProviderStatus);
+        Assert.Equal(
+            "Abandoned at Otp/Selfie step",
+            kyc.RejectionReason);
+        Assert.Equal(config.ProviderReference, kyc.ProviderReference);
+        Assert.Equal(dojahReference, kyc.DojahReference);
+        Assert.NotEqual(kyc.ProviderReference, kyc.DojahReference);
+        Assert.Null(kyc.VerifiedAt);
+        Assert.NotNull(kyc.LastProviderUpdatedAt);
+
+        var retry = await service.RetryAsync(kyc.UserId);
+
+        Assert.Equal(KycStatus.Pending, retry.Status);
+        Assert.StartsWith("PRYDE-", retry.ProviderReference);
+        Assert.Equal(retry.ProviderReference, retry.ReferenceId);
+        Assert.NotEqual(config.ProviderReference, retry.ProviderReference);
+        Assert.DoesNotContain(config.ProviderReference, retry.ShareableLink);
+        Assert.Null(kyc.DojahReference);
+        Assert.Null(kyc.ProviderStatus);
+        Assert.Null(kyc.RejectionReason);
+        Assert.Null(kyc.LastProviderUpdatedAt);
+    }
+
+    [Fact]
+    public async Task AbandonedWebhookWithoutMessageUsesSafeReason()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Payload(config.ProviderReference, "Abandoned");
+
+        await service.ProcessWebhookAsync(payload, SignV1(payload), null);
+
+        var kyc = Assert.Single(
+            unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(KycStatus.Rejected, kyc.Status);
+        Assert.Equal("Verification was abandoned.", kyc.RejectionReason);
     }
 
     [Fact]
