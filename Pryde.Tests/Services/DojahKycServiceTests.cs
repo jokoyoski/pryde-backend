@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
+using Pryde.Domain.Constants;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Services.Service.Implementation;
@@ -153,6 +154,245 @@ public class DojahKycServiceTests
         Assert.Equal("widget-test", first.WidgetId);
         Assert.Equal(KycStatus.Pending, first.Status);
         Assert.Single(unitOfWork.KycVerificationRepository.Items);
+    }
+
+    [Fact]
+    public async Task RejectedUserCanRetry()
+    {
+        var unitOfWork = RejectedKycContext(out var kyc);
+        var service = Service(unitOfWork);
+
+        var result = await service.RetryAsync(kyc.UserId);
+
+        Assert.Equal(KycStatus.Pending, result.Status);
+        Assert.Equal(KycStatus.Pending, kyc.Status);
+        Assert.Equal("Dojah", kyc.ProviderName);
+    }
+
+    [Fact]
+    public async Task RetryGeneratesDifferentReference()
+    {
+        var unitOfWork = RejectedKycContext(out var kyc);
+        var previousReference = kyc.ProviderReference;
+        var service = Service(unitOfWork);
+        var previousConfig = await service.GetConfigAsync(kyc.UserId);
+
+        var result = await service.RetryAsync(kyc.UserId);
+
+        Assert.NotEqual(previousReference, result.ProviderReference);
+        Assert.NotEqual(previousConfig.ShareableLink, result.ShareableLink);
+        Assert.Equal(result.ProviderReference, kyc.ProviderReference);
+        Assert.Equal(
+            result.ProviderReference,
+            result.Metadata["kyc_reference"]);
+    }
+
+    [Fact]
+    public async Task RetryClearsRejectionReasonAndPreviousProviderResult()
+    {
+        var unitOfWork = RejectedKycContext(out var kyc);
+        var service = Service(unitOfWork);
+
+        await service.RetryAsync(kyc.UserId);
+
+        Assert.Null(kyc.RejectionReason);
+        Assert.Null(kyc.DojahReference);
+        Assert.Null(kyc.ProviderStatus);
+        Assert.Null(kyc.LastProviderUpdatedAt);
+        Assert.Null(kyc.VerifiedAt);
+    }
+
+    [Fact]
+    public async Task ApprovedUserCannotRetry()
+    {
+        var unitOfWork = RejectedKycContext(out var kyc);
+        kyc.Status = KycStatus.Approved;
+        var service = Service(unitOfWork);
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            service.RetryAsync(kyc.UserId));
+    }
+
+    [Fact]
+    public async Task PendingUserCannotRetry()
+    {
+        var unitOfWork = RejectedKycContext(out var kyc);
+        kyc.Status = KycStatus.Pending;
+        var service = Service(unitOfWork);
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            service.RetryAsync(kyc.UserId));
+    }
+
+    [Fact]
+    public async Task SubmittedUserCannotRetry()
+    {
+        var unitOfWork = RejectedKycContext(out var kyc);
+        kyc.Status = KycStatus.Submitted;
+        var service = Service(unitOfWork);
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            service.RetryAsync(kyc.UserId));
+    }
+
+    [Fact]
+    public async Task SecondRetryWhilePendingIsRejected()
+    {
+        var unitOfWork = RejectedKycContext(out var kyc);
+        var service = Service(unitOfWork);
+
+        await service.RetryAsync(kyc.UserId);
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            service.RetryAsync(kyc.UserId));
+    }
+
+    [Fact]
+    public async Task ConcurrentRetryRequestsAllowOnlyOneNewAttempt()
+    {
+        var unitOfWork = RejectedKycContext(out var kyc);
+        var service = Service(unitOfWork);
+        var retryTasks = new[]
+        {
+            service.RetryAsync(kyc.UserId),
+            service.RetryAsync(kyc.UserId)
+        };
+        var successes = 0;
+        var conflicts = 0;
+
+        foreach (var retryTask in retryTasks)
+        {
+            try
+            {
+                await retryTask;
+                successes++;
+            }
+            catch (ConflictException)
+            {
+                conflicts++;
+            }
+        }
+
+        Assert.Equal(1, successes);
+        Assert.Equal(1, conflicts);
+        Assert.Equal(KycStatus.Pending, kyc.Status);
+    }
+
+    [Fact]
+    public async Task RetryUpdatesOnlyTheAuthenticatedUsersKyc()
+    {
+        var unitOfWork = RejectedKycContext(out var kyc);
+        var otherKyc = new KycVerification
+        {
+            UserId = Guid.NewGuid(),
+            Status = KycStatus.Rejected,
+            ProviderName = "Dojah",
+            ProviderReference = "PRYDE-other-rejected-attempt",
+            DojahReference = "provider-generated-other-reference",
+            ProviderStatus = "Failed",
+            RejectionReason = "Other rejection."
+        };
+        unitOfWork.KycVerificationRepository.Items.Add(otherKyc);
+        var service = Service(unitOfWork);
+
+        await service.RetryAsync(kyc.UserId);
+
+        Assert.Equal(KycStatus.Pending, kyc.Status);
+        Assert.Equal(KycStatus.Rejected, otherKyc.Status);
+        Assert.Equal("PRYDE-other-rejected-attempt", otherKyc.ProviderReference);
+        Assert.Equal("provider-generated-other-reference", otherKyc.DojahReference);
+        Assert.Equal("Other rejection.", otherKyc.RejectionReason);
+    }
+
+    [Fact]
+    public async Task OldWebhookReferenceCannotUpdateRetryAttempt()
+    {
+        var unitOfWork = RejectedKycContext(out var kyc);
+        var oldProviderReference = kyc.ProviderReference!;
+        var oldDojahReference = kyc.DojahReference!;
+        var service = Service(unitOfWork);
+        await service.RetryAsync(kyc.UserId);
+        var payload = PayloadWithMetadata(
+            oldDojahReference,
+            oldProviderReference,
+            "Completed");
+
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            service.ProcessWebhookAsync(payload, SignV1(payload), null));
+
+        Assert.Equal(KycStatus.Pending, kyc.Status);
+        Assert.NotEqual(oldProviderReference, kyc.ProviderReference);
+        Assert.Null(kyc.DojahReference);
+    }
+
+    [Fact]
+    public async Task NewWebhookReferenceCanUpdateRetryAttempt()
+    {
+        const string newDojahReference = "provider-generated-retry-reference";
+        var unitOfWork = RejectedKycContext(out var kyc);
+        var service = Service(unitOfWork);
+        var config = await service.RetryAsync(kyc.UserId);
+        var payload = PayloadWithMetadata(
+            newDojahReference,
+            config.ProviderReference,
+            "Completed");
+
+        await service.ProcessWebhookAsync(payload, SignV1(payload), null);
+
+        Assert.Equal(KycStatus.Approved, kyc.Status);
+        Assert.Equal(newDojahReference, kyc.DojahReference);
+        Assert.Equal(config.ProviderReference, kyc.ProviderReference);
+    }
+
+    [Fact]
+    public async Task NewFailedWebhookReferenceRejectsRetryAttempt()
+    {
+        const string newDojahReference = "provider-generated-failed-retry-reference";
+        var unitOfWork = RejectedKycContext(out var kyc);
+        var service = Service(unitOfWork);
+        var config = await service.RetryAsync(kyc.UserId);
+        var payload = PayloadWithMetadata(
+            newDojahReference,
+            config.ProviderReference,
+            "Failed",
+            "Retry identity check failed.");
+
+        await service.ProcessWebhookAsync(payload, SignV1(payload), null);
+
+        Assert.Equal(KycStatus.Rejected, kyc.Status);
+        Assert.Equal(newDojahReference, kyc.DojahReference);
+        Assert.Equal("Failed", kyc.ProviderStatus);
+        Assert.Equal("Retry identity check failed.", kyc.RejectionReason);
+    }
+
+    [Fact]
+    public async Task RetryReturnsUserToIdentityVerificationOnboardingStage()
+    {
+        var unitOfWork = RejectedKycContext(out var kyc);
+        ((TestUserRepository)unitOfWork.Users).Items.Add(new User
+        {
+            Id = kyc.UserId,
+            Email = "retry@test.local",
+            PhoneNumber = "08000000000",
+            IsEmailVerified = true,
+            Status = UserStatus.Active
+        });
+        unitOfWork.UserRoleRepository.Items.Add(new UserRole
+        {
+            UserId = kyc.UserId,
+            Role = new Role { Name = RoleNames.Passenger }
+        });
+        var service = Service(unitOfWork);
+
+        await service.RetryAsync(kyc.UserId);
+        var onboarding = await new OnboardingStatusService(unitOfWork)
+            .GetAsync(kyc.UserId);
+
+        Assert.Equal(
+            OnboardingStage.IdentityVerification,
+            onboarding.CurrentStage);
+        Assert.Equal(KycStatus.Pending, onboarding.KycStatus);
+        Assert.Null(onboarding.RejectionReason);
     }
 
     [Fact]
@@ -657,6 +897,25 @@ public class DojahKycServiceTests
             unitOfWork,
             Options.Create(settings ?? Settings()),
             NullLogger<DojahKycService>.Instance);
+
+    private static TestUnitOfWork RejectedKycContext(
+        out KycVerification kyc)
+    {
+        var unitOfWork = new TestUnitOfWork();
+        kyc = new KycVerification
+        {
+            UserId = Guid.NewGuid(),
+            Status = KycStatus.Rejected,
+            ProviderName = "Dojah",
+            ProviderReference = "PRYDE-old-rejected-attempt",
+            DojahReference = "provider-generated-old-reference",
+            ProviderStatus = "Failed",
+            RejectionReason = "Identity check failed.",
+            LastProviderUpdatedAt = DateTime.UtcNow.AddMinutes(-5)
+        };
+        unitOfWork.KycVerificationRepository.Items.Add(kyc);
+        return unitOfWork;
+    }
 
     private static DojahSettings Settings() => new()
     {

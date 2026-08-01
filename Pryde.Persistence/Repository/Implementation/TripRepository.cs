@@ -119,6 +119,47 @@ public class TripRepository(PrydeDbContext context) : ITripRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<int> CountCompletedByDriverIdAsync(
+        Guid driverId,
+        CancellationToken cancellationToken = default)
+    {
+        return await context.Trips
+            .AsNoTracking()
+            .CountAsync(
+                trip =>
+                    trip.DriverId == driverId &&
+                    trip.Status == TripStatus.Completed,
+                cancellationToken);
+    }
+
+    public async Task<DriverDashboardTripSummaryData?>
+        GetNextUpcomingByDriverIdAsync(
+        Guid driverId,
+        DateTime utcNow,
+        CancellationToken cancellationToken = default)
+    {
+        return await DashboardTrips(driverId)
+            .Where(trip =>
+                trip.DepartureTime > utcNow &&
+                trip.Status != TripStatus.Completed &&
+                trip.Status != TripStatus.Cancelled)
+            .OrderBy(trip => trip.DepartureTime)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<DriverDashboardTripSummaryData>>
+        GetLatestCompletedByDriverIdAsync(
+        Guid driverId,
+        int count,
+        CancellationToken cancellationToken = default)
+    {
+        return await DashboardTrips(driverId)
+            .Where(trip => trip.Status == TripStatus.Completed)
+            .OrderByDescending(trip => trip.DepartureTime)
+            .Take(count)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<Guid>>
         GetExpiredConfirmationTripIdsAsync(
             DateTime utcNow,
@@ -145,4 +186,34 @@ public class TripRepository(PrydeDbContext context) : ITripRepository
 
     public void Update(Trip trip) => context.Trips.Update(trip);
     public void Delete(Trip trip) => context.Trips.Remove(trip);
+
+    private IQueryable<DriverDashboardTripSummaryData> DashboardTrips(
+        Guid driverId)
+    {
+        return context.Trips
+            .AsNoTracking()
+            .Where(trip => trip.DriverId == driverId)
+            .Select(trip => new DriverDashboardTripSummaryData
+            {
+                TripId = trip.Id,
+                OriginAddress = trip.OriginAddress,
+                DestinationAddress = trip.DestinationAddress,
+                DepartureTime = trip.DepartureTime,
+                Status = trip.Status,
+                SeatPrice = trip.SeatPrice,
+                AvailableSeats = trip.AvailableSeats,
+                VehicleLicensePlateNumber =
+                    trip.Vehicle.LicensePlateNumber,
+                VehicleImageUrl = trip.Vehicle.Images
+                    .OrderByDescending(image => image.IsPrimary)
+                    .ThenBy(image =>
+                        image.ImageType == VehicleImageType.FrontView
+                            ? 0
+                            : 1)
+                    .ThenBy(image => image.ImageType)
+                    .ThenBy(image => image.Id)
+                    .Select(image => image.ImageUrl)
+                    .FirstOrDefault()
+            });
+    }
 }

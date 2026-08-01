@@ -34,7 +34,11 @@ public class AdminPortalServiceTests
             Result = new DojahVerificationDetailsResponseDto
             {
                 Reference = "provider-generated-reference",
-                Status = "Completed"
+                Status = "Completed",
+                FirstName = "Verified",
+                LastName = "Person",
+                Gender = "Female",
+                SelfieImageUrl = "https://media.dojah.io/selfie.jpg"
             }
         };
         var service = CreateService(unitOfWork, new FakeEmailService(), dojahClient);
@@ -47,6 +51,12 @@ public class AdminPortalServiceTests
         Assert.Equal("provider-generated-reference", result.DojahReference);
         Assert.NotNull(result.DojahDetails);
         Assert.Equal("Completed", result.DojahDetails.Status);
+        Assert.Equal("Verified", result.DojahDetails.FirstName);
+        Assert.Equal("Person", result.DojahDetails.LastName);
+        Assert.Equal("Female", result.DojahDetails.Gender);
+        Assert.Equal(
+            "https://media.dojah.io/selfie.jpg",
+            result.DojahDetails.SelfieImageUrl);
         Assert.Equal(
             "provider-generated-reference",
             dojahClient.RequestedReference);
@@ -112,6 +122,43 @@ public class AdminPortalServiceTests
         Assert.Equal(KycStatus.Approved, kyc.Status);
         Assert.Equal("Completed", kyc.ProviderStatus);
         Assert.Equal(0, unitOfWork.SaveChangesCount);
+    }
+
+    [Fact]
+    public async Task ProviderNotFoundReturnsSelectedLocalKycWithNullDetails()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var user = CreateKycUser();
+        var kyc = new KycVerification
+        {
+            User = user,
+            UserId = user.Id,
+            Status = KycStatus.Rejected,
+            ProviderReference = "PRYDE-selected-reference",
+            DojahReference = "provider-missing-reference",
+            ProviderStatus = "Failed",
+            RejectionReason = "Identity checks failed."
+        };
+        unitOfWork.AdminListingRepository.Kyc.Add(kyc);
+        var dojahClient = new FakeDojahApiClient
+        {
+            Exception = new NotFoundException(
+                "Dojah verification",
+                kyc.DojahReference)
+        };
+        var service = CreateService(
+            unitOfWork,
+            new FakeEmailService(),
+            dojahClient);
+
+        var result = await service.GetKycAsync(kyc.Id);
+
+        Assert.Equal(kyc.Id, result.Id);
+        Assert.Equal(kyc.UserId, result.UserId);
+        Assert.Equal(KycStatus.Rejected, result.Status);
+        Assert.Equal("Failed", result.ProviderStatus);
+        Assert.Equal("Identity checks failed.", result.RejectionReason);
+        Assert.Null(result.DojahDetails);
     }
 
     [Fact]

@@ -16,27 +16,27 @@ public class RoleController(IRoleService roleService) : ControllerBase
         return Ok(roles);
     }
 
-    [HttpPost]
-    [Authorize(Roles = "Admin")]
-    public async Task<IActionResult> Create([FromBody] RoleCreateRequestDto request, CancellationToken cancellationToken)
-    {
-        var result = await roleService.CreateAsync(request.Name, cancellationToken);
-        return StatusCode(StatusCodes.Status201Created, result);
-    }
+    //[HttpPost]
+    //[Authorize(Roles = RoleNames.SuperAdmin)]
+    //public async Task<IActionResult> Create([FromBody] RoleCreateRequestDto request, CancellationToken cancellationToken)
+    //{
+    //    var result = await roleService.CreateAsync(request.Name, cancellationToken);
+    //    return StatusCode(StatusCodes.Status201Created, result);
+    //}
 
-    [HttpPut("{id:guid}")]
-    [Authorize(Roles = "Admin")]
-    public async Task<IActionResult> Update(Guid id, [FromBody] RoleCreateRequestDto request, CancellationToken cancellationToken)
-    {
-        var result = await roleService.UpdateAsync(id, request.Name, cancellationToken);
-        return Ok(result);
-    }
+    //[HttpPut("{id:guid}")]
+    //[Authorize(Roles = RoleNames.SuperAdmin)]
+    //public async Task<IActionResult> Update(Guid id, [FromBody] RoleCreateRequestDto request, CancellationToken cancellationToken)
+    //{
+    //    var result = await roleService.UpdateAsync(id, request.Name, cancellationToken);
+    //    return Ok(result);
+    //}
 
-    [HttpDelete("{id:guid}")]
-    [Authorize(Roles = "Admin")]
-    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
-    {
-        await roleService.DeleteAsync(id, cancellationToken);
-        return NoContent();
-    }
+    //[HttpDelete("{id:guid}")]
+    //[Authorize(Roles = RoleNames.SuperAdmin)]
+    //public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
+    //{
+    //    await roleService.DeleteAsync(id, cancellationToken);
+    //    return NoContent();
+    //}
 }

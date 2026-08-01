@@ -117,13 +117,21 @@ public sealed class DojahApiClient(
             GovernmentDataResult = response.Data?.GovernmentData?.Status,
             DocumentType = idData?.DocumentType ?? response.IdType,
             FullName = fullName,
+            FirstName = idData?.FirstName ?? userData?.FirstName,
+            LastName = idData?.LastName ?? userData?.LastName,
             DateOfBirth = idData?.DateOfBirth ?? userData?.DateOfBirth,
-            Country = response.Data?.Countries?.Data?.Country,
+            Gender = GetGovernmentGender(
+                response.Data?.GovernmentData?.Data),
+            Country = response.Data?.Countries?.Data?.Country ??
+                      idData?.Nationality,
             IssueDate = idData?.DateIssued,
             ExpiryDate = idData?.ExpiryDate,
             MaskedDocumentNumber = MaskDocumentNumber(idData?.DocumentNumber),
             FrontDocumentImageUrl = GetSafeHttpsUrl(response.Data?.Id?.Data?.IdUrl ?? response.IdUrl),
-            BackDocumentImageUrl = GetSafeHttpsUrl(response.Data?.Id?.Data?.BackUrl ?? response.BackUrl)
+            BackDocumentImageUrl = GetSafeHttpsUrl(response.Data?.Id?.Data?.BackUrl ?? response.BackUrl),
+            SelfieImageUrl = GetSafeHttpsUrl(
+                response.Data?.Selfie?.Data?.SelfieUrl ??
+                response.SelfieUrl)
         };
     }
 
@@ -161,6 +169,28 @@ public sealed class DojahApiClient(
         }
 
         return null;
+    }
+
+    private static string? GetGovernmentGender(
+        DojahGovernmentData? governmentData)
+    {
+        return GetGovernmentGender(governmentData?.Bvn) ??
+               GetGovernmentGender(governmentData?.Nin);
+    }
+
+    private static string? GetGovernmentGender(JsonElement? record)
+    {
+        if (!record.HasValue ||
+            record.Value.ValueKind != JsonValueKind.Object ||
+            !record.Value.TryGetProperty("entity", out var entity) ||
+            entity.ValueKind != JsonValueKind.Object ||
+            !entity.TryGetProperty("gender", out var gender) ||
+            gender.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return gender.GetString();
     }
 
     private void EnsureConfigured(DojahSettings settings)

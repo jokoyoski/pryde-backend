@@ -27,11 +27,42 @@ public class KycVerificationRepository(PrydeDbContext context)
             .FirstOrDefaultAsync(kyc => kyc.UserId == userId, cancellationToken);
     }
 
+    public async Task<KycVerification?> GetByUserIdForUpdateAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        return await context.KycVerifications
+            .FromSqlInterpolated(
+                $"""
+                SELECT *
+                FROM "KycVerifications"
+                WHERE "UserId" = {userId}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<KycVerification?> GetByIdForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        return await context.KycVerifications
+            .FromSqlInterpolated(
+                $"""
+                SELECT *
+                FROM "KycVerifications"
+                WHERE "Id" = {id}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<KycVerification?> GetByProviderReferenceAsync(
         string providerReference,
         CancellationToken cancellationToken = default)
     {
         return await context.KycVerifications
+            .AsNoTracking()
             .FirstOrDefaultAsync(
                 kyc => kyc.ProviderReference == providerReference,
                 cancellationToken);
@@ -42,6 +73,7 @@ public class KycVerificationRepository(PrydeDbContext context)
         CancellationToken cancellationToken = default)
     {
         return await context.KycVerifications
+            .AsNoTracking()
             .FirstOrDefaultAsync(
                 kyc => kyc.DojahReference == dojahReference,
                 cancellationToken);

@@ -8,6 +8,7 @@ using Pryde.Contracts.RequestModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Constants;
 using Pryde.Domain.Entities;
+using Pryde.Domain.Enums;
 using Pryde.Services.Mapping;
 using Pryde.Services.Providers.Paystack;
 using Pryde.Services.Service.Implementation;
@@ -49,7 +50,7 @@ public class DriverBankAccountServiceTests
             });
 
         Assert.Equal("058", response.BankCode);
-        Assert.Equal("0123456789", response.AccountNumber);
+        Assert.Equal("******6789", response.AccountNumber);
         Assert.Equal("Example Account Name", response.AccountName);
     }
 
@@ -224,6 +225,102 @@ public class DriverBankAccountServiceTests
         var account = Assert.Single(response);
         Assert.Equal(ownDefault.Id, account.Id);
         Assert.Equal("******6789", account.AccountNumber);
+    }
+
+    [Fact]
+    public async Task DriverCanSwitchToReplacementBankAccount()
+    {
+        var context = CreateDriverContext();
+        var oldAccount = BankAccount(
+            context.DriverId,
+            "058",
+            "0123456789",
+            true,
+            true);
+        context.UnitOfWork.DriverBankAccountRepository.Items.Add(oldAccount);
+
+        var response = await context.Service.CreateAsync(
+            context.DriverId,
+            new CreateDriverBankAccountRequestDto
+            {
+                BankCode = "058",
+                AccountNumber = "0987654321"
+            });
+
+        Assert.False(oldAccount.IsActive);
+        Assert.False(oldAccount.IsDefault);
+        Assert.True(response.IsActive);
+        Assert.True(response.IsDefault);
+        Assert.Equal("******4321", response.AccountNumber);
+        Assert.Equal(2, context.UnitOfWork.DriverBankAccountRepository.Items.Count);
+    }
+
+    [Fact]
+    public async Task SwitchingAccountDoesNotChangeAnotherUsersAccount()
+    {
+        var context = CreateDriverContext();
+        var ownAccount = BankAccount(
+            context.DriverId,
+            "058",
+            "0123456789",
+            true,
+            true);
+        var otherAccount = BankAccount(
+            Guid.NewGuid(),
+            "058",
+            "1111111111",
+            true,
+            true);
+        context.UnitOfWork.DriverBankAccountRepository.Items.Add(ownAccount);
+        context.UnitOfWork.DriverBankAccountRepository.Items.Add(otherAccount);
+
+        await context.Service.CreateAsync(
+            context.DriverId,
+            new CreateDriverBankAccountRequestDto
+            {
+                BankCode = "058",
+                AccountNumber = "0987654321"
+            });
+
+        Assert.False(ownAccount.IsActive);
+        Assert.True(otherAccount.IsActive);
+        Assert.True(otherAccount.IsDefault);
+    }
+
+    [Fact]
+    public async Task SwitchingAccountPreservesHistoricalWithdrawalDetails()
+    {
+        var context = CreateDriverContext();
+        var oldAccount = BankAccount(
+            context.DriverId,
+            "058",
+            "0123456789",
+            true,
+            true);
+        context.UnitOfWork.DriverBankAccountRepository.Items.Add(oldAccount);
+        var withdrawal = new WalletTransaction
+        {
+            Type = WalletTransactionType.Withdrawal,
+            BankName = oldAccount.BankName,
+            MaskedAccountNumber = "******6789",
+            AccountName = oldAccount.AccountName,
+            Reference = "withdrawal-history"
+        };
+        context.UnitOfWork.WalletTransactionRepository.Items.Add(withdrawal);
+
+        await context.Service.CreateAsync(
+            context.DriverId,
+            new CreateDriverBankAccountRequestDto
+            {
+                BankCode = "058",
+                AccountNumber = "0987654321"
+            });
+
+        Assert.Contains(oldAccount,
+            context.UnitOfWork.DriverBankAccountRepository.Items);
+        Assert.False(oldAccount.IsActive);
+        Assert.Equal("******6789", withdrawal.MaskedAccountNumber);
+        Assert.Equal("withdrawal-history", withdrawal.Reference);
     }
 
     [Fact]

@@ -9,6 +9,14 @@ public interface ITripService
     Task<IReadOnlyList<TripSummaryResponseDto>> SearchAsync(SearchTripsRequestDto request, CancellationToken cancellationToken = default);
     Task<TripDetailsResponseDto> GetByIdAsync(Guid tripId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TripSummaryResponseDto>> GetMineAsync(Guid driverId, CancellationToken cancellationToken = default);
+    Task<DriverDashboardTripSummaryResponseDto?> GetNextUpcomingAsync(
+        Guid driverId,
+        DateTime utcNow,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DriverDashboardTripSummaryResponseDto>> GetLatestCompletedAsync(
+        Guid driverId,
+        int count,
+        CancellationToken cancellationToken = default);
     Task<TripDetailsResponseDto> UpdateAsync(Guid tripId, Guid driverId, UpdateTripRequestDto request, CancellationToken cancellationToken = default);
     Task CancelAsync(Guid tripId, Guid driverId, CancellationToken cancellationToken = default);
     Task<TripDetailsResponseDto> StartAsync(Guid tripId, Guid driverId, CancellationToken cancellationToken = default);

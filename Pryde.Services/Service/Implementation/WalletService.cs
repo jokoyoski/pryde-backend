@@ -113,21 +113,37 @@ public class WalletService(IUnitOfWork unitOfWork) : IWalletService
         };
     }
 
-    public async Task<IReadOnlyList<WalletTransactionResponseDto>> GetTransactionsAsync(
+    public async Task<PagedResponseDto<WalletTransactionResponseDto>> GetTransactionsAsync(
         Guid userId,
+        WalletTransactionsRequestDto request,
         CancellationToken cancellationToken = default)
     {
+        request ??= new WalletTransactionsRequestDto();
         var wallet = await GetWalletAsync(userId, cancellationToken);
-        var transactions = await unitOfWork.WalletTransactions.GetByWalletIdAsync(wallet.Id, cancellationToken);
+        var result = await unitOfWork.WalletTransactions.GetByWalletIdAsync(
+            wallet.Id,
+            request.PageNumber,
+            request.PageSize,
+            cancellationToken);
 
-        return transactions.Select(transaction => new WalletTransactionResponseDto
+        return new PagedResponseDto<WalletTransactionResponseDto>
         {
-            Id = transaction.Id,
-            Amount = transaction.Amount,
-            Type = transaction.Type,
-            Reference = transaction.Reference,
-            CreatedAt = transaction.CreatedAt
-        }).ToList();
+            Items = result.Items.Select(transaction => new WalletTransactionResponseDto
+            {
+                Id = transaction.Id,
+                Amount = transaction.Amount,
+                Type = transaction.Type,
+                Status = transaction.Status,
+                Description = transaction.Description,
+                Reference = transaction.Reference,
+                CreatedAt = transaction.CreatedAt
+            }).ToList(),
+            PageNumber = request.PageNumber,
+            PageSize = request.PageSize,
+            TotalCount = result.TotalCount,
+            TotalPages = (int)Math.Ceiling(
+                result.TotalCount / (double)request.PageSize)
+        };
     }
 
     public async Task<VirtualAccountResponseDto> GetVirtualAccountAsync(

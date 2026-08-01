@@ -61,13 +61,17 @@ public class DojahApiClientTests
         Assert.True(result.GovernmentDataResult);
         Assert.Equal("DRIVERS_LICENSE", result.DocumentType);
         Assert.Equal("Ada Chiamaka Lovelace", result.FullName);
+        Assert.Equal("Ada", result.FirstName);
+        Assert.Equal("Lovelace", result.LastName);
         Assert.Equal("1990-01-02", result.DateOfBirth);
+        Assert.Equal("Female", result.Gender);
         Assert.Equal("NG", result.Country);
         Assert.Equal("2020-03-04", result.IssueDate);
         Assert.Equal("2030-03-04", result.ExpiryDate);
         Assert.Equal("******7890", result.MaskedDocumentNumber);
         Assert.Equal("https://media.dojah.io/front.jpg", result.FrontDocumentImageUrl);
         Assert.Equal("https://media.dojah.io/back.jpg", result.BackDocumentImageUrl);
+        Assert.Equal("https://media.dojah.io/selfie.jpg", result.SelfieImageUrl);
     }
 
     [Fact]
@@ -403,6 +407,7 @@ public class DojahApiClientTests
               "first_name": "Ada",
               "middle_name": "Chiamaka",
               "last_name": "Lovelace",
+              "nationality": "Nigerian",
               "date_issued": "2020-03-04",
               "expiry_date": "2030-03-04",
               "date_of_birth": "1990-01-02",
@@ -412,12 +417,20 @@ public class DojahApiClientTests
           }
         },
         "selfie": {
-          "status": true
+          "status": true,
+          "data": {
+            "selfie_url": "https://media.dojah.io/selfie.jpg"
+          }
         },
         "government_data": {
           "status": true,
           "data": {
-            "bvn": "22110099887"
+            "bvn": {
+              "entity": {
+                "bvn": "22110099887",
+                "gender": "Female"
+              }
+            }
           }
         },
         "countries": {

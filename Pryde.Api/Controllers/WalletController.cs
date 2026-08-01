@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Pryde.Contracts.RequestModels;
 using Pryde.Services.Service.Interface;
 using Pryde.Api.Authorization;
 
@@ -20,9 +21,14 @@ public class WalletController(IWalletService walletService) : ControllerBase
     }
 
     [HttpGet("mine/transactions")]
-    public async Task<IActionResult> GetTransactions(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetTransactions(
+        [FromQuery] WalletTransactionsRequestDto request,
+        CancellationToken cancellationToken)
     {
-        return Ok(await walletService.GetTransactionsAsync(GetUserId(), cancellationToken));
+        return Ok(await walletService.GetTransactionsAsync(
+            GetUserId(),
+            request,
+            cancellationToken));
     }
 
     private Guid GetUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);

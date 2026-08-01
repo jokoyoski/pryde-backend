@@ -1,6 +1,7 @@
 using Pryde.Contracts.RequestModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
+using Pryde.Domain.Enums;
 using Pryde.Services.Service.Implementation;
 using Pryde.Tests.TestInfrastructure;
 
@@ -47,6 +48,67 @@ public class WalletServiceTests
 
         await Assert.ThrowsAsync<ForbiddenException>(() => service.FundVirtualAccountAsync(
             Guid.NewGuid(), new FundVirtualAccountRequestDto { AccountNumber = account.AccountNumber, Amount = 1m }));
+    }
+
+    [Fact]
+    public async Task TransactionHistoryIsPagedAndUserScoped()
+    {
+        var (unitOfWork, userId, wallet, _) = Context();
+        var otherUserId = Guid.NewGuid();
+        var otherWallet = new Wallet
+        {
+            UserId = otherUserId
+        };
+        unitOfWork.WalletRepository.Items.Add(otherWallet);
+
+        for (var index = 0; index < 5; index++)
+        {
+            unitOfWork.WalletTransactionRepository.Items.Add(
+                Transaction(wallet, index, DateTime.UtcNow.AddMinutes(-index)));
+        }
+
+        unitOfWork.WalletTransactionRepository.Items.Add(
+            Transaction(otherWallet, 99, DateTime.UtcNow.AddMinutes(1)));
+        var service = new WalletService(unitOfWork);
+
+        var result = await service.GetTransactionsAsync(
+            userId,
+            new WalletTransactionsRequestDto
+            {
+                PageNumber = 2,
+                PageSize = 2
+            });
+
+        Assert.Equal(2, result.Items.Count);
+        Assert.Equal(5, result.TotalCount);
+        Assert.Equal(2, result.PageNumber);
+        Assert.Equal(2, result.PageSize);
+        Assert.Equal(3, result.TotalPages);
+        Assert.All(result.Items, transaction =>
+            Assert.NotEqual("other-user", transaction.Reference));
+        Assert.All(result.Items, transaction =>
+        {
+            Assert.Equal(WalletTransactionStatus.Successful, transaction.Status);
+            Assert.Equal("Driver earning", transaction.Description);
+        });
+    }
+
+    private static WalletTransaction Transaction(
+        Wallet wallet,
+        int index,
+        DateTime createdAt)
+    {
+        return new WalletTransaction
+        {
+            WalletId = wallet.Id,
+            Wallet = wallet,
+            Amount = 100m + index,
+            Type = WalletTransactionType.EscrowRelease,
+            Status = WalletTransactionStatus.Successful,
+            Description = "Driver earning",
+            Reference = index == 99 ? "other-user" : $"earning-{index}",
+            CreatedAt = createdAt
+        };
     }
 
     private static (TestUnitOfWork UnitOfWork, Guid UserId, Wallet Wallet, VirtualAccount Account) Context()
