@@ -4,7 +4,6 @@ using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
-using Pryde.Api.Authorization;
 using Pryde.Contracts.RequestModels;
 using Pryde.Domain.Enums;
 using Pryde.Services.Service.Interface;
@@ -12,6 +11,7 @@ using Pryde.Services.Settings;
 using Pryde.Services.Storage.Enums;
 using Pryde.Services.Storage.Interface;
 using Pryde.Services.Storage.Validation;
+using Pryde.Api.Controllers.Driver.Authorization;
 
 namespace Pryde.Api.Controllers.V1;
 

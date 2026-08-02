@@ -3,7 +3,7 @@ using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
-using Pryde.Api.Authorization;
+using Pryde.Api.Controllers.Driver.Authorization;
 using Pryde.Contracts.RequestModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Services.Service.Interface;

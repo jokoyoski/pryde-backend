@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pryde.Contracts.RequestModels;
 using Pryde.Services.Service.Interface;
-using Pryde.Api.Authorization;
+using Pryde.Api.Controllers.Driver.Authorization;
 
 namespace Pryde.Api.Controllers.V1;
 
