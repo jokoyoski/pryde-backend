@@ -3,7 +3,6 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Authorization;
-using Pryde.Api.Authorization;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Services.Settings;
 using Pryde.Api.Controllers.Driver.Authorization;
