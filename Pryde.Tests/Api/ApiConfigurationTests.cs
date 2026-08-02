@@ -12,7 +12,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Models;
-using Pryde.Api.Authorization;
 using Pryde.Api.Controllers.V1;
 using Pryde.Api.Extension;
 using Pryde.Api.Extensions;
@@ -26,6 +25,7 @@ using Pryde.Services.Service.Interface;
 using Pryde.Services.Settings;
 using Pryde.Tests.TestInfrastructure;
 using Swashbuckle.AspNetCore.Swagger;
+using Pryde.Api.Controllers.Driver.Authorization;
 
 namespace Pryde.Tests.Api;
 

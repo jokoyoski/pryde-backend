@@ -1,4 +1,4 @@
-namespace Pryde.Api.Authorization;
+namespace Pryde.Api.Controllers.Driver.Authorization;
 
 public static class AuthorizationPolicies
 {

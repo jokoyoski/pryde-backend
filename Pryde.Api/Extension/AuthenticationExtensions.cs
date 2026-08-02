@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Pryde.Api.Authorization;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Services.Settings;
+using Pryde.Api.Controllers.Driver.Authorization;
 
 namespace Pryde.Api.Extension;
 

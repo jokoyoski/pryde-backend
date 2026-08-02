@@ -2,7 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Pryde.Persistence.Repository.Interfaces;
 
-namespace Pryde.Api.Authorization;
+namespace Pryde.Api.Controllers.Driver.Authorization;
 
 public sealed class EmailVerifiedHandler(
     IUnitOfWork unitOfWork,

@@ -2,7 +2,7 @@ using System.Security.Claims;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Pryde.Api.Authorization;
+using Pryde.Api.Controllers.Driver.Authorization;
 using Pryde.Domain.Constants;
 using Pryde.Services.Service.Interface;
 
