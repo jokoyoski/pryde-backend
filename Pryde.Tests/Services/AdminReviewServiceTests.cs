@@ -20,7 +20,7 @@ public class AdminReviewServiceTests
             BiometricVerificationUrl = "https://files.test/selfie.jpg"
         };
         unitOfWork.KycVerificationRepository.Items.Add(kyc);
-        var service = new KycService(unitOfWork, null!);
+        var service = new KycService(unitOfWork);
 
         await Assert.ThrowsAsync<ValidationException>(() => service.RejectAsync(kyc.UserId, " "));
         await service.ApproveAsync(kyc.UserId);

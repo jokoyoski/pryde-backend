@@ -2,16 +2,16 @@ using System.Security.Claims;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Pryde.Api.Authorization;
 using Pryde.Contracts.RequestModels;
 using Pryde.Services.Service.Interface;
-using Pryde.Api.Authorization;
 
 namespace Pryde.Api.Controllers.V1;
 
 [ApiController]
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/trips")]
-public class TripsController(ITripService tripService) : ControllerBase
+public class DriverTripsController(ITripService tripService) : ControllerBase
 {
     [HttpPost]
     [Authorize(Roles = "Driver", Policy = AuthorizationPolicies.EmailVerified)]
@@ -21,22 +21,6 @@ public class TripsController(ITripService tripService) : ControllerBase
     {
         var result = await tripService.CreateAsync(GetUserId(), request, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, result);
-    }
-
-    [HttpGet]
-    [AllowAnonymous]
-    public async Task<IActionResult> Search(
-        [FromQuery] SearchTripsRequestDto request,
-        CancellationToken cancellationToken)
-    {
-        return Ok(await tripService.SearchAsync(request, cancellationToken));
-    }
-
-    [HttpGet("{tripId:guid}")]
-    [AllowAnonymous]
-    public async Task<IActionResult> GetById(Guid tripId, CancellationToken cancellationToken)
-    {
-        return Ok(await tripService.GetByIdAsync(tripId, cancellationToken));
     }
 
     [HttpGet("mine")]
@@ -76,18 +60,6 @@ public class TripsController(ITripService tripService) : ControllerBase
             cancellationToken));
     }
 
-    [HttpPost("{tripId:guid}/pickup-confirmation")]
-    [Authorize(Roles = "Passenger", Policy = AuthorizationPolicies.EmailVerified)]
-    public async Task<IActionResult> ConfirmPickup(
-        Guid tripId,
-        CancellationToken cancellationToken)
-    {
-        return Ok(await tripService.ConfirmPickupAsync(
-            tripId,
-            GetUserId(),
-            cancellationToken));
-    }
-
     [HttpPost("{tripId:guid}/end")]
     [Authorize(Roles = "Driver", Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> End(
@@ -95,18 +67,6 @@ public class TripsController(ITripService tripService) : ControllerBase
         CancellationToken cancellationToken)
     {
         return Ok(await tripService.EndAsync(
-            tripId,
-            GetUserId(),
-            cancellationToken));
-    }
-
-    [HttpPost("{tripId:guid}/dropoff-confirmation")]
-    [Authorize(Roles = "Passenger", Policy = AuthorizationPolicies.EmailVerified)]
-    public async Task<IActionResult> ConfirmDropoff(
-        Guid tripId,
-        CancellationToken cancellationToken)
-    {
-        return Ok(await tripService.ConfirmDropoffAsync(
             tripId,
             GetUserId(),
             cancellationToken));

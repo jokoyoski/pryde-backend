@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Pryde.Api.Authorization;
 using Pryde.Contracts.RequestModels;
-using Pryde.Domain.Constants;
 using Pryde.Domain.Enums;
 using Pryde.Services.Service.Interface;
 using Pryde.Services.Settings;
@@ -23,58 +22,9 @@ namespace Pryde.Api.Controllers.V1;
 public class VehicleController(
     IVehicleService vehicleService,
     IFileStorageService fileStorageService,
-    IAdminListingService adminListingService,
-    IAdminPortalService adminPortalService,
     IOptions<VehicleUploadSettings> vehicleUploadSettings,
     ILogger<VehicleController> logger) : ControllerBase
 {
-    [HttpGet("~/api/v{version:apiVersion}/admin/vehicles")]
-    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-    public async Task<IActionResult> GetAdminVehicles(
-        [FromQuery] AdminVehiclesRequestDto request,
-        CancellationToken cancellationToken)
-    {
-        var result = await adminListingService.GetVehiclesAsync(request, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpGet("~/api/v{version:apiVersion}/admin/vehicles/{id:guid}")]
-    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-    public async Task<IActionResult> GetAdminVehicle(Guid id, CancellationToken cancellationToken)
-    {
-        return Ok(await adminPortalService.GetVehicleAsync(id, cancellationToken));
-    }
-
-    [HttpPost("~/api/v{version:apiVersion}/admin/vehicles/{id:guid}/activate")]
-    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-    public async Task<IActionResult> ActivateVehicle(Guid id, CancellationToken cancellationToken)
-    {
-        var result = await vehicleService.ActivateAsync(id, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpPost("~/api/v{version:apiVersion}/admin/vehicles/{id:guid}/deactivate")]
-    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-    public async Task<IActionResult> DeactivateVehicle(Guid id, CancellationToken cancellationToken)
-    {
-        var result = await vehicleService.DeactivateAsync(id, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpPost("~/api/v{version:apiVersion}/admin/vehicles/{vehicleId:guid}/reject")]
-    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-    public async Task<IActionResult> RejectVehicle(
-        Guid vehicleId,
-        [FromBody] RejectionRequestDto request,
-        CancellationToken cancellationToken)
-    {
-        var result = await vehicleService.RejectAsync(
-            vehicleId,
-            request.Reason,
-            cancellationToken);
-        return Ok(result);
-    }
-
     [HttpPost]
     [Consumes("multipart/form-data")]
     [Authorize(Policy = AuthorizationPolicies.EmailVerified)]

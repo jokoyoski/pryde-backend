@@ -125,9 +125,7 @@ public sealed class CloudinaryFileStorageService : IFileStorageService
             FileCategory.VehicleVideo =>
                 _cloudinary.Api.UrlVideoUp.BuildUrl(fileKey),
 
-            FileCategory.VehicleDocument or
-            FileCategory.KycDriverLicense or
-            FileCategory.KycSecondaryId =>
+            FileCategory.VehicleDocument =>
                 _cloudinary.Api.UrlImgUp.ResourceType("raw").BuildUrl(fileKey),
 
             _ =>
@@ -147,9 +145,7 @@ public sealed class CloudinaryFileStorageService : IFileStorageService
             ResourceType = category switch
             {
                 FileCategory.VehicleVideo => ResourceType.Video,
-                FileCategory.VehicleDocument or
-                FileCategory.KycDriverLicense or
-                FileCategory.KycSecondaryId => ResourceType.Raw,
+                FileCategory.VehicleDocument => ResourceType.Raw,
                 _ => ResourceType.Image
             }
         };
@@ -178,15 +174,6 @@ public sealed class CloudinaryFileStorageService : IFileStorageService
 
             FileCategory.VehicleDocument =>
                 $"vehicles/{ownerId}/documents",
-
-            FileCategory.KycBiometric =>
-                $"kyc/{ownerId}/biometric",
-
-            FileCategory.KycDriverLicense =>
-                $"kyc/{ownerId}/driver-license",
-
-            FileCategory.KycSecondaryId =>
-                $"kyc/{ownerId}/secondary-id",
 
             _ => throw new ArgumentOutOfRangeException(nameof(category))
         };

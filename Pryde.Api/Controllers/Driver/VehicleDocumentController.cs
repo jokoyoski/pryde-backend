@@ -6,7 +6,6 @@ using Microsoft.Extensions.Options;
 using Pryde.Api.Authorization;
 using Pryde.Contracts.RequestModels;
 using Pryde.Domain.Common.Exceptions;
-using Pryde.Domain.Constants;
 using Pryde.Services.Service.Interface;
 using Pryde.Services.Settings;
 using Pryde.Services.Storage.Enums;
@@ -19,46 +18,8 @@ namespace Pryde.Api.Controllers.V1;
 public class VehicleDocumentController(
     IVehicleDocumentService vehicleDocumentService,
     IFileStorageService fileStorageService,
-    IAdminListingService adminListingService,
     IOptions<VehicleUploadSettings> vehicleUploadSettings) : ControllerBase
 {
-    [HttpGet("~/api/v{version:apiVersion}/admin/vehicle-documents")]
-    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-    public async Task<IActionResult> GetAdminVehicleDocuments(
-        [FromQuery] AdminVehicleDocumentsRequestDto request,
-        CancellationToken cancellationToken)
-    {
-        var result = await adminListingService.GetVehicleDocumentsAsync(request, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpGet("~/api/v{version:apiVersion}/admin/vehicle-documents/{documentId:guid}")]
-    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-    public async Task<IActionResult> GetAdminVehicleDocument(
-        Guid documentId, CancellationToken cancellationToken)
-    {
-        return Ok(await vehicleDocumentService.GetForAdminAsync(documentId, cancellationToken));
-    }
-
-    [HttpPatch("~/api/v{version:apiVersion}/admin/vehicle-documents/{documentId:guid}/approve")]
-    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-    public async Task<IActionResult> Approve(
-        Guid documentId, CancellationToken cancellationToken)
-    {
-        return Ok(await vehicleDocumentService.ApproveAsync(
-            documentId, GetUserId(), cancellationToken));
-    }
-
-    [HttpPatch("~/api/v{version:apiVersion}/admin/vehicle-documents/{documentId:guid}/reject")]
-    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-    public async Task<IActionResult> Reject(
-        Guid documentId, [FromBody] RejectionRequestDto request,
-        CancellationToken cancellationToken)
-    {
-        return Ok(await vehicleDocumentService.RejectAsync(
-            documentId, GetUserId(), request.Reason, cancellationToken));
-    }
-
     [HttpPost]
     [Consumes("multipart/form-data")]
     [Authorize(Policy = AuthorizationPolicies.EmailVerified)]

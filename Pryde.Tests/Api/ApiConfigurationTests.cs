@@ -54,14 +54,14 @@ public class ApiConfigurationTests
     [InlineData(typeof(AdminEscrowsController), nameof(AdminEscrowsController.GetAll))]
     [InlineData(typeof(AdminNotificationsController), nameof(AdminNotificationsController.GetAll))]
     [InlineData(typeof(AdminNotificationsController), nameof(AdminNotificationsController.Get))]
-    [InlineData(typeof(KycController), nameof(KycController.GetAdminKyc))]
-    [InlineData(typeof(KycController), nameof(KycController.ApproveKyc))]
-    [InlineData(typeof(KycController), nameof(KycController.RejectKyc))]
-    [InlineData(typeof(VehicleController), nameof(VehicleController.GetAdminVehicles))]
-    [InlineData(typeof(VehicleController), nameof(VehicleController.ActivateVehicle))]
-    [InlineData(typeof(VehicleController), nameof(VehicleController.DeactivateVehicle))]
-    [InlineData(typeof(VehicleController), nameof(VehicleController.RejectVehicle))]
-    [InlineData(typeof(VehicleDocumentController), nameof(VehicleDocumentController.GetAdminVehicleDocuments))]
+    [InlineData(typeof(AdminKycController), nameof(AdminKycController.GetAdminKyc))]
+    [InlineData(typeof(AdminKycController), nameof(AdminKycController.ApproveKyc))]
+    [InlineData(typeof(AdminKycController), nameof(AdminKycController.RejectKyc))]
+    [InlineData(typeof(AdminVehiclesController), nameof(AdminVehiclesController.GetAdminVehicles))]
+    [InlineData(typeof(AdminVehiclesController), nameof(AdminVehiclesController.ActivateVehicle))]
+    [InlineData(typeof(AdminVehiclesController), nameof(AdminVehiclesController.DeactivateVehicle))]
+    [InlineData(typeof(AdminVehiclesController), nameof(AdminVehiclesController.RejectVehicle))]
+    [InlineData(typeof(AdminVehicleDocumentsController), nameof(AdminVehicleDocumentsController.GetAdminVehicleDocuments))]
     public void AdminResourceActionsRequireAdminOrSuperAdmin(Type controllerType, string actionName)
     {
         var action = controllerType.GetMethod(actionName);
@@ -219,8 +219,6 @@ public class ApiConfigurationTests
     }
 
     [Theory]
-    [InlineData(nameof(KycController.UploadDocuments))]
-    [InlineData(nameof(KycController.Submit))]
     [InlineData(nameof(KycController.GetMine))]
     [InlineData(nameof(KycController.GetDojahConfig))]
     [InlineData(nameof(KycController.RetryDojahVerification))]
@@ -266,6 +264,7 @@ public class ApiConfigurationTests
         bool expected)
     {
         var result = await AuthorizeKycActionAsync(
+            typeof(KycController),
             nameof(KycController.GetDojahConfig),
             isEmailVerified,
             "Passenger");
@@ -282,7 +281,8 @@ public class ApiConfigurationTests
         bool expected)
     {
         var result = await AuthorizeKycActionAsync(
-            nameof(KycController.GetAdminKyc),
+            typeof(AdminKycController),
+            nameof(AdminKycController.GetAdminKyc),
             isEmailVerified: false,
             role);
 
@@ -298,7 +298,8 @@ public class ApiConfigurationTests
         bool expected)
     {
         var result = await AuthorizeKycActionAsync(
-            nameof(KycController.GetAdminKycById),
+            typeof(AdminKycController),
+            nameof(AdminKycController.GetAdminKycById),
             isEmailVerified: false,
             role);
 
@@ -390,7 +391,7 @@ public class ApiConfigurationTests
             .AddJsonOptions(options =>
                 options.JsonSerializerOptions.Converters.Add(
                     new JsonStringEnumConverter()))
-            .AddApplicationPart(typeof(TripsController).Assembly);
+            .AddApplicationPart(typeof(DriverTripsController).Assembly);
         services.AddEndpointsApiExplorer();
         services.AddApiVersioningConfiguration();
         services.AddSwaggerConfiguration();
@@ -404,9 +405,14 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/trips/{tripId}", paths);
         Assert.Contains("/api/v1/trips/mine", paths);
         Assert.Contains("/api/v1/trips/{tripId}/cancel", paths);
+        Assert.Contains("/api/v1/trips/{tripId}/start", paths);
+        Assert.Contains("/api/v1/trips/{tripId}/pickup-confirmation", paths);
+        Assert.Contains("/api/v1/trips/{tripId}/end", paths);
+        Assert.Contains("/api/v1/trips/{tripId}/dropoff-confirmation", paths);
         Assert.Contains("/api/v1/trip-bookings", paths);
         Assert.Contains("/api/v1/trip-bookings/mine", paths);
         Assert.Contains("/api/v1/trips/{tripId}/booking-requests", paths);
+        Assert.Contains("/api/v1/driver/booking-requests", paths);
         Assert.Contains("/api/v1/trips/{tripId}/passengers", paths);
         Assert.Contains("/api/v1/trip-bookings/{bookingId}/approve", paths);
         Assert.Contains("/api/v1/trip-bookings/{bookingId}/decline", paths);
@@ -450,16 +456,17 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/notifications/read-all", paths);
         Assert.Contains("/api/v1/admin/notifications", paths);
         Assert.Contains("/api/v1/admin/notifications/{notificationId}", paths);
-        Assert.Contains("/api/v1/kyc/documents", paths);
+        Assert.DoesNotContain("/api/v1/kyc/documents", paths);
         Assert.Contains("/api/v1/kyc/mine", paths);
         Assert.Contains("/api/v1/kyc/dojah/config", paths);
+        Assert.Contains("/api/v1/kyc/dojah/retry", paths);
         Assert.Contains("/api/v1/kyc/dojah/webhook", paths);
         Assert.Contains("/api/v1/auth/email-verification/resend", paths);
         Assert.Contains("/api/v1/auth/email-verification/verify", paths);
         Assert.Contains("/api/v1/auth/verification-status", paths);
         Assert.Contains("/api/v1/auth/onboarding-status", paths);
         Assert.Contains("/api/v1/auth/roles/select", paths);
-        Assert.Contains("/api/v1/kyc/submit", paths);
+        Assert.DoesNotContain("/api/v1/kyc/submit", paths);
         Assert.Contains("/api/v1/admin/kyc/{userId}/approve", paths);
         Assert.Contains("/api/v1/admin/kyc/{userId}/reject", paths);
         Assert.Contains("/api/v1/admin/vehicles/{id}/activate", paths);
@@ -481,9 +488,6 @@ public class ApiConfigurationTests
         Assert.Equal(
             OperationType.Post,
             document.Paths["/api/v1/auth/roles/select"].Operations.Single().Key);
-        Assert.Equal(
-            OperationType.Post,
-            document.Paths["/api/v1/kyc/submit"].Operations.Single().Key);
         Assert.DoesNotContain(
             "roles",
             document.Components.Schemas[nameof(RegisterRequestDto)].Properties.Keys);
@@ -537,6 +541,7 @@ public class ApiConfigurationTests
     }
 
     private static async Task<AuthorizationResult> AuthorizeKycActionAsync(
+        Type controllerType,
         string actionName,
         bool isEmailVerified,
         string role)
@@ -552,10 +557,10 @@ public class ApiConfigurationTests
 
         using var provider = CreateAuthenticationServices(unitOfWork);
         using var scope = provider.CreateScope();
-        var authorizeData = typeof(KycController)
+        var authorizeData = controllerType
             .GetCustomAttributes(typeof(AuthorizeAttribute), true)
             .Cast<IAuthorizeData>()
-            .Concat(typeof(KycController)
+            .Concat(controllerType
                 .GetMethod(actionName)!
                 .GetCustomAttributes(typeof(AuthorizeAttribute), true)
                 .Cast<IAuthorizeData>());
