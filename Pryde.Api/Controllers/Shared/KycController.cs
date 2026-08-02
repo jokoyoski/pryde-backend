@@ -2,8 +2,6 @@ using System.Security.Claims;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Pryde.Contracts.RequestModels;
-using Pryde.Domain.Constants;
 using Pryde.Services.Service.Interface;
 using Pryde.Api.Authorization;
 
@@ -15,74 +13,8 @@ namespace Pryde.Api.Controllers.V1;
 [Authorize]
 public class KycController(
     IKycService kycService,
-    IDojahKycService dojahKycService,
-    IAdminListingService adminListingService,
-    IAdminPortalService adminPortalService) : ControllerBase
+    IDojahKycService dojahKycService) : ControllerBase
 {
-    [HttpGet("~/api/v{version:apiVersion}/admin/kyc")]
-    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-    public async Task<IActionResult> GetAdminKyc(
-        [FromQuery] AdminKycRequestDto request,
-        CancellationToken cancellationToken)
-    {
-        var result = await adminListingService.GetKycAsync(request, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpGet("~/api/v{version:apiVersion}/admin/kyc/{kycId:guid}")]
-    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-    public async Task<IActionResult> GetAdminKycById(
-        Guid kycId, CancellationToken cancellationToken)
-    {
-        return Ok(await adminPortalService.GetKycAsync(kycId, cancellationToken));
-    }
-
-    [HttpPost("~/api/v{version:apiVersion}/admin/kyc/{userId:guid}/approve")]
-    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-    public async Task<IActionResult> ApproveKyc(Guid userId, CancellationToken cancellationToken)
-    {
-        var result = await kycService.ApproveAsync(userId, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpPost("~/api/v{version:apiVersion}/admin/kyc/{userId:guid}/reject")]
-    [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-    public async Task<IActionResult> RejectKyc(
-        Guid userId,
-        [FromBody] string reason,
-        CancellationToken cancellationToken)
-    {
-        var result = await kycService.RejectAsync(userId, reason, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpPost("documents")]
-    [Consumes("multipart/form-data")]
-    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
-    public async Task<IActionResult> UploadDocuments(
-        [FromForm] KycDocumentUploadRequest request,
-        CancellationToken cancellationToken)
-    {
-        var result = await kycService.UploadDocumentsAsync(
-            GetUserId(),
-            request,
-            cancellationToken);
-
-        return Ok(result);
-    }
-
-    [HttpPost("submit")]
-    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
-    public async Task<IActionResult> Submit(
-        CancellationToken cancellationToken)
-    {
-        var result = await kycService.SubmitAsync(
-            GetUserId(),
-            cancellationToken);
-
-        return Ok(result);
-    }
-
     [HttpGet("mine")]
     [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> GetMine(

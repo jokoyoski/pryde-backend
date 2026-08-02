@@ -315,7 +315,7 @@ public class DojahKycService(
         if (!_settings.Enabled)
         {
             throw new ServiceUnavailableException(
-                "Dojah verification is currently unavailable. Manual KYC remains available.");
+                "Dojah verification is currently unavailable.");
         }
     }
 

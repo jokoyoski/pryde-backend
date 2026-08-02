@@ -5,8 +5,5 @@ public enum FileCategory
     ProfilePhoto,
     VehiclePhoto,
     VehicleVideo,
-    VehicleDocument,
-    KycBiometric,
-    KycDriverLicense,
-    KycSecondaryId
+    VehicleDocument
 }
