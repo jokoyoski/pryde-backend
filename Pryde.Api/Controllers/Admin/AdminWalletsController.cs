@@ -4,8 +4,6 @@ using Microsoft.AspNetCore.Mvc;
 using Pryde.Contracts.RequestModels;
 using Pryde.Domain.Constants;
 using Pryde.Services.Service.Interface;
-using Pryde.Services.Settings;
-using Microsoft.Extensions.Options;
 
 namespace Pryde.Api.Controllers.V1;
 
@@ -16,14 +14,14 @@ namespace Pryde.Api.Controllers.V1;
 public class AdminWalletsController : ControllerBase
 {
     private readonly IAdminWalletService _adminWalletService;
-    private readonly WalletTestingSettings _walletTestingSettings;
+    private readonly IHostEnvironment _environment;
 
     public AdminWalletsController(
         IAdminWalletService adminWalletService,
-        IOptions<WalletTestingSettings> walletTestingSettings)
+        IHostEnvironment environment)
     {
         _adminWalletService = adminWalletService;
-        _walletTestingSettings = walletTestingSettings.Value;
+        _environment = environment;
     }
 
     [HttpPost("fund")]
@@ -31,7 +29,7 @@ public class AdminWalletsController : ControllerBase
         [FromBody] AdminFundWalletRequest request,
         CancellationToken cancellationToken)
     {
-        if (!_walletTestingSettings.EnableManualFunding)
+        if (!IsDevelopmentOrTestingEnvironment())
         {
             return NotFound();
         }
@@ -41,5 +39,12 @@ public class AdminWalletsController : ControllerBase
             cancellationToken);
 
         return Ok(response);
+    }
+
+    private bool IsDevelopmentOrTestingEnvironment()
+    {
+        return _environment.IsDevelopment() ||
+            _environment.IsEnvironment("Testing") ||
+            _environment.IsEnvironment("QA");
     }
 }

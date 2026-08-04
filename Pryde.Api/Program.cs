@@ -66,10 +66,6 @@ builder.Services.AddAuthenticationConfiguration(
 builder.Services.Configure<PricingSettings>(
     builder.Configuration.GetSection("PricingSettings"));
 
-builder.Services.Configure<WalletTestingSettings>(
-    builder.Configuration.GetSection(
-        WalletTestingSettings.SectionName));
-
 builder.Services
     .AddOptions<BookingPaymentSettings>()
     .Bind(builder.Configuration.GetSection(

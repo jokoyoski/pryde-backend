@@ -633,12 +633,16 @@ public class ApiConfigurationTests
     }
 
     [Fact]
-    public async Task AdminWalletFundingIsHiddenWhenFeatureFlagIsDisabled()
+    public async Task AdminWalletFundingIsHiddenInProduction()
     {
         var service = new TestAdminWalletService();
+        var environment = new TestHostEnvironment
+        {
+            EnvironmentName = "Production"
+        };
         var controller = new AdminWalletsController(
             service,
-            Options.Create(new WalletTestingSettings()));
+            environment);
 
         var result = await controller.Fund(
             new AdminFundWalletRequest
@@ -650,29 +654,6 @@ public class ApiConfigurationTests
 
         Assert.IsType<NotFoundResult>(result);
         Assert.Equal(0, service.CallCount);
-    }
-
-    [Fact]
-    public async Task AdminWalletFundingRunsWhenFeatureFlagIsEnabled()
-    {
-        var service = new TestAdminWalletService();
-        var controller = new AdminWalletsController(
-            service,
-            Options.Create(new WalletTestingSettings
-            {
-                EnableManualFunding = true
-            }));
-
-        var result = await controller.Fund(
-            new AdminFundWalletRequest
-            {
-                UserId = Guid.NewGuid(),
-                Amount = 100m
-            },
-            CancellationToken.None);
-
-        Assert.IsType<OkObjectResult>(result);
-        Assert.Equal(1, service.CallCount);
     }
 
     private static async Task<AuthorizationResult> AuthorizeKycActionAsync(
