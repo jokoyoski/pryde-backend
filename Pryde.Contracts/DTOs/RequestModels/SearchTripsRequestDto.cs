@@ -2,6 +2,8 @@ namespace Pryde.Contracts.RequestModels;
 
 public class SearchTripsRequestDto
 {
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
     public double? OriginLatitude { get; set; }
     public double? OriginLongitude { get; set; }
     public double? DestinationLatitude { get; set; }

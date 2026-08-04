@@ -885,7 +885,9 @@ internal sealed class TestTripRepository : ITripRepository
 
     public Task<IReadOnlyList<Trip>> SearchAsync(
         DateTime utcNow, DateTime? departureDate, bool? requiresLuggage,
-        int requiredSeats, CancellationToken cancellationToken = default)
+        int requiredSeats, double? pickupLatitude,
+        double? pickupLongitude, double? pickupRadiusKm,
+        CancellationToken cancellationToken = default)
     {
         var query = Items.Where(t => t.Status == TripStatus.Scheduled
             && t.DepartureTime > utcNow
@@ -895,7 +897,38 @@ internal sealed class TestTripRepository : ITripRepository
             query = query.Where(t => t.DepartureTime.Date == departureDate.Value.Date);
         if (requiresLuggage == true)
             query = query.Where(t => t.AllowLuggage);
+        if (pickupLatitude.HasValue &&
+            pickupLongitude.HasValue &&
+            pickupRadiusKm.HasValue)
+        {
+            query = query.Where(trip => PickupDistanceKm(
+                    pickupLatitude.Value,
+                    pickupLongitude.Value,
+                    trip.OriginLatitude,
+                    trip.OriginLongitude) <= pickupRadiusKm.Value);
+        }
         return Task.FromResult<IReadOnlyList<Trip>>(query.OrderBy(t => t.DepartureTime).ToList());
+    }
+
+    private static double PickupDistanceKm(
+        double latitude,
+        double longitude,
+        double pickupLatitude,
+        double pickupLongitude)
+    {
+        const double earthRadiusKm = 6371d;
+        const double degreesToRadians = Math.PI / 180d;
+        var latitudeDelta =
+            (pickupLatitude - latitude) * degreesToRadians;
+        var longitudeDelta =
+            (pickupLongitude - longitude) * degreesToRadians;
+        var haversine =
+            Math.Pow(Math.Sin(latitudeDelta / 2d), 2d) +
+            Math.Cos(latitude * degreesToRadians) *
+            Math.Cos(pickupLatitude * degreesToRadians) *
+            Math.Pow(Math.Sin(longitudeDelta / 2d), 2d);
+        return 2d * earthRadiusKm *
+            Math.Asin(Math.Sqrt(haversine));
     }
 
     public Task<IReadOnlyList<Trip>> GetActiveAsync(CancellationToken cancellationToken = default) =>

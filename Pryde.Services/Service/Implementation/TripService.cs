@@ -114,6 +114,20 @@ public class TripService(
             ValidateCoordinates(request.OriginLatitude!.Value, request.OriginLongitude!.Value,
                 request.DestinationLatitude!.Value, request.DestinationLongitude!.Value);
 
+        var hasNearbyCoordinates =
+            request.Latitude.HasValue && request.Longitude.HasValue;
+        if (hasNearbyCoordinates)
+        {
+            ValidatePickupCoordinates(
+                request.Latitude!.Value,
+                request.Longitude!.Value);
+            if (_pricingSettings.PickupRadiusKm <= 0)
+            {
+                throw new ValidationException(
+                    "Pickup radius must be greater than zero.");
+            }
+        }
+
         var requiredSeats = request.RequiredSeats ?? 1;
         if (requiredSeats <= 0)
             throw new ValidationException("Required seats must be greater than zero.");
@@ -124,7 +138,13 @@ public class TripService(
 
         var trips = await unitOfWork.Trips.SearchAsync(
             DateTime.UtcNow, request.DepartureDate, request.RequiresLuggage,
-            requiredSeats, cancellationToken);
+            requiredSeats,
+            hasNearbyCoordinates ? request.Latitude : null,
+            hasNearbyCoordinates ? request.Longitude : null,
+            hasNearbyCoordinates
+                ? _pricingSettings.PickupRadiusKm
+                : null,
+            cancellationToken);
 
         if (hasAllCoordinates)
         {
@@ -690,6 +710,16 @@ public class TripService(
         if (originLatitude is < -90 or > 90 || destinationLatitude is < -90 or > 90)
             throw new ValidationException("Latitude must be between -90 and 90.");
         if (originLongitude is < -180 or > 180 || destinationLongitude is < -180 or > 180)
+            throw new ValidationException("Longitude must be between -180 and 180.");
+    }
+
+    private static void ValidatePickupCoordinates(
+        double latitude,
+        double longitude)
+    {
+        if (latitude is < -90 or > 90)
+            throw new ValidationException("Latitude must be between -90 and 90.");
+        if (longitude is < -180 or > 180)
             throw new ValidationException("Longitude must be between -180 and 180.");
     }
 
