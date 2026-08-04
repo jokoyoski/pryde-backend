@@ -31,7 +31,8 @@ public class UnitOfWork(
     IEscrowRepository escrows,
     ILedgerRepository ledger,
     IDriverBankAccountRepository driverBankAccounts,
-    INotificationRepository notifications)
+    INotificationRepository notifications,
+    ITripRatingRepository tripRatings)
     : IUnitOfWork
 {
     public IUserRepository Users { get; } = users;
@@ -59,6 +60,7 @@ public class UnitOfWork(
     public IDriverBankAccountRepository DriverBankAccounts { get; } = driverBankAccounts;
     public INotificationRepository Notifications { get; } =
         notifications;
+    public ITripRatingRepository TripRatings { get; } = tripRatings;
 
 
     public async Task<int> SaveChangesAsync(

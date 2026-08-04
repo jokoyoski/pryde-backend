@@ -45,6 +45,7 @@ public class ApiConfigurationTests
 
     [Theory]
     [InlineData(typeof(AdminUsersController), nameof(AdminUsersController.GetAll))]
+    [InlineData(typeof(AdminUsersController), nameof(AdminUsersController.GetRatings))]
     [InlineData(typeof(AdminDriversController), nameof(AdminDriversController.GetAll))]
     [InlineData(typeof(AdminDriversController), nameof(AdminDriversController.Reject))]
     [InlineData(typeof(AdminTripsController), nameof(AdminTripsController.GetAll))]
@@ -102,6 +103,51 @@ public class ApiConfigurationTests
             "Test"));
 
         var result = await authorizationService.AuthorizeAsync(principal, null, policy!);
+
+        Assert.Equal(expected, result.Succeeded);
+    }
+
+    [Theory]
+    [InlineData("Admin", true)]
+    [InlineData("SuperAdmin", true)]
+    [InlineData("Driver", false)]
+    [InlineData("Passenger", false)]
+    public async Task AdminUserRatingsAllowOnlyAdminRoles(
+        string role,
+        bool expected)
+    {
+        var authorizeData = typeof(AdminUsersController)
+            .GetCustomAttributes(
+                typeof(AuthorizeAttribute),
+                true)
+            .Cast<IAuthorizeData>()
+            .Concat(typeof(AdminUsersController)
+                .GetMethod(nameof(
+                    AdminUsersController.GetRatings))!
+                .GetCustomAttributes(
+                    typeof(AuthorizeAttribute),
+                    true)
+                .Cast<IAuthorizeData>());
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAuthorizationCore();
+        using var provider = services.BuildServiceProvider();
+        var policy = await AuthorizationPolicy.CombineAsync(
+            provider.GetRequiredService<
+                IAuthorizationPolicyProvider>(),
+            authorizeData);
+        var principal = new ClaimsPrincipal(
+            new ClaimsIdentity(
+                [
+                    new Claim(
+                        ClaimTypes.NameIdentifier,
+                        Guid.NewGuid().ToString()),
+                    new Claim(ClaimTypes.Role, role)
+                ],
+                "Test"));
+        var result = await provider
+            .GetRequiredService<IAuthorizationService>()
+            .AuthorizeAsync(principal, null, policy!);
 
         Assert.Equal(expected, result.Succeeded);
     }
@@ -473,6 +519,9 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/wallet/mine/transactions", paths);
         Assert.Contains("/api/v1/virtual-accounts/mine", paths);
         Assert.Contains("/api/v1/admin/users", paths);
+        Assert.Contains(
+            "/api/v1/admin/users/{userId}/ratings",
+            paths);
         Assert.DoesNotContain("/api/v1/admin/users/paged", paths);
         Assert.Contains("/api/v1/admin/kyc", paths);
         Assert.Contains("/api/v1/admin/vehicles", paths);
@@ -528,6 +577,11 @@ public class ApiConfigurationTests
 
         Assert.Equal(OperationType.Get, document.Paths["/api/v1/admin/users"].Operations.Single().Key);
         Assert.Single(document.Paths["/api/v1/admin/users"].Operations);
+        Assert.Equal(
+            OperationType.Get,
+            document.Paths[
+                    "/api/v1/admin/users/{userId}/ratings"]
+                .Operations.Single().Key);
         Assert.Equal(OperationType.Get, document.Paths["/api/v1/admin/kyc"].Operations.Single().Key);
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/kyc/{userId}/approve"].Operations.Single().Key);
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/kyc/{userId}/reject"].Operations.Single().Key);

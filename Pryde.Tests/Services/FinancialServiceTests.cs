@@ -140,6 +140,7 @@ public class FinancialServiceTests
         Assert.Equal(2400m, summary.TotalDriverPayouts);
         Assert.Equal(EscrowStatus.Released, context.UnitOfWork.EscrowRepository.Items.Single().Status);
         Assert.Equal(TripStatus.Completed, context.Trip.Status);
+        Assert.NotNull(context.Trip.CompletedAt);
         Assert.Equal(BookingStatus.Completed, context.Booking.Status);
         Assert.Equal(2, context.UnitOfWork.LedgerRepository.Transactions.Count);
         Assert.All(context.UnitOfWork.LedgerRepository.Transactions, AssertBalanced);

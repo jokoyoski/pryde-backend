@@ -36,6 +36,7 @@ namespace Pryde.Domain.Entities
         public DateTime? DriverEndedAt { get; set; }
         public DateTime? ConfirmationDeadline { get; set; }
         public DateTime? AutoCompletedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
         public bool WasAutoCompleted { get; set; }
 
         public Guid? RecurringTripId { get; set; }
