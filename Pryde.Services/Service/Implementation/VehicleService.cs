@@ -640,6 +640,48 @@ public class VehicleService(
         return response;
     }
 
+    public async Task<VehicleResponseDto> RejectDriverApplicationAsync(
+        Guid driverId,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureDriverAsync(driverId, cancellationToken);
+        var vehicles = await unitOfWork.Vehicles.GetByUserIdAsync(
+            driverId,
+            cancellationToken);
+        var pendingVehicle = vehicles
+            .Where(vehicle =>
+                vehicle.OnboardingStatus ==
+                VehicleOnboardingStatus.PendingReview)
+            .OrderByDescending(vehicle => vehicle.CreatedAt)
+            .FirstOrDefault();
+
+        if (pendingVehicle is null)
+        {
+            throw new ConflictException(
+                "Only a driver application pending review can be rejected.");
+        }
+
+        return await RejectAsync(
+            pendingVehicle.Id,
+            reason,
+            cancellationToken);
+    }
+
+    private async Task EnsureDriverAsync(
+        Guid driverId,
+        CancellationToken cancellationToken)
+    {
+        var roles = await unitOfWork.UserRoles.GetByUserIdAsync(
+            driverId,
+            cancellationToken);
+        if (!roles.Any(role =>
+                role.Role.Name == RoleType.Driver.ToString()))
+        {
+            throw new NotFoundException("Driver", driverId);
+        }
+    }
+
     private Task NotifyVehicleReviewAsync(
         Vehicle vehicle,
         bool approved,

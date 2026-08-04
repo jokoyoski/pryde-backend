@@ -25,6 +25,7 @@ public class NotificationServiceTests
         Assert.Equal(21, (int)NotificationType.VehicleApproved);
         Assert.Equal(22, (int)NotificationType.VehicleRejected);
         Assert.Equal(23, (int)NotificationType.SystemAnnouncement);
+        Assert.Equal(24, (int)NotificationType.DriverDeactivated);
     }
 
     [Fact]

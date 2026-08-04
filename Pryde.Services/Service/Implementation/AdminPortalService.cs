@@ -233,18 +233,18 @@ public class AdminPortalService(
                 UserId = driverId,
                 Type = approved
                     ? NotificationType.DriverApproved
-                    : NotificationType.DriverRejected,
+                    : NotificationType.DriverDeactivated,
                 Title = approved
                     ? "Driver onboarding approved"
-                    : "Driver onboarding rejected",
+                    : "Driver account deactivated",
                 Message = approved
                     ? "Your driver onboarding was approved."
-                    : "Your driver onboarding was rejected.",
+                    : "Your driver account was deactivated.",
                 RelatedEntityId = driverId,
                 RelatedEntityType = "Driver",
                 DeduplicationKey = approved
                     ? $"driver-approved:{driverId}"
-                    : $"driver-rejected:{driverId}"
+                    : $"driver-deactivated:{driverId}"
             },
             cancellationToken);
     }

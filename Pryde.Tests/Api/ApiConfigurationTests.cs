@@ -46,6 +46,7 @@ public class ApiConfigurationTests
     [Theory]
     [InlineData(typeof(AdminUsersController), nameof(AdminUsersController.GetAll))]
     [InlineData(typeof(AdminDriversController), nameof(AdminDriversController.GetAll))]
+    [InlineData(typeof(AdminDriversController), nameof(AdminDriversController.Reject))]
     [InlineData(typeof(AdminTripsController), nameof(AdminTripsController.GetAll))]
     [InlineData(typeof(AdminBookingsController), nameof(AdminBookingsController.GetAll))]
     [InlineData(typeof(AdminFinanceController), nameof(AdminFinanceController.GetWalletTransactions))]
@@ -101,6 +102,55 @@ public class ApiConfigurationTests
             "Test"));
 
         var result = await authorizationService.AuthorizeAsync(principal, null, policy!);
+
+        Assert.Equal(expected, result.Succeeded);
+    }
+
+    [Theory]
+    [InlineData("Admin", true)]
+    [InlineData("SuperAdmin", true)]
+    [InlineData("Driver", false)]
+    [InlineData("Passenger", false)]
+    public async Task DriverApplicationReviewAllowsOnlyAdminRoles(
+        string role,
+        bool expected)
+    {
+        var action = typeof(AdminDriversController)
+            .GetMethod(nameof(AdminDriversController.Reject));
+        Assert.NotNull(action);
+        var authorizeData = typeof(AdminDriversController)
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<IAuthorizeData>()
+            .Concat(action.GetCustomAttributes(
+                    typeof(AuthorizeAttribute),
+                    true)
+                .Cast<IAuthorizeData>());
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAuthorizationCore();
+
+        using var provider = services.BuildServiceProvider();
+        var policyProvider = provider
+            .GetRequiredService<IAuthorizationPolicyProvider>();
+        var policy = await AuthorizationPolicy.CombineAsync(
+            policyProvider,
+            authorizeData);
+        var authorizationService = provider
+            .GetRequiredService<IAuthorizationService>();
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim(
+                    ClaimTypes.NameIdentifier,
+                    Guid.NewGuid().ToString()),
+                new Claim(ClaimTypes.Role, role)
+            ],
+            "Test"));
+
+        var result = await authorizationService.AuthorizeAsync(
+            principal,
+            null,
+            policy!);
 
         Assert.Equal(expected, result.Succeeded);
     }
@@ -439,6 +489,9 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/admin/dashboard", paths);
         Assert.Contains("/api/v1/admin/drivers", paths);
         Assert.Contains("/api/v1/admin/drivers/{driverId}", paths);
+        Assert.Contains(
+            "/api/v1/admin/drivers/{driverId}/reject",
+            paths);
         Assert.Contains("/api/v1/admin/trips", paths);
         Assert.Contains("/api/v1/admin/trips/{tripId}", paths);
         Assert.Contains("/api/v1/admin/bookings", paths);
@@ -479,6 +532,10 @@ public class ApiConfigurationTests
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/kyc/{userId}/approve"].Operations.Single().Key);
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/kyc/{userId}/reject"].Operations.Single().Key);
         Assert.Equal(OperationType.Get, document.Paths["/api/v1/admin/vehicles"].Operations.Single().Key);
+        Assert.Equal(
+            OperationType.Patch,
+            document.Paths["/api/v1/admin/drivers/{driverId}/reject"]
+                .Operations.Single().Key);
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/vehicles/{id}/activate"].Operations.Single().Key);
         Assert.Equal(OperationType.Post, document.Paths["/api/v1/admin/vehicles/{id}/deactivate"].Operations.Single().Key);
         Assert.Equal(
@@ -514,6 +571,11 @@ public class ApiConfigurationTests
             document.Components.Schemas["DriverVerificationStatus"].Enum,
             value => value is OpenApiString openApiString &&
                      openApiString.Value == "ResubmissionRequired");
+        Assert.Contains(
+            "driverApplicationStatus",
+            document.Components.Schemas[
+                    nameof(OnboardingStatusResponseDto)]
+                .Properties.Keys);
     }
 
     [Fact]

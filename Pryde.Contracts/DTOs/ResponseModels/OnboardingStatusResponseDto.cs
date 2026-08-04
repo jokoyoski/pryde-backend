@@ -9,6 +9,7 @@ public sealed class OnboardingStatusResponseDto
     public IReadOnlyList<OnboardingStage> CompletedStages { get; set; } = [];
     public OnboardingStage? NextStage { get; set; }
     public KycStatus? KycStatus { get; set; }
+    public VehicleOnboardingStatus? DriverApplicationStatus { get; set; }
     public DriverVerificationStatus? DriverVerificationStatus { get; set; }
     public string? RejectionReason { get; set; }
     public bool OnboardingCompleted { get; set; }
