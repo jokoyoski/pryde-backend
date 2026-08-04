@@ -2,7 +2,6 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using Pryde.Api.Authorization;
 using Pryde.Api.Controllers.Driver.Authorization;
 using Pryde.Domain.Entities;
 using Pryde.Persistence.Repository.Interfaces;

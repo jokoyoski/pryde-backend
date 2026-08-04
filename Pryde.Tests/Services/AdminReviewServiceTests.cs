@@ -16,8 +16,12 @@ public class AdminReviewServiceTests
         var kyc = new KycVerification
         {
             UserId = Guid.NewGuid(),
-            Status = KycStatus.Submitted,
-            BiometricVerificationUrl = "https://files.test/selfie.jpg"
+            Status = KycStatus.Pending,
+            ProviderName = "Dojah",
+            ProviderReference = $"PRYDE-{Guid.NewGuid():N}",
+            DojahReference = $"DJ-{Guid.NewGuid():N}",
+            ProviderStatus = "Completed",
+            LastProviderUpdatedAt = DateTime.UtcNow
         };
         unitOfWork.KycVerificationRepository.Items.Add(kyc);
         var service = new KycService(unitOfWork);
