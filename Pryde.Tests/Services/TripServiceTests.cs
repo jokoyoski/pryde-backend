@@ -152,6 +152,160 @@ public class TripServiceTests
     }
 
     [Fact]
+    public async Task NearbySearchIncludesTripInsideConfiguredRadius()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var trip = SearchTripAtDistance(driverId, vehicle, 1d);
+        unitOfWork.TripRepository.Items.Add(trip);
+
+        var results = await TestData.CreateTripService(unitOfWork)
+            .SearchAsync(new SearchTripsRequestDto
+            {
+                Latitude = 0d,
+                Longitude = 0d
+            });
+
+        Assert.Equal(trip.Id, Assert.Single(results).TripId);
+    }
+
+    [Fact]
+    public async Task NearbySearchExcludesTripOutsideConfiguredRadius()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        unitOfWork.TripRepository.Items.Add(
+            SearchTripAtDistance(driverId, vehicle, 2.1d));
+
+        var results = await TestData.CreateTripService(unitOfWork)
+            .SearchAsync(new SearchTripsRequestDto
+            {
+                Latitude = 0d,
+                Longitude = 0d,
+                PickupRadiusKm = 100d
+            });
+
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task NearbySearchIncludesTripExactlyOnConfiguredBoundary()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var trip = SearchTripAtDistance(
+            driverId,
+            vehicle,
+            TestData.Pricing.PickupRadiusKm);
+        unitOfWork.TripRepository.Items.Add(trip);
+
+        var results = await TestData.CreateTripService(unitOfWork)
+            .SearchAsync(new SearchTripsRequestDto
+            {
+                Latitude = 0d,
+                Longitude = 0d
+            });
+
+        Assert.Equal(trip.Id, Assert.Single(results).TripId);
+    }
+
+    [Fact]
+    public async Task SearchWithoutNearbyCoordinatesPreservesExistingBehavior()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var distantTrip = SearchTripAtDistance(
+            driverId,
+            vehicle,
+            100d);
+        unitOfWork.TripRepository.Items.Add(distantTrip);
+
+        var results = await TestData.CreateTripService(unitOfWork)
+            .SearchAsync(new SearchTripsRequestDto());
+
+        Assert.Equal(distantTrip.Id, Assert.Single(results).TripId);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SearchWithOnlyOneNearbyCoordinatePreservesExistingBehavior(
+        bool supplyLatitude)
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var distantTrip = SearchTripAtDistance(
+            driverId,
+            vehicle,
+            100d);
+        unitOfWork.TripRepository.Items.Add(distantTrip);
+        var request = new SearchTripsRequestDto
+        {
+            Latitude = supplyLatitude ? 0d : null,
+            Longitude = supplyLatitude ? null : 0d
+        };
+
+        var results = await TestData.CreateTripService(unitOfWork)
+            .SearchAsync(request);
+
+        Assert.Equal(distantTrip.Id, Assert.Single(results).TripId);
+    }
+
+    [Fact]
+    public async Task NearbySearchPreservesExistingDepartureTimeOrdering()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var later = SearchTripAtDistance(driverId, vehicle, 1d);
+        later.DepartureTime = DateTime.UtcNow.AddHours(12);
+        var earlier = SearchTripAtDistance(driverId, vehicle, 1d);
+        earlier.DepartureTime = DateTime.UtcNow.AddHours(10);
+        unitOfWork.TripRepository.Items.AddRange([later, earlier]);
+
+        var results = await TestData.CreateTripService(unitOfWork)
+            .SearchAsync(new SearchTripsRequestDto
+            {
+                Latitude = 0d,
+                Longitude = 0d
+            });
+
+        Assert.Equal(
+            [earlier.Id, later.Id],
+            results.Select(result => result.TripId).ToList());
+    }
+
+    [Fact]
+    public async Task NearbySearchPreservesExistingSeatAndLuggageFilters()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var matching = SearchTripAtDistance(driverId, vehicle, 1d);
+        matching.AllowLuggage = true;
+        matching.AvailableSeats = 2;
+        var noLuggage = SearchTripAtDistance(driverId, vehicle, 1d);
+        noLuggage.AllowLuggage = false;
+        var insufficientSeats = SearchTripAtDistance(
+            driverId,
+            vehicle,
+            1d);
+        insufficientSeats.AllowLuggage = true;
+        insufficientSeats.AvailableSeats = 1;
+        unitOfWork.TripRepository.Items.AddRange(
+            [matching, noLuggage, insufficientSeats]);
+
+        var results = await TestData.CreateTripService(unitOfWork)
+            .SearchAsync(new SearchTripsRequestDto
+            {
+                Latitude = 0d,
+                Longitude = 0d,
+                RequiresLuggage = true,
+                RequiredSeats = 2
+            });
+
+        Assert.Equal(matching.Id, Assert.Single(results).TripId);
+    }
+
+    [Fact]
     public async Task DriverStartsTripSuccessfully()
     {
         var context = CreateLifecycleContext();
@@ -423,6 +577,19 @@ public class TripServiceTests
             context.Service.StartAsync(
                 context.Trip.Id,
                 context.DriverId));
+    }
+
+    private static Trip SearchTripAtDistance(
+        Guid driverId,
+        Vehicle vehicle,
+        double distanceKm)
+    {
+        const double earthRadiusKm = 6371d;
+        var trip = TestData.OpenTrip(driverId, vehicle);
+        trip.OriginLatitude =
+            distanceKm / earthRadiusKm * 180d / Math.PI;
+        trip.OriginLongitude = 0d;
+        return trip;
     }
 
     private static async Task MoveToInProgressAsync(

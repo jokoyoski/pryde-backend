@@ -29,6 +29,9 @@ public interface ITripRepository
         DateTime? departureDate,
         bool? requiresLuggage,
         int requiredSeats,
+        double? pickupLatitude,
+        double? pickupLongitude,
+        double? pickupRadiusKm,
         CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Trip>> GetActiveAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Guid>> GetExpiredConfirmationTripIdsAsync(

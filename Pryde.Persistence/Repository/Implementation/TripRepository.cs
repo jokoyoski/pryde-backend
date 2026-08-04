@@ -8,6 +8,9 @@ namespace Pryde.Persistence.Repository.Implementations;
 
 public class TripRepository(PrydeDbContext context) : ITripRepository
 {
+    private const double EarthRadiusKm = 6371d;
+    private const double DegreesToRadians = Math.PI / 180d;
+
     public async Task<Trip?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         return await context.Trips.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
@@ -83,6 +86,9 @@ public class TripRepository(PrydeDbContext context) : ITripRepository
         DateTime? departureDate,
         bool? requiresLuggage,
         int requiredSeats,
+        double? pickupLatitude,
+        double? pickupLongitude,
+        double? pickupRadiusKm,
         CancellationToken cancellationToken = default)
     {
         var query = context.Trips
@@ -105,6 +111,25 @@ public class TripRepository(PrydeDbContext context) : ITripRepository
 
         if (requiresLuggage == true)
             query = query.Where(t => t.AllowLuggage);
+
+        if (pickupLatitude.HasValue &&
+            pickupLongitude.HasValue &&
+            pickupRadiusKm.HasValue)
+        {
+            var latitude = pickupLatitude.Value;
+            var longitude = pickupLongitude.Value;
+            var radiusKm = pickupRadiusKm.Value;
+            query = query.Where(trip =>
+                2d * EarthRadiusKm * Math.Asin(Math.Sqrt(
+                    Math.Pow(Math.Sin(
+                        (trip.OriginLatitude - latitude) *
+                        DegreesToRadians / 2d), 2d) +
+                    Math.Cos(latitude * DegreesToRadians) *
+                    Math.Cos(trip.OriginLatitude * DegreesToRadians) *
+                    Math.Pow(Math.Sin(
+                        (trip.OriginLongitude - longitude) *
+                        DegreesToRadians / 2d), 2d))) <= radiusKm);
+        }
 
         return await query
             .OrderBy(t => t.DepartureTime)
