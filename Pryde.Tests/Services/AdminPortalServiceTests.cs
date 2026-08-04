@@ -284,7 +284,7 @@ public class AdminPortalServiceTests
     }
 
     [Fact]
-    public async Task DriverApprovalAndRejectionUseSeparateNotificationTypes()
+    public async Task DriverActivationAndDeactivationUseSeparateNotificationTypes()
     {
         var unitOfWork = new TestUnitOfWork();
         var driver = new User
@@ -322,7 +322,11 @@ public class AdminPortalServiceTests
             unitOfWork.NotificationRepository.Items,
             notification =>
                 notification.UserId == driver.Id &&
-                notification.Type == NotificationType.DriverRejected);
+                notification.Type == NotificationType.DriverDeactivated &&
+                notification.Title == "Driver account deactivated" &&
+                notification.Message == "Your driver account was deactivated." &&
+                notification.DeduplicationKey ==
+                    $"driver-deactivated:{driver.Id}");
     }
 
     private static AdminPortalService CreateService(

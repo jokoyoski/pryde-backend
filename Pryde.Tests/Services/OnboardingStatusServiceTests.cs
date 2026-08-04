@@ -126,6 +126,9 @@ public class OnboardingStatusServiceTests
         Assert.Equal(
             DriverVerificationStatus.Pending,
             result.DriverVerificationStatus);
+        Assert.Equal(
+            VehicleOnboardingStatus.PendingReview,
+            result.DriverApplicationStatus);
         Assert.True(result.OnboardingCompleted);
         Assert.False(result.DriverAccessGranted);
         Assert.Null(result.NextStage);
@@ -150,6 +153,9 @@ public class OnboardingStatusServiceTests
         Assert.Equal(
             DriverVerificationStatus.ResubmissionRequired,
             result.DriverVerificationStatus);
+        Assert.Equal(
+            VehicleOnboardingStatus.Rejected,
+            result.DriverApplicationStatus);
         Assert.Equal(
             vehicle.RejectionReason,
             result.RejectionReason);
@@ -176,6 +182,9 @@ public class OnboardingStatusServiceTests
         Assert.Equal(
             DriverVerificationStatus.Approved,
             result.DriverVerificationStatus);
+        Assert.Equal(
+            VehicleOnboardingStatus.Approved,
+            result.DriverApplicationStatus);
         Assert.True(result.OnboardingCompleted);
         Assert.Equal(isActive, result.DriverAccessGranted);
     }

@@ -11,7 +11,9 @@ namespace Pryde.Api.Controllers.V1;
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/admin/drivers")]
 [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
-public class AdminDriversController(IAdminPortalService adminPortalService) : ControllerBase
+public class AdminDriversController(
+    IAdminPortalService adminPortalService,
+    IVehicleService vehicleService) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetAll(
@@ -29,4 +31,14 @@ public class AdminDriversController(IAdminPortalService adminPortalService) : Co
     [HttpPatch("{driverId:guid}/deactivate")]
     public async Task<IActionResult> Deactivate(Guid driverId, CancellationToken cancellationToken) =>
         Ok(await adminPortalService.DeactivateDriverAsync(driverId, cancellationToken));
+
+    [HttpPatch("{driverId:guid}/reject")]
+    public async Task<IActionResult> Reject(
+        Guid driverId,
+        [FromBody] RejectionRequestDto request,
+        CancellationToken cancellationToken) =>
+        Ok(await vehicleService.RejectDriverApplicationAsync(
+            driverId,
+            request.Reason,
+            cancellationToken));
 }

@@ -134,7 +134,8 @@ public sealed class OnboardingStatusService(IUnitOfWork unitOfWork)
                 verificationStatus,
                 null,
                 false,
-                false);
+                false,
+                vehicle.OnboardingStatus);
         }
 
         completedStages.Add(OnboardingStage.DriverDocuments);
@@ -149,7 +150,8 @@ public sealed class OnboardingStatusService(IUnitOfWork unitOfWork)
                 verificationStatus,
                 null,
                 false,
-                false);
+                false,
+                vehicle.OnboardingStatus);
         }
 
         completedStages.Add(OnboardingStage.VehicleInformation);
@@ -168,7 +170,8 @@ public sealed class OnboardingStatusService(IUnitOfWork unitOfWork)
                     ? vehicle.RejectionReason
                     : null,
                 true,
-                false);
+                false,
+                vehicle.OnboardingStatus);
         }
 
         completedStages.Add(OnboardingStage.SubmittedForReview);
@@ -180,7 +183,8 @@ public sealed class OnboardingStatusService(IUnitOfWork unitOfWork)
             verificationStatus,
             null,
             true,
-            vehicle.IsActive);
+            vehicle.IsActive,
+            vehicle.OnboardingStatus);
     }
 
     private static OnboardingStatusResponseDto CompletedStaffResponse(
@@ -203,7 +207,8 @@ public sealed class OnboardingStatusService(IUnitOfWork unitOfWork)
         DriverVerificationStatus? driverVerificationStatus,
         string? rejectionReason,
         bool onboardingCompleted,
-        bool driverAccessGranted) =>
+        bool driverAccessGranted,
+        VehicleOnboardingStatus? driverApplicationStatus = null) =>
         new()
         {
             Roles = roles,
@@ -215,6 +220,7 @@ public sealed class OnboardingStatusService(IUnitOfWork unitOfWork)
                 ? null
                 : currentStage,
             KycStatus = kycStatus,
+            DriverApplicationStatus = driverApplicationStatus,
             DriverVerificationStatus = driverVerificationStatus,
             RejectionReason = rejectionReason,
             OnboardingCompleted = onboardingCompleted,

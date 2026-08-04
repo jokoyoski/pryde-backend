@@ -377,6 +377,149 @@ public class VehicleOnboardingServiceTests
     }
 
     [Fact]
+    public async Task DriverApplicationRejectionTargetsOnlyNewestPendingVehicle()
+    {
+        var (unitOfWork, ownerId, olderVehicle) = Context();
+        Complete(unitOfWork, olderVehicle);
+        olderVehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+        olderVehicle.CreatedAt = DateTime.UtcNow.AddMinutes(-1);
+        var newerVehicle = new Vehicle
+        {
+            UserId = ownerId,
+            LicensePlateNumber = "PRYDE-NEWEST",
+            OnboardingStatus = VehicleOnboardingStatus.PendingReview,
+            CreatedAt = DateTime.UtcNow
+        };
+        unitOfWork.VehicleRepository.Items.Add(newerVehicle);
+        Complete(unitOfWork, newerVehicle);
+        unitOfWork.KycVerificationRepository.Items.Add(new KycVerification
+        {
+            UserId = ownerId,
+            Status = KycStatus.Approved
+        });
+        var service = Service(unitOfWork);
+
+        var result = await service.RejectDriverApplicationAsync(
+            ownerId,
+            "Newest application rejected");
+
+        Assert.Equal(newerVehicle.Id, result.Id);
+        Assert.Equal(
+            VehicleOnboardingStatus.Rejected,
+            newerVehicle.OnboardingStatus);
+        Assert.Equal(
+            VehicleOnboardingStatus.PendingReview,
+            olderVehicle.OnboardingStatus);
+        Assert.Single(
+            unitOfWork.NotificationRepository.Items,
+            notification =>
+                notification.RelatedEntityId == newerVehicle.Id);
+    }
+
+    [Fact]
+    public async Task DriverApplicationRejectionRequiresReason()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            Service(unitOfWork)
+                .RejectDriverApplicationAsync(ownerId, " "));
+    }
+
+    [Fact]
+    public async Task DriverApplicationRejectionRequiresResubmissionAndBlocksTrips()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        Complete(unitOfWork, vehicle);
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+        vehicle.IsActive = true;
+        unitOfWork.KycVerificationRepository.Items.Add(new KycVerification
+        {
+            UserId = ownerId,
+            Status = KycStatus.Approved
+        });
+
+        var result = await Service(unitOfWork)
+            .RejectDriverApplicationAsync(
+                ownerId,
+                "  Registration image is unreadable.  ");
+        var onboarding = await new OnboardingStatusService(unitOfWork)
+            .GetAsync(ownerId);
+
+        Assert.Equal(VehicleOnboardingStatus.Rejected, result.OnboardingStatus);
+        Assert.False(result.IsActive);
+        Assert.Equal(
+            "Registration image is unreadable.",
+            result.RejectionReason);
+        Assert.Equal(
+            WorkflowNextAction.CompleteVehicleOnboarding,
+            result.NextAction);
+        Assert.Equal(WorkflowActor.Driver, result.RequiredActor);
+        Assert.Equal(
+            VehicleOnboardingStatus.Rejected,
+            onboarding.DriverApplicationStatus);
+        Assert.Equal(
+            DriverVerificationStatus.ResubmissionRequired,
+            onboarding.DriverVerificationStatus);
+        Assert.Single(
+            unitOfWork.NotificationRepository.Items,
+            notification =>
+                notification.Type == NotificationType.VehicleRejected);
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            TestData.CreateTripService(unitOfWork).CreateAsync(
+                ownerId,
+                TestData.ValidTripRequest(vehicle.Id)));
+
+        await Service(unitOfWork).UpdateDetailsAsync(
+            vehicle.Id,
+            ownerId,
+            DetailsRequest("Black"));
+        var resubmitted = await Service(unitOfWork)
+            .SubmitAsync(vehicle.Id, ownerId);
+
+        Assert.Equal(
+            VehicleOnboardingStatus.PendingReview,
+            resubmitted.OnboardingStatus);
+        Assert.Null(resubmitted.RejectionReason);
+    }
+
+    [Fact]
+    public async Task RepeatedDriverApplicationRejectionUsesExistingConflictBehavior()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+        var service = Service(unitOfWork);
+
+        var first = await service.RejectDriverApplicationAsync(
+            ownerId,
+            "Incorrect registration");
+        Assert.Equal(
+            VehicleOnboardingStatus.Rejected,
+            first.OnboardingStatus);
+        Assert.Single(
+            unitOfWork.NotificationRepository.Items,
+            notification =>
+                notification.Type == NotificationType.VehicleRejected);
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            service.RejectDriverApplicationAsync(
+                ownerId,
+                "  Incorrect registration  "));
+    }
+
+    [Fact]
+    public async Task DraftDriverApplicationCannotBeRejected()
+    {
+        var (unitOfWork, ownerId, _) = Context();
+        var service = Service(unitOfWork);
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            service.RejectDriverApplicationAsync(
+                ownerId,
+                "Not ready for review"));
+    }
+
+    [Fact]
     public async Task IncompleteVehicleCannotBeApproved()
     {
         var (unitOfWork, ownerId, vehicle) = Context();
@@ -459,6 +602,14 @@ public class VehicleOnboardingServiceTests
     {
         var unitOfWork = new TestUnitOfWork();
         var ownerId = Guid.NewGuid();
+        unitOfWork.UserRepository.Items.Add(new User
+        {
+            Id = ownerId,
+            Email = "driver@test.local",
+            PhoneNumber = "08000000000",
+            IsEmailVerified = true,
+            Status = UserStatus.Pending
+        });
         var vehicle = new Vehicle
         {
             UserId = ownerId,

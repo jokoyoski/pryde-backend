@@ -20,4 +20,5 @@ public interface IVehicleService
     Task<VehicleResponseDto> ActivateAsync(Guid vehicleId, CancellationToken cancellationToken = default);
     Task<VehicleResponseDto> DeactivateAsync(Guid vehicleId, CancellationToken cancellationToken = default);
     Task<VehicleResponseDto> RejectAsync(Guid vehicleId, string reason, CancellationToken cancellationToken = default);
+    Task<VehicleResponseDto> RejectDriverApplicationAsync(Guid driverId, string reason, CancellationToken cancellationToken = default);
 }

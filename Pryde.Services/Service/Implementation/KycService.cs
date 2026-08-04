@@ -13,6 +13,9 @@ public class KycService(
     IUnitOfWork unitOfWork,
     INotificationService notificationService) : IKycService
 {
+    private const string DojahProviderName = "Dojah";
+    private const string DojahCompletedStatus = "Completed";
+
     public KycService(IUnitOfWork unitOfWork)
         : this(
             unitOfWork,
@@ -43,18 +46,17 @@ public class KycService(
             ?? throw new NotFoundException(nameof(KycVerification), userId);
 
         if (kyc.Status is KycStatus.Approved or KycStatus.Rejected)
+        {
             throw new ConflictException("This KYC request has already been finalized.");
+        }
 
-        var requiresDriverOnboarding = await ValidateCompletenessAsync(
-            userId,
+        await ValidateCompletedDojahAttemptAsync(
             kyc,
             cancellationToken);
 
-        if (kyc.Status != KycStatus.Submitted)
-        {
-            throw new ConflictException(
-                "KYC must be submitted before approval.");
-        }
+        var requiresDriverOnboarding = await RequiresDriverOnboardingAsync(
+            userId,
+            cancellationToken);
 
         kyc.Status = KycStatus.Approved;
         kyc.VerifiedAt = DateTime.UtcNow;
@@ -83,43 +85,61 @@ public class KycService(
         return response;
     }
 
-    private async Task<bool> ValidateCompletenessAsync(
-        Guid userId,
+    private async Task ValidateCompletedDojahAttemptAsync(
         KycVerification kyc,
         CancellationToken cancellationToken)
     {
-        var missingDocuments = new List<string>();
-
-        if (string.IsNullOrWhiteSpace(kyc.BiometricVerificationUrl))
+        if (!string.Equals(
+                kyc.ProviderName,
+                DojahProviderName,
+                StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(
+                kyc.ProviderStatus,
+                DojahCompletedStatus,
+                StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(kyc.ProviderReference) ||
+            string.IsNullOrWhiteSpace(kyc.DojahReference) ||
+            !kyc.LastProviderUpdatedAt.HasValue)
         {
-            missingDocuments.Add("biometric verification");
+            throw new ConflictException(
+                "Only a successfully completed Dojah verification can be approved.");
         }
 
+        if (kyc.ProviderReference.Equals(
+                kyc.DojahReference,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ConflictException(
+                "The Dojah verification references do not match the active verification.");
+        }
+
+        var providerReferenceOwner = await unitOfWork.KycVerifications
+            .GetByProviderReferenceAsync(
+                kyc.ProviderReference,
+                cancellationToken);
+        var dojahReferenceOwner = await unitOfWork.KycVerifications
+            .GetByDojahReferenceAsync(
+                kyc.DojahReference,
+                cancellationToken);
+
+        if (providerReferenceOwner?.Id != kyc.Id ||
+            dojahReferenceOwner?.Id != kyc.Id)
+        {
+            throw new ConflictException(
+                "The Dojah verification references do not match the active verification.");
+        }
+    }
+
+    private async Task<bool> RequiresDriverOnboardingAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
         var userRoles = await unitOfWork.UserRoles.GetByUserIdAsync(
             userId,
             cancellationToken);
-        var requiresDriverDocuments = userRoles.Any(role =>
+
+        return userRoles.Any(role =>
             role.Role.Name == RoleNames.Driver);
-
-        if (requiresDriverDocuments &&
-            string.IsNullOrWhiteSpace(kyc.DriverLicenseUrl))
-        {
-            missingDocuments.Add("driver's license");
-        }
-
-        if (requiresDriverDocuments &&
-            string.IsNullOrWhiteSpace(kyc.SecondaryIdentificationUrl))
-        {
-            missingDocuments.Add("secondary identification");
-        }
-
-        if (missingDocuments.Count > 0)
-        {
-            throw new ValidationException(
-                $"Missing required KYC documents: {string.Join(", ", missingDocuments)}.");
-        }
-
-        return requiresDriverDocuments;
     }
 
     public async Task<KycVerificationResponseDto> RejectAsync(
@@ -130,7 +150,9 @@ public class KycService(
             ?? throw new NotFoundException(nameof(KycVerification), userId);
 
         if (kyc.Status is KycStatus.Approved or KycStatus.Rejected)
+        {
             throw new ConflictException("This KYC request has already been finalized.");
+        }
 
         kyc.Status = KycStatus.Rejected;
         kyc.VerifiedAt = null;
