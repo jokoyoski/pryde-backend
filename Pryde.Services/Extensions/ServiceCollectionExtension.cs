@@ -35,6 +35,7 @@ public static class ServiceCollectionExtension
         services.AddScoped<IAdminWalletService, AdminWalletService>();
         services.AddScoped<IAdminPortalService, AdminPortalService>();
         services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<ITripRatingService, TripRatingService>();
         services.AddHostedService<
             TripAutoCompletionBackgroundService>();
         services.AddHostedService<

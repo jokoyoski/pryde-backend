@@ -519,6 +519,7 @@ public class FinancialService(
 
             unitOfWork.Wallets.Update(driverWallet);
             trip.Status = TripStatus.Completed;
+            trip.CompletedAt = completionTime;
 
             if (isAutomaticCompletion)
             {

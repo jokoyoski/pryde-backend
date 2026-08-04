@@ -25,5 +25,6 @@ public enum NotificationType
     VehicleApproved = 21,
     VehicleRejected = 22,
     SystemAnnouncement = 23,
-    DriverDeactivated = 24
+    DriverDeactivated = 24,
+    RatingReceived = 25
 }

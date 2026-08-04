@@ -28,6 +28,7 @@ public interface IUnitOfWork
     ILedgerRepository Ledger { get; }
     IDriverBankAccountRepository DriverBankAccounts { get; }
     INotificationRepository Notifications { get; }
+    ITripRatingRepository TripRatings { get; }
 
     Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default);

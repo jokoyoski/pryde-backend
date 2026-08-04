@@ -13,7 +13,8 @@ namespace Pryde.Api.Controllers.V1;
 [Authorize(Roles = RoleNames.AdminOrSuperAdmin)]
 public class AdminUsersController(
     IAdminListingService adminListingService,
-    IAdminPortalService adminPortalService) : ControllerBase
+    IAdminPortalService adminPortalService,
+    ITripRatingService tripRatingService) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetAll(
@@ -23,6 +24,16 @@ public class AdminUsersController(
     [HttpGet("{userId:guid}")]
     public async Task<IActionResult> Get(Guid userId, CancellationToken cancellationToken) =>
         Ok(await adminPortalService.GetUserAsync(userId, cancellationToken));
+
+    [HttpGet("{userId:guid}/ratings")]
+    public async Task<IActionResult> GetRatings(
+        Guid userId,
+        [FromQuery] AdminUserRatingsRequestDto request,
+        CancellationToken cancellationToken) =>
+        Ok(await tripRatingService.AdminGetByUserIdAsync(
+            userId,
+            request,
+            cancellationToken));
 
     [HttpPatch("{userId:guid}/activate")]
     public async Task<IActionResult> Activate(Guid userId, CancellationToken cancellationToken) =>

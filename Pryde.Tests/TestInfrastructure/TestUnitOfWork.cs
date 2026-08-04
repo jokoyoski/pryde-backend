@@ -34,6 +34,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         DriverBankAccounts = new TestDriverBankAccountRepository();
         Notifications = new TestNotificationRepository(
             ((TestUserRepository)Users).Items);
+        TripRatings = new TestTripRatingRepository();
     }
 
     public TestTripRepository TripRepository => (TestTripRepository)Trips;
@@ -61,6 +62,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         (TestDriverBankAccountRepository)DriverBankAccounts;
     public TestNotificationRepository NotificationRepository =>
         (TestNotificationRepository)Notifications;
+    public TestTripRatingRepository TripRatingRepository =>
+        (TestTripRatingRepository)TripRatings;
     public int SaveChangesCount { get; private set; }
 
     public IUserRepository Users { get; }
@@ -87,6 +90,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public ILedgerRepository Ledger { get; }
     public IDriverBankAccountRepository DriverBankAccounts { get; }
     public INotificationRepository Notifications { get; }
+    public ITripRatingRepository TripRatings { get; }
 
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
@@ -117,6 +121,86 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         return ExecuteInTransactionAsync(
             action,
             cancellationToken);
+    }
+}
+
+internal sealed class TestTripRatingRepository
+    : ITripRatingRepository
+{
+    public List<TripRating> Items { get; } = [];
+
+    public Task<bool> ExistsAsync(
+        Guid bookingId,
+        Guid raterId,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Items.Any(rating =>
+            rating.BookingId == bookingId &&
+            rating.RaterId == raterId));
+    }
+
+    public Task<RatingSummaryData> GetSummaryAsync(
+        Guid ratedUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var ratings = Items
+            .Where(rating => rating.RatedUserId == ratedUserId)
+            .ToList();
+        return Task.FromResult(new RatingSummaryData(
+            ratings.Count == 0
+                ? 0
+                : ratings.Average(rating => rating.Value),
+            ratings.Count));
+    }
+
+    public Task<(
+        IReadOnlyList<AdminTripRatingData> Items,
+        int TotalCount)> GetAdminByRatedUserIdAsync(
+            Guid ratedUserId,
+            int pageNumber,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+    {
+        var ratings = Items
+            .Where(rating =>
+                rating.RatedUserId == ratedUserId)
+            .OrderByDescending(rating => rating.CreatedAt)
+            .ThenByDescending(rating => rating.Id)
+            .ToList();
+        var items = ratings
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .Select(rating => new AdminTripRatingData(
+                rating.Id,
+                rating.BookingId,
+                rating.Booking.TripId,
+                rating.Value,
+                rating.Comment,
+                rating.RaterId,
+                rating.Rater.Profile is null
+                    ? string.Empty
+                    : $"{rating.Rater.Profile.FirstName} {rating.Rater.Profile.LastName}".Trim(),
+                rating.RaterId ==
+                    rating.Booking.Trip.DriverId
+                        ? RoleType.Driver.ToString()
+                        : RoleType.Passenger.ToString(),
+                rating.RatedUserId,
+                rating.Booking.Trip.OriginAddress,
+                rating.Booking.Trip.DestinationAddress,
+                rating.CreatedAt))
+            .ToList();
+
+        return Task.FromResult<(
+            IReadOnlyList<AdminTripRatingData> Items,
+            int TotalCount)>((items, ratings.Count));
+    }
+
+    public Task<TripRating> CreateAsync(
+        TripRating rating,
+        CancellationToken cancellationToken = default)
+    {
+        Items.Add(rating);
+        return Task.FromResult(rating);
     }
 }
 
