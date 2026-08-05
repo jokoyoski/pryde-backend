@@ -3,6 +3,7 @@ using Pryde.Contracts.RequestModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Enums;
 using Pryde.Services.Service.Implementation;
+using Pryde.Services.Service.Interface;
 using Pryde.Services.Settings;
 using Pryde.Tests.TestInfrastructure;
 
@@ -33,6 +34,32 @@ public class TripBookingServiceTests
             unitOfWork.NotificationRepository.Items);
         Assert.Equal(driverId, notification.UserId);
         Assert.Equal(NotificationType.BookingRequested, notification.Type);
+    }
+
+    [Fact]
+    public async Task PassengerBookingSucceedsWhenRealtimeDeliveryFails()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        var notificationService = new NotificationService(
+            unitOfWork,
+            new ThrowingRealtimeSender(),
+            Microsoft.Extensions.Logging.Abstractions
+                .NullLogger<NotificationService>.Instance);
+        var service = new TripBookingService(
+            unitOfWork,
+            new FinancialService(unitOfWork),
+            Options.Create(new BookingPaymentSettings()),
+            notificationService);
+
+        var result = await service.CreateAsync(
+            Guid.NewGuid(),
+            trip.Id);
+
+        Assert.Equal(BookingStatus.Pending, result.Status);
+        Assert.Single(unitOfWork.TripBookingRepository.Items);
+        Assert.Single(unitOfWork.NotificationRepository.Items);
     }
 
     [Fact]
@@ -428,5 +455,18 @@ public class TripBookingServiceTests
         var booking = TestData.Booking(trip, passengerId ?? Guid.NewGuid(), status);
         unitOfWork.TripBookingRepository.Items.Add(booking);
         return booking;
+    }
+
+    private sealed class ThrowingRealtimeSender
+        : INotificationRealtimeSender
+    {
+        public Task SendAsync(
+            Guid userId,
+            Pryde.Contracts.ResponseModels.NotificationResponseDto notification,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException(
+                "SignalR delivery failed");
+        }
     }
 }

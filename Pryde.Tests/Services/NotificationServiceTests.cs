@@ -50,7 +50,11 @@ public class NotificationServiceTests
     public async Task NotificationCreationWorks()
     {
         var unitOfWork = Context(out var user);
-        var service = new NotificationService(unitOfWork);
+        var realtimeSender = new TestRealtimeSender();
+        var service = new NotificationService(
+            unitOfWork,
+            realtimeSender,
+            new TestLogger<NotificationService>());
 
         var result = await service.CreateAsync(
             Request(
@@ -61,6 +65,34 @@ public class NotificationServiceTests
             NotificationType.BookingApproved,
             result.Type);
         Assert.False(result.IsRead);
+        Assert.Single(
+            unitOfWork.NotificationRepository.Items);
+        Assert.Equal(1, unitOfWork.SaveChangesCount);
+        Assert.Equal(user.Id, realtimeSender.UserId);
+        Assert.Same(result, realtimeSender.Notification);
+    }
+
+    [Fact]
+    public async Task RealtimeFailureDoesNotUndoPersistedNotification()
+    {
+        var unitOfWork = Context(out var user);
+        var service = new NotificationService(
+            unitOfWork,
+            new TestRealtimeSender
+            {
+                Exception = new InvalidOperationException(
+                    "SignalR delivery failed")
+            },
+            new TestLogger<NotificationService>());
+
+        var result = await service.CreateAsync(
+            Request(
+                user.Id,
+                NotificationType.BookingApproved));
+
+        Assert.Equal(
+            NotificationType.BookingApproved,
+            result.Type);
         Assert.Single(
             unitOfWork.NotificationRepository.Items);
         Assert.Equal(1, unitOfWork.SaveChangesCount);
@@ -396,6 +428,30 @@ public class NotificationServiceTests
             Func<TState, Exception?, string> formatter)
         {
             Messages.Add(formatter(state, exception));
+        }
+    }
+
+    private sealed class TestRealtimeSender
+        : INotificationRealtimeSender
+    {
+        public Guid? UserId { get; private set; }
+        public NotificationResponseDto? Notification { get; private set; }
+        public Exception? Exception { get; init; }
+
+        public Task SendAsync(
+            Guid userId,
+            NotificationResponseDto notification,
+            CancellationToken cancellationToken = default)
+        {
+            UserId = userId;
+            Notification = notification;
+
+            if (Exception is not null)
+            {
+                throw Exception;
+            }
+
+            return Task.CompletedTask;
         }
     }
 }
