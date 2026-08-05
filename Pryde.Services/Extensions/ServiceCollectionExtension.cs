@@ -27,6 +27,7 @@ public static class ServiceCollectionExtension
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IWalletService, WalletService>();
         services.AddScoped<ITripService, TripService>();
+        services.AddScoped<IRecurringTripService, RecurringTripService>();
         services.AddScoped<ITripBookingService, TripBookingService>();
         services.AddScoped<IDriverDashboardService, DriverDashboardService>();
         services.AddScoped<IAdminListingService, AdminListingService>();
@@ -40,6 +41,8 @@ public static class ServiceCollectionExtension
             TripAutoCompletionBackgroundService>();
         services.AddHostedService<
             BookingPaymentExpiryBackgroundService>();
+        services.AddHostedService<
+            RecurringTripGenerationBackgroundService>();
 
         services.AddScoped<IFareCalculator, FareCalculator>();
         services.AddScoped<IRouteMatchingService, RouteMatchingService>();

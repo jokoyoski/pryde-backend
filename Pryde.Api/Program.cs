@@ -67,6 +67,16 @@ builder.Services.Configure<PricingSettings>(
     builder.Configuration.GetSection("PricingSettings"));
 
 builder.Services
+    .AddOptions<RecurringTripSettings>()
+    .Bind(builder.Configuration.GetSection(
+        RecurringTripSettings.SectionName))
+    .Validate(
+        settings => settings.GenerationHorizonDays > 0 &&
+                    settings.GenerationIntervalMinutes > 0,
+        "Recurring trip settings must be greater than zero.")
+    .ValidateOnStart();
+
+builder.Services
     .AddOptions<BookingPaymentSettings>()
     .Bind(builder.Configuration.GetSection(
         BookingPaymentSettings.SectionName))

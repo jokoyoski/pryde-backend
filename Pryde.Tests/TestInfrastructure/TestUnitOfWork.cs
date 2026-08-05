@@ -14,6 +14,9 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         Users = new TestUserRepository(((TestAdminListingRepository)AdminListings).Users);
         Roles = new TestRoleRepository();
         Trips = new TestTripRepository();
+        RecurringTrips = new TestRecurringTripRepository();
+        TripSubscriptions = new TestTripSubscriptionRepository(
+            (TestRecurringTripRepository)RecurringTrips);
         TripBookings = new TestTripBookingRepository((TestTripRepository)Trips);
         Vehicles = new TestVehicleRepository();
         UserRoles = new TestUserRoleRepository(((TestUserRepository)Users).Items, ((TestRoleRepository)Roles).Items);
@@ -64,6 +67,10 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         (TestNotificationRepository)Notifications;
     public TestTripRatingRepository TripRatingRepository =>
         (TestTripRatingRepository)TripRatings;
+    public TestRecurringTripRepository RecurringTripRepository =>
+        (TestRecurringTripRepository)RecurringTrips;
+    public TestTripSubscriptionRepository TripSubscriptionRepository =>
+        (TestTripSubscriptionRepository)TripSubscriptions;
     public int SaveChangesCount { get; private set; }
 
     public IUserRepository Users { get; }
@@ -78,8 +85,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public IVerificationCodeRepository VerificationCodes { get; }
     public ITripRepository Trips { get; }
     public ITripBookingRepository TripBookings { get; }
-    public IRecurringTripRepository RecurringTrips { get; } = null!;
-    public ITripSubscriptionRepository TripSubscriptions { get; } = null!;
+    public IRecurringTripRepository RecurringTrips { get; }
+    public ITripSubscriptionRepository TripSubscriptions { get; }
     public IWalletRepository Wallets { get; }
     public IWalletTransactionRepository WalletTransactions { get; }
     public IVirtualAccountRepository VirtualAccounts { get; }
@@ -121,6 +128,131 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         return ExecuteInTransactionAsync(
             action,
             cancellationToken);
+    }
+}
+
+internal sealed class TestRecurringTripRepository
+    : IRecurringTripRepository
+{
+    public List<RecurringTrip> Items { get; } = [];
+
+    public Task<RecurringTrip?> GetByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Items.FirstOrDefault(item => item.Id == id));
+
+    public Task<RecurringTrip?> GetByIdForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default) =>
+        GetByIdAsync(id, cancellationToken);
+
+    public Task<IReadOnlyList<RecurringTrip>> GetByDriverIdAsync(
+        Guid driverId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<RecurringTrip>>(Items
+            .Where(item => item.DriverId == driverId)
+            .OrderByDescending(item => item.CreatedAt)
+            .ToList());
+
+    public Task<IReadOnlyList<RecurringTrip>> GetActiveForGenerationAsync(
+        DateOnly from,
+        DateOnly to,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<RecurringTrip>>(Items
+            .Where(item => item.IsActive && item.CancelledAt == null &&
+                item.StartDate <= to &&
+                (!item.EndDate.HasValue || item.EndDate.Value >= from))
+            .ToList());
+
+    public Task<(IReadOnlyList<RecurringTrip> Items, int TotalCount)> GetAllAsync(
+        Guid? driverId,
+        bool? isActive,
+        bool? isCancelled,
+        int pageNumber,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = Items.AsEnumerable();
+        if (driverId.HasValue)
+            query = query.Where(item => item.DriverId == driverId.Value);
+        if (isActive.HasValue)
+            query = query.Where(item => item.IsActive == isActive.Value);
+        if (isCancelled.HasValue)
+            query = query.Where(item =>
+                item.CancelledAt.HasValue == isCancelled.Value);
+        var filtered = query.OrderByDescending(item => item.CreatedAt).ToList();
+        return Task.FromResult((
+            (IReadOnlyList<RecurringTrip>)filtered
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToList(),
+            filtered.Count));
+    }
+
+    public Task<RecurringTrip> CreateAsync(
+        RecurringTrip recurringTrip,
+        CancellationToken cancellationToken = default)
+    {
+        Items.Add(recurringTrip);
+        return Task.FromResult(recurringTrip);
+    }
+
+    public void Update(RecurringTrip recurringTrip)
+    {
+    }
+}
+
+internal sealed class TestTripSubscriptionRepository(
+    TestRecurringTripRepository recurringTrips)
+    : ITripSubscriptionRepository
+{
+    public List<TripSubscription> Items { get; } = [];
+
+    public Task<TripSubscription?> GetByRecurringTripAndPassengerAsync(
+        Guid recurringTripId,
+        Guid passengerId,
+        CancellationToken cancellationToken = default)
+    {
+        var subscription = Items.FirstOrDefault(item =>
+            item.RecurringTripId == recurringTripId &&
+            item.PassengerId == passengerId);
+        if (subscription is not null && subscription.RecurringTrip is null)
+            subscription.RecurringTrip = recurringTrips.Items
+                .Single(item => item.Id == recurringTripId);
+        return Task.FromResult(subscription);
+    }
+
+    public Task<IReadOnlyList<TripSubscription>> GetByPassengerIdAsync(
+        Guid passengerId,
+        CancellationToken cancellationToken = default)
+    {
+        var subscriptions = Items
+            .Where(item => item.PassengerId == passengerId)
+            .OrderByDescending(item => item.CreatedAt)
+            .ToList();
+        foreach (var subscription in subscriptions)
+            subscription.RecurringTrip = recurringTrips.Items
+                .Single(item => item.Id == subscription.RecurringTripId);
+        return Task.FromResult<IReadOnlyList<TripSubscription>>(subscriptions);
+    }
+
+    public Task<int> CountActiveAsync(
+        Guid recurringTripId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Items.Count(item =>
+            item.RecurringTripId == recurringTripId && item.IsActive));
+
+    public Task<TripSubscription> CreateAsync(
+        TripSubscription subscription,
+        CancellationToken cancellationToken = default)
+    {
+        Items.Add(subscription);
+        subscription.RecurringTrip.Subscriptions.Add(subscription);
+        return Task.FromResult(subscription);
+    }
+
+    public void Update(TripSubscription subscription)
+    {
     }
 }
 
@@ -1017,6 +1149,14 @@ internal sealed class TestTripRepository : ITripRepository
 
     public Task<IReadOnlyList<Trip>> GetActiveAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Trip>>(Items.Where(t => t.Status == TripStatus.Scheduled && t.AvailableSeats > 0).ToList());
+
+    public Task<bool> RecurringOccurrenceExistsAsync(
+        Guid recurringTripId,
+        DateTime departureTime,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Items.Any(trip =>
+            trip.RecurringTripId == recurringTripId &&
+            trip.DepartureTime == departureTime));
 
     public Task<IReadOnlyList<Guid>>
         GetExpiredConfirmationTripIdsAsync(

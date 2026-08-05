@@ -144,6 +144,17 @@ public class TripRepository(PrydeDbContext context) : ITripRepository
             .ToListAsync(cancellationToken);
     }
 
+    public Task<bool> RecurringOccurrenceExistsAsync(
+        Guid recurringTripId,
+        DateTime departureTime,
+        CancellationToken cancellationToken = default)
+    {
+        return context.Trips.AsNoTracking().AnyAsync(
+            trip => trip.RecurringTripId == recurringTripId &&
+                trip.DepartureTime == departureTime,
+            cancellationToken);
+    }
+
     public async Task<int> CountCompletedByDriverIdAsync(
         Guid driverId,
         CancellationToken cancellationToken = default)

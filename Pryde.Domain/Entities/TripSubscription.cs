@@ -10,6 +10,7 @@ namespace Pryde.Domain.Entities
         public Guid PassengerId { get; set; }
         public User Passenger { get; set; } = null!;
 
-        //public bool IsActive { get; set; } = true;
+        public bool IsActive { get; set; } = true;
+        public DateTime? CancelledAt { get; set; }
     }
 }
