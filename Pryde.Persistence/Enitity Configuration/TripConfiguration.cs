@@ -41,6 +41,8 @@ public class TripConfiguration : IEntityTypeConfiguration<Trip>
 
         builder.HasIndex(x => x.DepartureTime);
         builder.HasIndex(x => x.Status);
+        builder.HasIndex(x => new { x.RecurringTripId, x.DepartureTime })
+            .IsUnique();
         builder.HasIndex(x => new
         {
             x.Status,

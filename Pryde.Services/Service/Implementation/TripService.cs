@@ -57,17 +57,47 @@ public class TripService(
         CreateTripRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        ValidateTrip(request.OriginLatitude, request.OriginLongitude,
-            request.DestinationLatitude, request.DestinationLongitude,
-            request.OriginAddress, request.DestinationAddress,
-            request.DistanceKm, request.EstimatedDurationMinutes,
-            request.DepartureTime, request.AvailableSeats, request.BookingWindowHours);
+        return await CreateInternalAsync(
+            driverId,
+            request,
+            null,
+            cancellationToken);
+    }
 
-        await EnsureDriverAsync(driverId, cancellationToken);
-        await EnsureApprovedKycAsync(driverId, cancellationToken);
-        var vehicle = await GetOwnedActiveVehicleAsync(request.VehicleId, driverId, cancellationToken);
-        if (request.AvailableSeats > vehicle.Capacity)
-            throw new ValidationException("Available seats cannot exceed vehicle capacity.");
+    public async Task ValidateRecurringTemplateAsync(
+        Guid driverId,
+        CreateTripRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        await ValidateCreationAsync(
+            driverId,
+            request,
+            cancellationToken);
+    }
+
+    public async Task<TripDetailsResponseDto> CreateRecurringOccurrenceAsync(
+        Guid driverId,
+        Guid recurringTripId,
+        CreateTripRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        return await CreateInternalAsync(
+            driverId,
+            request,
+            recurringTripId,
+            cancellationToken);
+    }
+
+    private async Task<TripDetailsResponseDto> CreateInternalAsync(
+        Guid driverId,
+        CreateTripRequestDto request,
+        Guid? recurringTripId,
+        CancellationToken cancellationToken)
+    {
+        var vehicle = await ValidateCreationAsync(
+            driverId,
+            request,
+            cancellationToken);
 
         var fare = fareCalculator.Calculate(request.DistanceKm, request.EstimatedDurationMinutes, vehicle.Capacity);
         var trip = new Trip
@@ -87,6 +117,7 @@ public class TripService(
             AvailableSeats = request.AvailableSeats,
             AllowLuggage = request.AllowLuggage,
             BookingWindowHours = request.BookingWindowHours,
+            RecurringTripId = recurringTripId,
             TripFare = fare.TotalTripCost,
             SeatPrice = fare.SeatPrice,
             ServiceChargePercentage = fare.ServiceChargePercentage,
@@ -96,6 +127,30 @@ public class TripService(
         await unitOfWork.Trips.CreateAsync(trip, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return await GetByIdAsync(trip.Id, cancellationToken);
+    }
+
+    private async Task<Vehicle> ValidateCreationAsync(
+        Guid driverId,
+        CreateTripRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        ValidateTrip(request.OriginLatitude, request.OriginLongitude,
+            request.DestinationLatitude, request.DestinationLongitude,
+            request.OriginAddress, request.DestinationAddress,
+            request.DistanceKm, request.EstimatedDurationMinutes,
+            request.DepartureTime, request.AvailableSeats, request.BookingWindowHours);
+
+        await EnsureDriverAsync(driverId, cancellationToken);
+        await EnsureApprovedKycAsync(driverId, cancellationToken);
+        var vehicle = await GetOwnedActiveVehicleAsync(
+            request.VehicleId,
+            driverId,
+            cancellationToken);
+        if (request.AvailableSeats > vehicle.Capacity)
+            throw new ValidationException(
+                "Available seats cannot exceed vehicle capacity.");
+
+        return vehicle;
     }
 
     public async Task<IReadOnlyList<TripSummaryResponseDto>> SearchAsync(
