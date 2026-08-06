@@ -575,8 +575,9 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/admin/vehicles/{id}/deactivate", paths);
         Assert.Contains("/api/v1/admin/vehicles/{vehicleId}/reject", paths);
 
-        Assert.Equal(OperationType.Get, document.Paths["/api/v1/admin/users"].Operations.Single().Key);
-        Assert.Single(document.Paths["/api/v1/admin/users"].Operations);
+        Assert.Equal(
+            [OperationType.Get, OperationType.Delete],
+            document.Paths["/api/v1/admin/users"].Operations.Keys.Order().ToArray());
         Assert.Equal(
             OperationType.Get,
             document.Paths[

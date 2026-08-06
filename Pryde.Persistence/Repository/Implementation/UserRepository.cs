@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Pryde.Domain.Entities;
+using Pryde.Domain.Enums;
 using Pryde.Persistence.Context;
 using Pryde.Persistence.Repository.Interfaces;
 
@@ -80,6 +81,151 @@ public class UserRepository(PrydeDbContext context) : IUserRepository
                    (!string.IsNullOrWhiteSpace(phoneNumber) &&
                     user.PhoneNumber == phoneNumber),
             cancellationToken);
+    }
+
+    public async Task<bool> HasProtectedDeletionRecordsAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var walletIds = context.Wallets
+            .Where(wallet => wallet.UserId == userId)
+            .Select(wallet => wallet.Id);
+        var relatedBookingIds = context.TripBookings
+            .Where(booking =>
+                booking.PassengerId == userId ||
+                booking.Trip.DriverId == userId)
+            .Select(booking => booking.Id);
+
+        return await context.Wallets.AnyAsync(
+                   wallet => wallet.UserId == userId &&
+                             (wallet.Balance != 0 || wallet.EscrowBalance != 0),
+                   cancellationToken) ||
+               await context.WalletTransactions.AnyAsync(
+                   transaction => walletIds.Contains(transaction.WalletId),
+                   cancellationToken) ||
+               await context.LedgerAccounts.AnyAsync(
+                   account => account.WalletId.HasValue &&
+                              walletIds.Contains(account.WalletId.Value),
+                   cancellationToken) ||
+               await context.Escrows.AnyAsync(
+                   escrow => escrow.PassengerId == userId ||
+                             escrow.DriverId == userId ||
+                             relatedBookingIds.Contains(escrow.BookingId),
+                   cancellationToken) ||
+               await context.LedgerTransactions.AnyAsync(
+                   transaction => transaction.BookingId.HasValue &&
+                                  relatedBookingIds.Contains(transaction.BookingId.Value),
+                   cancellationToken) ||
+               await context.TripBookings.AnyAsync(
+                   booking =>
+                       (booking.PassengerId == userId ||
+                        booking.Trip.DriverId == userId) &&
+                       (booking.PaidAt.HasValue ||
+                        booking.Status == BookingStatus.Completed),
+                   cancellationToken) ||
+               await context.Trips.AnyAsync(
+                   trip => trip.DriverId == userId &&
+                           trip.Status == TripStatus.Completed,
+                   cancellationToken) ||
+               await context.TripRatings.AnyAsync(
+                   rating => rating.RaterId == userId ||
+                             rating.RatedUserId == userId ||
+                             relatedBookingIds.Contains(rating.BookingId),
+                   cancellationToken);
+    }
+
+    public async Task DeleteWithRelatedDataAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var vehicleIds = context.Vehicles
+            .Where(vehicle => vehicle.UserId == userId)
+            .Select(vehicle => vehicle.Id);
+        var recurringTripIds = context.RecurringTrips
+            .Where(trip => trip.DriverId == userId)
+            .Select(trip => trip.Id);
+        var tripIds = context.Trips
+            .Where(trip => trip.DriverId == userId)
+            .Select(trip => trip.Id);
+        var bookingIds = context.TripBookings
+            .Where(booking =>
+                booking.PassengerId == userId ||
+                tripIds.Contains(booking.TripId))
+            .Select(booking => booking.Id);
+        var walletIds = context.Wallets
+            .Where(wallet => wallet.UserId == userId)
+            .Select(wallet => wallet.Id);
+
+        await context.VehicleDocuments
+            .Where(document => document.ReviewedBy == userId)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(
+                    document => document.ReviewedBy,
+                    (Guid?)null),
+                cancellationToken);
+        await context.TripRatings
+            .Where(rating => rating.RaterId == userId ||
+                             rating.RatedUserId == userId ||
+                             bookingIds.Contains(rating.BookingId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.TripSubscriptions
+            .Where(subscription => subscription.PassengerId == userId ||
+                                   recurringTripIds.Contains(subscription.RecurringTripId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.TripBookings
+            .Where(booking => bookingIds.Contains(booking.Id))
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.Trips
+            .Where(trip => trip.DriverId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.RecurringTrips
+            .Where(trip => trip.DriverId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.VehicleAmenities
+            .Where(amenity => vehicleIds.Contains(amenity.VehicleId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.VehicleImages
+            .Where(image => vehicleIds.Contains(image.VehicleId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.VehicleDocuments
+            .Where(document => vehicleIds.Contains(document.VehicleId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.Vehicles
+            .Where(vehicle => vehicle.UserId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.VirtualAccounts
+            .Where(account => walletIds.Contains(account.WalletId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.Wallets
+            .Where(wallet => wallet.UserId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.Notifications
+            .Where(notification => notification.UserId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.DriverBankAccounts
+            .Where(account => account.UserId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.VerificationCodes
+            .Where(code => code.UserId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.PasswordResetCodes
+            .Where(code => code.UserId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.RefreshTokens
+            .Where(token => token.UserId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.KycVerifications
+            .Where(kyc => kyc.UserId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.Profiles
+            .Where(profile => profile.UserId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.UserRoles
+            .Where(userRole => userRole.UserId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await context.Users
+            .Where(user => user.Id == userId)
+            .ExecuteDeleteAsync(cancellationToken);
     }
 
     public async Task<User> CreateAsync(

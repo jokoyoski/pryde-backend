@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Pryde.Contracts.ResponseModels;
@@ -372,69 +373,56 @@ public class DojahKycService(
 
     private static DojahWebhookData ParseWebhook(ReadOnlySpan<byte> payload)
     {
-        using var document = JsonDocument.Parse(payload.ToArray());
-        var root = document.RootElement;
+        var parsed = JsonSerializer.Deserialize<DojahWebhookPayload>(payload)
+            ?? throw new JsonException("Missing webhook payload.");
+        var metadataReference = ValidateOptionalReference(
+            parsed.Metadata?.KycReference,
+            "metadata.kyc_reference");
+        var referenceId = ValidateRequiredReference(
+            parsed.ReferenceId ??
+            parsed.ReferenceIdSnakeCase ??
+            metadataReference,
+            "referenceId/reference_id/metadata.kyc_reference");
+        var status = ValidateRequiredReference(
+            parsed.VerificationStatus ??
+            parsed.VerificationStatusSnakeCase,
+            "verificationStatus/verification_status");
+        var providerReference = metadataReference;
 
-        var referenceId = GetRequiredString(root, "reference_id");
-        var status = GetRequiredString(root, "verification_status");
-        var message = root.TryGetProperty("message", out var messageElement) &&
-                      messageElement.ValueKind == JsonValueKind.String
-            ? messageElement.GetString()
-            : null;
-
-        var providerReference =
-            GetOptionalString(root, "vendor_reference") ??
-            GetOptionalString(root, "customer_reference") ??
-            GetOptionalString(root, "custom_reference") ??
-            GetMetadataReference(root);
+        if (providerReference is null && IsPrydeOwnedReference(referenceId))
+        {
+            providerReference = referenceId;
+        }
 
         return new DojahWebhookData(
             referenceId,
             providerReference,
             status.Trim(),
-            message);
+            parsed.Message);
     }
 
-    private static string GetRequiredString(JsonElement root, string propertyName)
+    private static string ValidateRequiredReference(
+        string? value,
+        string propertyName)
     {
-        if (!root.TryGetProperty(propertyName, out var element) ||
-            element.ValueKind != JsonValueKind.String ||
-            string.IsNullOrWhiteSpace(element.GetString()))
+        if (string.IsNullOrWhiteSpace(value))
         {
             throw new JsonException($"Missing {propertyName}.");
         }
 
-        return ValidateReferenceLength(element.GetString()!.Trim(), propertyName);
+        return ValidateReferenceLength(value.Trim(), propertyName);
     }
 
-    private static string? GetOptionalString(
-        JsonElement element,
+    private static string? ValidateOptionalReference(
+        string? value,
         string propertyName)
     {
-        if (!element.TryGetProperty(propertyName, out var property) ||
-            property.ValueKind != JsonValueKind.String ||
-            string.IsNullOrWhiteSpace(property.GetString()))
+        if (string.IsNullOrWhiteSpace(value))
         {
             return null;
         }
 
-        return ValidateReferenceLength(property.GetString()!.Trim(), propertyName);
-    }
-
-    private static string? GetMetadataReference(JsonElement root)
-    {
-        if (!root.TryGetProperty("metadata", out var metadata) ||
-            metadata.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
-
-        return GetOptionalString(metadata, "kyc_reference") ??
-               GetOptionalString(metadata, "vendor_reference") ??
-               GetOptionalString(metadata, "customer_reference") ??
-               GetOptionalString(metadata, "custom_reference") ??
-               GetOptionalString(metadata, "reference_id") ??
-               GetOptionalString(metadata, "user_id");
+        return ValidateReferenceLength(value.Trim(), propertyName);
     }
 
     private static string ValidateReferenceLength(
@@ -641,6 +629,33 @@ public class DojahKycService(
         string? ProviderReference,
         string Status,
         string? Message);
+
+    private sealed class DojahWebhookPayload
+    {
+        [JsonPropertyName("referenceId")]
+        public string? ReferenceId { get; init; }
+
+        [JsonPropertyName("reference_id")]
+        public string? ReferenceIdSnakeCase { get; init; }
+
+        [JsonPropertyName("verificationStatus")]
+        public string? VerificationStatus { get; init; }
+
+        [JsonPropertyName("verification_status")]
+        public string? VerificationStatusSnakeCase { get; init; }
+
+        [JsonPropertyName("message")]
+        public string? Message { get; init; }
+
+        [JsonPropertyName("metadata")]
+        public DojahWebhookMetadata? Metadata { get; init; }
+    }
+
+    private sealed class DojahWebhookMetadata
+    {
+        [JsonPropertyName("kyc_reference")]
+        public string? KycReference { get; init; }
+    }
 
     private sealed record WebhookCorrelation(
         KycVerification Kyc,

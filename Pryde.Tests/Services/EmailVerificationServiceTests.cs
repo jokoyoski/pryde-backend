@@ -421,8 +421,15 @@ public class EmailVerificationServiceTests
             CancellationToken cancellationToken = default)
         {
             if (throws) throw new HttpRequestException("Provider unavailable.");
-            var match = Regex.Match(htmlBody, @"\b\d{6}\b");
-            Messages.Add(new SentEmail(toEmail, subject, htmlBody, match.Value));
+            var match = Regex.Match(
+                htmlBody,
+                @">\s*(\d{6})\s*</span>");
+            Messages.Add(
+                new SentEmail(
+                    toEmail,
+                    subject,
+                    htmlBody,
+                    match.Groups[1].Value));
             return Task.CompletedTask;
         }
     }
