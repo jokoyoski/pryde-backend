@@ -2,6 +2,7 @@ using Mapster;
 using Microsoft.EntityFrameworkCore;
 using Pryde.Api.Extension;
 using Pryde.Api.Extensions;
+using Pryde.Api.Hubs;
 using Pryde.Api.Middleware;
 using Pryde.Persistence.Context;
 using Pryde.Persistence.Settings;
@@ -22,12 +23,17 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.Converters.Add(
             new JsonStringEnumConverter()));
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSignalR().AddJsonProtocol(options =>options.PayloadSerializerOptions.Converters
+.Add( new JsonStringEnumConverter()));
 
 builder.Services.AddApiVersioningConfiguration();
 builder.Services.AddSwaggerConfiguration();
 
 builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddServices();
+builder.Services.AddScoped<
+    Pryde.Services.Service.Interface.INotificationRealtimeSender,
+    SignalRNotificationRealtimeSender>();
 builder.Services.AddDojahIntegration(builder.Configuration);
 builder.Services.AddPaystackIntegration(builder.Configuration);
 
@@ -142,5 +148,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<NotificationHub>("/hubs/notifications");
 
 app.Run();

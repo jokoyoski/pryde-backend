@@ -1,4 +1,5 @@
 using Asp.Versioning;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pryde.Contracts.RequestModels;
@@ -14,7 +15,8 @@ namespace Pryde.Api.Controllers.V1;
 public class AdminUsersController(
     IAdminListingService adminListingService,
     IAdminPortalService adminPortalService,
-    ITripRatingService tripRatingService) : ControllerBase
+    ITripRatingService tripRatingService,
+    IAdminUserDeletionService adminUserDeletionService) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetAll(
@@ -42,4 +44,21 @@ public class AdminUsersController(
     [HttpPatch("{userId:guid}/deactivate")]
     public async Task<IActionResult> Deactivate(Guid userId, CancellationToken cancellationToken) =>
         Ok(await adminPortalService.DeactivateUserAsync(userId, cancellationToken));
+
+    [HttpDelete]
+    [Authorize(Roles = RoleNames.SuperAdmin)]
+    public async Task<IActionResult> Delete(
+        [FromQuery] Guid? userId,
+        [FromQuery] string? email,
+        CancellationToken cancellationToken)
+    {
+        var currentUserId = Guid.Parse(
+            User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        await adminUserDeletionService.DeleteAsync(
+            currentUserId,
+            userId,
+            email,
+            cancellationToken);
+        return NoContent();
+    }
 }

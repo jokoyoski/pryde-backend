@@ -15,6 +15,7 @@ namespace Pryde.Services.Service.Implementation;
 public class NotificationService : INotificationService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly INotificationRealtimeSender _realtimeSender;
     private readonly ILogger<NotificationService> _logger;
     private const int MaximumTitleLength = 150;
     private const int MaximumMessageLength = 1000;
@@ -26,10 +27,22 @@ public class NotificationService : INotificationService
 
     public NotificationService(
         IUnitOfWork unitOfWork,
+        INotificationRealtimeSender realtimeSender,
         ILogger<NotificationService> logger)
     {
         _unitOfWork = unitOfWork;
+        _realtimeSender = realtimeSender;
         _logger = logger;
+    }
+
+    public NotificationService(
+        IUnitOfWork unitOfWork,
+        ILogger<NotificationService> logger)
+        : this(
+            unitOfWork,
+            NullNotificationRealtimeSender.Instance,
+            logger)
+    {
     }
 
     public NotificationService(IUnitOfWork unitOfWork)
@@ -80,7 +93,12 @@ public class NotificationService : INotificationService
         {
             await _unitOfWork.SaveChangesAsync(
                 cancellationToken);
-            return Map(notification);
+            var response = Map(notification);
+            await TrySendRealtimeAsync(
+                notification.UserId,
+                response,
+                cancellationToken);
+            return response;
         }
         catch (DbUpdateException exception)
             when (deduplicationKey is not null &&
@@ -349,6 +367,28 @@ public class NotificationService : INotificationService
         return false;
     }
 
+    private async Task TrySendRealtimeAsync(
+        Guid userId,
+        NotificationResponseDto notification,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _realtimeSender.SendAsync(
+                userId,
+                notification,
+                cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Real-time notification delivery failed for notification {NotificationId} and user {UserId}.",
+                notification.Id,
+                userId);
+        }
+    }
+
     private static string? NormalizeOptional(
         string? value)
     {
@@ -414,5 +454,20 @@ public class NotificationService : INotificationService
             TotalPages = (int)Math.Ceiling(
                 totalCount / (double)request.PageSize)
         };
+    }
+
+    private sealed class NullNotificationRealtimeSender
+        : INotificationRealtimeSender
+    {
+        public static NullNotificationRealtimeSender Instance { get; } =
+            new();
+
+        public Task SendAsync(
+            Guid userId,
+            NotificationResponseDto notification,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
     }
 }
