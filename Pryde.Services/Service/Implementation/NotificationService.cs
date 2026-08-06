@@ -77,8 +77,7 @@ public class NotificationService : INotificationService
             Title = request.Title.Trim(),
             Message = request.Message.Trim(),
             RelatedEntityId = request.RelatedEntityId,
-            RelatedEntityType = NormalizeOptional(
-                request.RelatedEntityType),
+            RelatedEntityType = NormalizeOptional( request.RelatedEntityType),
             Action = NormalizeOptional(request.Action),
             DeduplicationKey = deduplicationKey,
             IsRead = false,
@@ -86,8 +85,7 @@ public class NotificationService : INotificationService
         };
 
         await _unitOfWork.Notifications.AddAsync(
-            notification,
-            cancellationToken);
+            notification, cancellationToken);
 
         try
         {

@@ -28,6 +28,14 @@ public interface IUserRepository
         string? phoneNumber,
         CancellationToken cancellationToken = default);
 
+    Task<bool> HasProtectedDeletionRecordsAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
+    Task DeleteWithRelatedDataAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
     Task<User> CreateAsync(
         User user,
         CancellationToken cancellationToken = default);

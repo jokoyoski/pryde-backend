@@ -35,6 +35,7 @@ public static class ServiceCollectionExtension
         services.AddScoped<IDriverWithdrawalService, DriverWithdrawalService>();
         services.AddScoped<IAdminWalletService, AdminWalletService>();
         services.AddScoped<IAdminPortalService, AdminPortalService>();
+        services.AddScoped<IAdminUserDeletionService, AdminUserDeletionService>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<ITripRatingService, TripRatingService>();
         services.AddHostedService<

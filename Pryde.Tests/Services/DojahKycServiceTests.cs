@@ -532,7 +532,7 @@ public class DojahKycServiceTests
     [InlineData("vendor_reference")]
     [InlineData("customer_reference")]
     [InlineData("custom_reference")]
-    public async Task ExistingTopLevelCorrelationFallbacksRemainSupported(
+    public async Task UnapprovedTopLevelCorrelationFieldsAreIgnored(
         string correlationField)
     {
         const string dojahReference = "DJ-FALLBACK001";
@@ -542,17 +542,18 @@ public class DojahKycServiceTests
         var payload = Encoding.UTF8.GetBytes(
             $"{{\"reference_id\":\"{dojahReference}\",\"verification_status\":\"Ongoing\",\"{correlationField}\":\"{config.ProviderReference}\"}}");
 
-        await service.ProcessWebhookAsync(payload, SignV1(payload), null);
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            service.ProcessWebhookAsync(payload, SignV1(payload), null));
 
         var kyc = Assert.Single(
             unitOfWork.KycVerificationRepository.Items);
         Assert.Equal(config.ProviderReference, kyc.ProviderReference);
-        Assert.Equal(dojahReference, kyc.DojahReference);
+        Assert.Null(kyc.DojahReference);
         Assert.Equal(KycStatus.Pending, kyc.Status);
     }
 
     [Fact]
-    public async Task ExistingMetadataReferenceIdFallbackRemainsSupported()
+    public async Task UnapprovedMetadataReferenceIdIsIgnored()
     {
         const string dojahReference = "DJ-FALLBACK002";
         var unitOfWork = new TestUnitOfWork();
@@ -561,13 +562,61 @@ public class DojahKycServiceTests
         var payload = Encoding.UTF8.GetBytes(
             $"{{\"reference_id\":\"{dojahReference}\",\"verification_status\":\"Ongoing\",\"metadata\":{{\"reference_id\":\"{config.ProviderReference}\"}}}}");
 
-        await service.ProcessWebhookAsync(payload, SignV1(payload), null);
+        await Assert.ThrowsAsync<NotFoundException>(() =>
+            service.ProcessWebhookAsync(payload, SignV1(payload), null));
 
         var kyc = Assert.Single(
             unitOfWork.KycVerificationRepository.Items);
         Assert.Equal(config.ProviderReference, kyc.ProviderReference);
-        Assert.Equal(dojahReference, kyc.DojahReference);
+        Assert.Null(kyc.DojahReference);
         Assert.Equal(KycStatus.Pending, kyc.Status);
+    }
+
+    [Fact]
+    public async Task ProductionEasyOnboardReferenceIsParsedExactlyAndCompletedIsApproved()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Encoding.UTF8.GetBytes($$"""
+        {
+          "referenceId": "{{config.ProviderReference}}",
+          "widgetId": "production-widget-id",
+          "verificationStatus": "Completed",
+          "message": "Successfully completed the verification."
+        }
+        """);
+
+        await service.ProcessWebhookAsync(
+            payload,
+            SignV1(payload),
+            null);
+
+        var kyc = Assert.Single(
+            unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(config.ProviderReference, kyc.ProviderReference);
+        Assert.DoesNotContain("widgetId", kyc.ProviderReference);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
+        Assert.Equal("Completed", kyc.ProviderStatus);
+    }
+
+    [Fact]
+    public async Task SandboxSnakeCasePayloadStillWorks()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Payload(config.ProviderReference, "Completed");
+
+        await service.ProcessWebhookAsync(
+            payload,
+            SignV1(payload),
+            null);
+
+        var kyc = Assert.Single(
+            unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(config.ProviderReference, kyc.ProviderReference);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
     }
 
     [Fact]
@@ -801,11 +850,18 @@ public class DojahKycServiceTests
     {
         var unitOfWork = new TestUnitOfWork();
         var service = Service(unitOfWork);
-        var payload = Payload("DJ-UNKNOWN001", "Completed");
+        var payload = Encoding.UTF8.GetBytes("""
+        {
+          "referenceId": "PRYDE-UNKNOWN001",
+          "widgetId": "production-widget-id",
+          "verificationStatus": "Completed"
+        }
+        """);
 
-        await Assert.ThrowsAsync<NotFoundException>(() =>
+        var exception = await Assert.ThrowsAsync<NotFoundException>(() =>
             service.ProcessWebhookAsync(payload, SignV1(payload), null));
 
+        Assert.Contains("PRYDE-UNKNOWN001", exception.Message);
         Assert.Empty(unitOfWork.KycVerificationRepository.Items);
         Assert.Equal(0, unitOfWork.SaveChangesCount);
     }

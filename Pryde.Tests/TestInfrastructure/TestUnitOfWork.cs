@@ -72,6 +72,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public TestTripSubscriptionRepository TripSubscriptionRepository =>
         (TestTripSubscriptionRepository)TripSubscriptions;
     public int SaveChangesCount { get; private set; }
+    public int TransactionCount { get; private set; }
 
     public IUserRepository Users { get; }
     public IRoleRepository Roles { get; }
@@ -110,10 +111,18 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         CancellationToken cancellationToken = default)
     {
         await _transactionLock.WaitAsync(cancellationToken);
+        TransactionCount++;
+        var users = UserRepository.Items.ToList();
 
         try
         {
             return await action(cancellationToken);
+        }
+        catch
+        {
+            UserRepository.Items.Clear();
+            UserRepository.Items.AddRange(users);
+            throw;
         }
         finally
         {
@@ -655,6 +664,9 @@ internal sealed class TestKycVerificationRepository : IKycVerificationRepository
 internal sealed class TestUserRepository(List<User> items) : IUserRepository
 {
     public List<User> Items { get; } = items;
+    public HashSet<Guid> ProtectedDeletionUserIds { get; } = [];
+    public List<Guid> DeletedWithRelatedDataUserIds { get; } = [];
+    public Exception? DeleteWithRelatedDataException { get; set; }
     public Task<bool> ExistsByIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Items.Any(user => user.Id == userId));
     public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(user => user.Id == id));
@@ -662,6 +674,17 @@ internal sealed class TestUserRepository(List<User> items) : IUserRepository
     public Task<User?> GetByPhoneNumberAsync(string phoneNumber, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(user => user.PhoneNumber == phoneNumber));
     public Task<IReadOnlyList<User>> GetAllAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<User>>(Items.ToList());
     public Task<bool> ExistsAsync(string email, string? phoneNumber, CancellationToken cancellationToken = default) => Task.FromResult(Items.Any(user => user.Email.Equals(email, StringComparison.OrdinalIgnoreCase) || (!string.IsNullOrWhiteSpace(phoneNumber) && user.PhoneNumber == phoneNumber)));
+    public Task<bool> HasProtectedDeletionRecordsAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(ProtectedDeletionUserIds.Contains(userId));
+    public Task DeleteWithRelatedDataAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        DeletedWithRelatedDataUserIds.Add(userId);
+        Items.RemoveAll(user => user.Id == userId);
+        if (DeleteWithRelatedDataException is not null)
+        {
+            throw DeleteWithRelatedDataException;
+        }
+        return Task.CompletedTask;
+    }
     public Task<User> CreateAsync(User user, CancellationToken cancellationToken = default) { Items.Add(user); return Task.FromResult(user); }
     public void Update(User user) { }
     public void Delete(User user) => Items.Remove(user);
