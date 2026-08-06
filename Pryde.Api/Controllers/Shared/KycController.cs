@@ -1,9 +1,10 @@
-using System.Security.Claims;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Pryde.Services.Service.Interface;
 using Pryde.Api.Controllers.Driver.Authorization;
+using Pryde.Services.Service.Interface;
+using System.Security.Claims;
+using System.Text.Json;
 
 namespace Pryde.Api.Controllers.V1;
 
@@ -101,6 +102,13 @@ public class KycController(
 
             await stream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
         }
+    }
+
+    [HttpPost("dojah/webhook/debug")]
+    [AllowAnonymous]
+    public IActionResult DebugWebhook([FromBody] JsonElement payload)
+    {
+        return Ok(payload);
     }
 
     private Guid GetUserId() =>

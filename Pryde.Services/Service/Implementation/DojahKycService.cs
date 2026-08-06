@@ -150,6 +150,22 @@ public class DojahKycService(
         try
         {
             webhook = ParseWebhook(payload.Span);
+
+            logger.LogInformation(
+            "RAW DOJAH PAYLOAD: {Payload}",
+            Encoding.UTF8.GetString(payload.Span));
+
+            logger.LogInformation(
+                "Parsed ReferenceId: {ReferenceId}",
+                webhook.ReferenceId);
+
+            logger.LogInformation(
+                "Parsed ProviderReference: {ProviderReference}",
+                webhook.ProviderReference);
+
+            logger.LogInformation(
+                "Parsed Status: {Status}",
+                webhook.Status);
         }
         catch (JsonException)
         {
@@ -387,7 +403,32 @@ public class DojahKycService(
             parsed.VerificationStatus ??
             parsed.VerificationStatusSnakeCase,
             "verificationStatus/verification_status");
-        var providerReference = metadataReference;
+        var providerReference =
+            ValidateOptionalReference(
+                parsed.VendorReference,
+                "vendor_reference") ??
+            ValidateOptionalReference(
+                parsed.CustomerReference,
+                "customer_reference") ??
+            ValidateOptionalReference(
+                parsed.CustomReference,
+                "custom_reference") ??
+            metadataReference ??
+            ValidateOptionalReference(
+                parsed.Metadata?.VendorReference,
+                "metadata.vendor_reference") ??
+            ValidateOptionalReference(
+                parsed.Metadata?.CustomerReference,
+                "metadata.customer_reference") ??
+            ValidateOptionalReference(
+                parsed.Metadata?.CustomReference,
+                "metadata.custom_reference") ??
+            ValidateOptionalReference(
+                parsed.Metadata?.ReferenceId,
+                "metadata.reference_id") ??
+            ValidateOptionalReference(
+                parsed.Metadata?.UserId,
+                "metadata.user_id");
 
         if (providerReference is null && IsPrydeOwnedReference(referenceId))
         {
@@ -647,6 +688,15 @@ public class DojahKycService(
         [JsonPropertyName("message")]
         public string? Message { get; init; }
 
+        [JsonPropertyName("vendor_reference")]
+        public string? VendorReference { get; init; }
+
+        [JsonPropertyName("customer_reference")]
+        public string? CustomerReference { get; init; }
+
+        [JsonPropertyName("custom_reference")]
+        public string? CustomReference { get; init; }
+
         [JsonPropertyName("metadata")]
         public DojahWebhookMetadata? Metadata { get; init; }
     }
@@ -655,6 +705,21 @@ public class DojahKycService(
     {
         [JsonPropertyName("kyc_reference")]
         public string? KycReference { get; init; }
+
+        [JsonPropertyName("vendor_reference")]
+        public string? VendorReference { get; init; }
+
+        [JsonPropertyName("customer_reference")]
+        public string? CustomerReference { get; init; }
+
+        [JsonPropertyName("custom_reference")]
+        public string? CustomReference { get; init; }
+
+        [JsonPropertyName("reference_id")]
+        public string? ReferenceId { get; init; }
+
+        [JsonPropertyName("user_id")]
+        public string? UserId { get; init; }
     }
 
     private sealed record WebhookCorrelation(
