@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Extensions.Logging;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
@@ -12,6 +10,9 @@ using Pryde.Services.Notifications.Interface;
 using Pryde.Services.Providers.Dojah;
 using Pryde.Services.Security.Interface;
 using Pryde.Services.Service.Interface;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Encodings.Web;
 
 namespace Pryde.Services.Service.Implementation;
 
@@ -105,13 +106,94 @@ public class AdminPortalService(
         }, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        await emailService.SendAsync(
-            email,
-            "Your Pryde administrator invitation",
-            $"<p>Hello {request.FirstName.Trim()},</p><p>Your Pryde {roleName} invitation code is <strong>{code}</strong>. Use the existing reset-password flow to set your password. The code expires in 24 hours.</p>",
-            cancellationToken);
+        await SendStaffInvitationEmailAsync(email, request.FirstName, roleName, code, cancellationToken);
 
         return await GetStaffByIdAsync(user.Id, cancellationToken);
+    }
+    private Task SendStaffInvitationEmailAsync( string email, string? firstName, string roleName,string code,
+     CancellationToken cancellationToken)
+    {
+        var safeFirstName = string.IsNullOrWhiteSpace(firstName)
+            ? null
+            : HtmlEncoder.Default.Encode(firstName.Trim());
+
+        var safeRoleName = HtmlEncoder.Default.Encode(roleName);
+        var safeCode = HtmlEncoder.Default.Encode(code);
+
+        var greeting = safeFirstName is null
+            ? "Hello,"
+            : $"Hello {safeFirstName},";
+
+        var emailBody = $"""
+        <div style="margin:0; padding:24px; background-color:#f5f7fa; font-family:Arial, Helvetica, sans-serif; color:#1f2937;">
+            <div style="max-width:600px; margin:0 auto; background-color:#ffffff; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden;">
+
+                <div style="padding:28px 32px; text-align:center; background-color:#111827;">
+                    <h1 style="margin:0; color:#ffffff; font-size:28px;">
+                        Pryde
+                    </h1>
+                </div>
+
+                <div style="padding:32px;">
+                    <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">
+                        {greeting}
+                    </p>
+
+                    <h2 style="margin:0 0 16px; font-size:22px; color:#111827;">
+                        You have been invited to join Pryde
+                    </h2>
+
+                    <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">
+                        You have been invited to join the Pryde administration team as a
+                        <strong>{safeRoleName}</strong>.
+                    </p>
+
+                    <p style="margin:0 0 24px; font-size:16px; line-height:1.6;">
+                        Use the invitation code below to continue setting up your account:
+                    </p>
+
+                    <div style="margin:24px 0; padding:22px; text-align:center; background-color:#f3f4f6; border-radius:8px;">
+                        <span style="font-size:32px; font-weight:700; letter-spacing:8px; color:#111827;">
+                            {safeCode}
+                        </span>
+                    </div>
+
+                    <p style="margin:0 0 18px; font-size:15px; line-height:1.6; color:#4b5563;">
+                        This invitation code will expire in
+                        <strong>24 hours</strong>.
+                    </p>
+
+                    <p style="margin:0 0 18px; font-size:15px; line-height:1.6; color:#4b5563;">
+                        Use the existing password reset flow to set your password
+                        and activate your account.
+                    </p>
+
+                    <p style="margin:0 0 24px; font-size:15px; line-height:1.6; color:#4b5563;">
+                        If you were not expecting this invitation,
+                        you can safely ignore this email.
+                    </p>
+
+                    <p style="margin:0; font-size:15px; line-height:1.6;">
+                        Regards,<br />
+                        <strong>The Pryde Team</strong>
+                    </p>
+                </div>
+
+                <div style="padding:20px 32px; text-align:center; background-color:#f9fafb; border-top:1px solid #e5e7eb;">
+                    <p style="margin:0; font-size:13px; color:#6b7280;">
+                        © {DateTime.UtcNow.Year} Pryde. All rights reserved.
+                    </p>
+                </div>
+
+            </div>
+        </div>
+        """;
+
+        return emailService.SendAsync(
+            email,
+            "Your Pryde administrator invitation",
+            emailBody,
+            cancellationToken);
     }
 
     public async Task<StaffListResponseDto> GetStaffAsync(
@@ -309,7 +391,7 @@ public class AdminPortalService(
         };
     }
 
-    public async Task<AdminDashboardResponseDto> GetDashboardAsync(
+    public async Task<AdminDashboardResponseDto> GetDashboardAsync(int days = 7,
         CancellationToken cancellationToken = default)
     {
         var counts = await unitOfWork.AdminListings.GetDashboardCountsAsync(cancellationToken);
@@ -333,7 +415,7 @@ public class AdminPortalService(
             TotalTransactions = finance.TotalTransactions,
             RecentDriverRequests = drivers.Select(MapRecentDriver).ToList(),
             RecentTransactions = transactions.Select(MapWalletTransaction).ToList(),
-            RevenueSummary = await financialService.GetRevenueSummaryAsync(7, cancellationToken)
+            RevenueSummary = await financialService.GetRevenueSummaryAsync(days, cancellationToken)
         };
     }
 

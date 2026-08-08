@@ -20,5 +20,5 @@ public interface IAdminPortalService
     Task<AdminKycResponseDto> GetKycAsync(Guid kycId, CancellationToken cancellationToken = default);
     Task<AdminVehicleResponseDto> GetVehicleAsync(Guid vehicleId, CancellationToken cancellationToken = default);
     Task<PagedResponseDto<AdminWalletTransactionResponseDto>> GetWalletTransactionsAsync(AdminWalletTransactionsRequestDto request, CancellationToken cancellationToken = default);
-    Task<AdminDashboardResponseDto> GetDashboardAsync(CancellationToken cancellationToken = default);
+    Task<AdminDashboardResponseDto> GetDashboardAsync(int days = 7, CancellationToken cancellationToken = default);
 }
