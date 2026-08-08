@@ -307,20 +307,29 @@ public class AuthService(
             cancellationToken);
         return response;
     }
-    public async Task ForgotPasswordAsync(
-        ForgotPasswordRequestDto request, CancellationToken cancellationToken = default)
+    public async Task ForgotPasswordAsync( ForgotPasswordRequestDto request,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request?.Email))
+        {
             throw new ValidationException("Email is required.");
+        }
 
         var user = await unitOfWork.Users.GetByEmailAsync(
-            request.Email.Trim().ToLowerInvariant(), cancellationToken);
+            request.Email.Trim().ToLowerInvariant(),
+            cancellationToken);
 
-        if (user is null) return;
+        if (user is null)
+        {
+            return;
+        }
 
-        await unitOfWork.PasswordResetCodes.InvalidateAllForUserAsync(user.Id, cancellationToken);
+        await unitOfWork.PasswordResetCodes.InvalidateAllForUserAsync(
+            user.Id,cancellationToken);
 
-        var code = System.Security.Cryptography.RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+        var code = System.Security.Cryptography.RandomNumberGenerator
+            .GetInt32(100000, 1000000)
+            .ToString();
 
         await unitOfWork.PasswordResetCodes.CreateAsync(
             new PasswordResetCode
@@ -333,11 +342,95 @@ public class AuthService(
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        await emailService.SendAsync(
-            user.Email,
-            "Reset your Pryde password",
-            $"<p>Your password reset code is <strong>{code}</strong>. It expires in 10 minutes.</p>",
+        var profile = await unitOfWork.Profiles.GetByUserIdAsync(
+            user.Id,
             cancellationToken);
+
+        await SendPasswordResetCodeAsync(
+            user.Email,
+            profile?.FirstName,
+            code,
+            cancellationToken);
+    }
+
+    private Task SendPasswordResetCodeAsync( string email,string? firstName,
+        string code, CancellationToken cancellationToken)
+    {
+        var safeFirstName = string.IsNullOrWhiteSpace(firstName)
+            ? null
+            : HtmlEncoder.Default.Encode(firstName.Trim());
+
+        var safeCode = HtmlEncoder.Default.Encode(code);
+
+        var greeting = safeFirstName is null
+            ? "Hello,"
+            : $"Hello {safeFirstName},";
+
+        var emailBody = $"""
+        <div style="margin:0; padding:24px; background-color:#f5f7fa; font-family:Arial, Helvetica, sans-serif; color:#1f2937;">
+            <div style="max-width:600px; margin:0 auto; background-color:#ffffff; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden;">
+
+                <div style="padding:28px 32px; text-align:center; background-color:#111827;">
+                    <h1 style="margin:0; color:#ffffff; font-size:28px;">
+                        Pryde
+                    </h1>
+                </div>
+
+                <div style="padding:32px;">
+                    <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">
+                        {greeting}
+                    </p>
+
+                    <h2 style="margin:0 0 16px; font-size:22px; color:#111827;">
+                        Reset your Pryde password
+                    </h2>
+
+                    <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">
+                        We received a request to reset the password for your Pryde account.
+                    </p>
+
+                    <p style="margin:0 0 24px; font-size:16px; line-height:1.6;">
+                        Use the verification code below to continue:
+                    </p>
+
+                    <div style="margin:24px 0; padding:22px; text-align:center; background-color:#f3f4f6; border-radius:8px;">
+                        <span style="font-size:32px; font-weight:700; letter-spacing:8px; color:#111827;">
+                            {safeCode}
+                        </span>
+                    </div>
+
+                    <p style="margin:0 0 18px; font-size:15px; line-height:1.6; color:#4b5563;">
+                        This code will expire in
+                        <strong>10 minutes</strong>.
+                    </p>
+
+                    <p style="margin:0 0 18px; font-size:15px; line-height:1.6; color:#4b5563;">
+                        For your security, do not share this code with anyone.
+                        Pryde representatives will never ask you to provide your password reset code.
+                    </p>
+
+                    <p style="margin:0 0 24px; font-size:15px; line-height:1.6; color:#4b5563;">
+                        If you did not request a password reset, you can safely ignore this email.
+                    </p>
+
+                    <p style="margin:0; font-size:15px; line-height:1.6;">
+                        Regards,<br />
+                        <strong>The Pryde Team</strong>
+                    </p>
+                </div>
+
+                <div style="padding:20px 32px; text-align:center; background-color:#f9fafb; border-top:1px solid #e5e7eb;">
+                    <p style="margin:0; font-size:13px; color:#6b7280;">
+                        © {DateTime.UtcNow.Year} Pryde. All rights reserved.
+                    </p>
+                </div>
+
+            </div>
+        </div>
+        """;
+
+        return emailService.SendAsync( email, "Reset your Pryde password",
+            emailBody, cancellationToken);
     }
 
     public async Task ResetPasswordAsync(
@@ -683,6 +776,7 @@ private Task SendEmailVerificationCodeAsync(
         cancellationToken);
 }
 
+
 private static EmailVerificationResendResponseDto ResendResponse(
         DateTime resendAvailableAt,
         DateTime now) => new()
@@ -835,4 +929,6 @@ private static EmailVerificationResendResponseDto ResendResponse(
             throw new ValidationException(
                 "Password is required.");
     }
+
+
 }

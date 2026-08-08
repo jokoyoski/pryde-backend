@@ -13,6 +13,9 @@ namespace Pryde.Api.Controllers.V1;
 public class AdminDashboardController(IAdminPortalService adminPortalService) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> Get(CancellationToken cancellationToken) =>
-        Ok(await adminPortalService.GetDashboardAsync(cancellationToken));
+    public async Task<IActionResult> Get([FromQuery] int days = 7,CancellationToken cancellationToken = default)
+    {
+        var result = await adminPortalService.GetDashboardAsync(days, cancellationToken);
+        return Ok(result);
+    }
 }
