@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Pryde.Domain.Entities;
+using Pryde.Domain.Common;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Context;
 using Pryde.Persistence.Repository.Interfaces;
@@ -99,8 +100,8 @@ public class TripRepository(PrydeDbContext context) : ITripRepository
                 .ThenInclude(v => v.Images)
             .Where(t => t.Status == TripStatus.Scheduled
                 && t.DepartureTime > utcNow
-                && t.DepartureTime.AddHours(-t.BookingWindowHours) > utcNow
-                && t.AvailableSeats >= requiredSeats);
+                && t.AvailableSeats >= requiredSeats)
+            .Where(TripBookingWindow.IsOpenAtUtc(utcNow));
 
         if (departureDate.HasValue)
         {

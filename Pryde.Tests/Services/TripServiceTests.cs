@@ -23,6 +23,88 @@ public class TripServiceTests
         Assert.Equal(1, unitOfWork.SaveChangesCount);
     }
 
+    [Fact]
+    public async Task TripCreationUsesConfiguredFifteenMinuteDefault()
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        var request = TestData.ValidTripRequest(vehicle.Id);
+        request.BookingWindowMinutes = null;
+
+        var result = await TestData.CreateTripService(unitOfWork)
+            .CreateAsync(driverId, request);
+
+        Assert.Equal(15, result.BookingWindowMinutes);
+    }
+
+    [Fact]
+    public async Task DriverCanConfigureBookingWindowInMinutes()
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        var request = TestData.ValidTripRequest(vehicle.Id);
+        request.BookingWindowMinutes = 45;
+
+        var result = await TestData.CreateTripService(unitOfWork)
+            .CreateAsync(driverId, request);
+
+        Assert.Equal(45, result.BookingWindowMinutes);
+    }
+
+    [Theory]
+    [InlineData(16, true)]
+    [InlineData(15, false)]
+    [InlineData(14, false)]
+    public async Task TripCreationEnforcesBookingCutoffBoundary(
+        int departureMinutesFromNow,
+        bool succeeds)
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        var request = TestData.ValidTripRequest(vehicle.Id);
+        request.DepartureTime = DateTime.UtcNow
+            .AddMinutes(departureMinutesFromNow);
+        request.BookingWindowMinutes = 15;
+
+        if (succeeds)
+        {
+            await TestData.CreateTripService(unitOfWork)
+                .CreateAsync(driverId, request);
+            Assert.Single(unitOfWork.TripRepository.Items);
+            return;
+        }
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            TestData.CreateTripService(unitOfWork)
+                .CreateAsync(driverId, request));
+        Assert.Empty(unitOfWork.TripRepository.Items);
+    }
+
+    [Theory]
+    [InlineData(16, true)]
+    [InlineData(15, false)]
+    [InlineData(14, false)]
+    public async Task TripUpdateEnforcesBookingCutoffBoundary(
+        int departureMinutesFromNow,
+        bool succeeds)
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        var trip = TestData.OpenTrip(driverId, vehicle);
+        unitOfWork.TripRepository.Items.Add(trip);
+        var request = ToUpdate(TestData.ValidTripRequest(vehicle.Id));
+        request.DepartureTime = DateTime.UtcNow
+            .AddMinutes(departureMinutesFromNow);
+
+        if (succeeds)
+        {
+            var result = await TestData.CreateTripService(unitOfWork)
+                .UpdateAsync(trip.Id, driverId, request);
+            Assert.Equal(request.DepartureTime, result.DepartureTime);
+            return;
+        }
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            TestData.CreateTripService(unitOfWork)
+                .UpdateAsync(trip.Id, driverId, request));
+    }
+
     [Theory]
     [InlineData(false, VehicleOnboardingStatus.Approved)]
     [InlineData(true, VehicleOnboardingStatus.Draft)]
@@ -142,13 +224,35 @@ public class TripServiceTests
         var completed = TestData.OpenTrip(driverId, vehicle); completed.Status = TripStatus.Completed;
         var departed = TestData.OpenTrip(driverId, vehicle); departed.DepartureTime = DateTime.UtcNow.AddMinutes(-1);
         var full = TestData.OpenTrip(driverId, vehicle, 0);
-        var bookingClosed = TestData.OpenTrip(driverId, vehicle); bookingClosed.DepartureTime = DateTime.UtcNow.AddHours(4);
+        var bookingClosed = TestData.OpenTrip(driverId, vehicle);
+        bookingClosed.DepartureTime = DateTime.UtcNow.AddMinutes(15);
         unitOfWork.TripRepository.Items.AddRange([valid, cancelled, completed, departed, full, bookingClosed]);
 
         var results = await TestData.CreateTripService(unitOfWork).SearchAsync(new SearchTripsRequestDto());
 
         var result = Assert.Single(results);
         Assert.Equal(valid.Id, result.TripId);
+    }
+
+    [Theory]
+    [InlineData(16, true)]
+    [InlineData(15, false)]
+    [InlineData(14, false)]
+    public async Task DiscoveryEnforcesBookingCutoffBoundary(
+        int departureMinutesFromNow,
+        bool isReturned)
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        var trip = TestData.OpenTrip(driverId, vehicle);
+        trip.DepartureTime = DateTime.UtcNow
+            .AddMinutes(departureMinutesFromNow);
+        trip.BookingWindowMinutes = 15;
+        unitOfWork.TripRepository.Items.Add(trip);
+
+        var results = await TestData.CreateTripService(unitOfWork)
+            .SearchAsync(new SearchTripsRequestDto());
+
+        Assert.Equal(isReturned, results.Any(item => item.TripId == trip.Id));
     }
 
     [Fact]
@@ -170,7 +274,7 @@ public class TripServiceTests
     }
 
     [Fact]
-    public async Task NearbySearchExcludesTripOutsideConfiguredRadius()
+    public async Task NearbySearchUsesValidatedRequestRadiusOverride()
     {
         var (unitOfWork, driverId, vehicle) =
             TestData.CreateDriverContext();
@@ -185,7 +289,7 @@ public class TripServiceTests
                 PickupRadiusKm = 100d
             });
 
-        Assert.Empty(results);
+        Assert.Single(results);
     }
 
     [Fact]
@@ -578,6 +682,25 @@ public class TripServiceTests
                 context.Trip.Id,
                 context.DriverId));
     }
+
+    private static UpdateTripRequestDto ToUpdate(
+        CreateTripRequestDto request) => new()
+    {
+        VehicleId = request.VehicleId,
+        OriginLatitude = request.OriginLatitude,
+        OriginLongitude = request.OriginLongitude,
+        OriginAddress = request.OriginAddress,
+        DestinationLatitude = request.DestinationLatitude,
+        DestinationLongitude = request.DestinationLongitude,
+        DestinationAddress = request.DestinationAddress,
+        DistanceKm = request.DistanceKm,
+        EstimatedDurationMinutes = request.EstimatedDurationMinutes,
+        DepartureTime = request.DepartureTime,
+        AvailableSeats = request.AvailableSeats,
+        AllowLuggage = request.AllowLuggage,
+        BookingWindowMinutes = request.BookingWindowMinutes,
+        RoutePolyline = request.RoutePolyline
+    };
 
     private static Trip SearchTripAtDistance(
         Guid driverId,

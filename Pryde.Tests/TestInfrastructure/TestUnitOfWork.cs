@@ -1,4 +1,5 @@
 using Pryde.Domain.Entities;
+using Pryde.Domain.Common;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 
@@ -1160,9 +1161,12 @@ internal sealed class TestTripRepository : ITripRepository
         double? pickupLongitude, double? pickupRadiusKm,
         CancellationToken cancellationToken = default)
     {
+        var isBookingOpen = TripBookingWindow
+            .IsOpenAtUtc(utcNow)
+            .Compile();
         var query = Items.Where(t => t.Status == TripStatus.Scheduled
             && t.DepartureTime > utcNow
-            && t.DepartureTime - TimeSpan.FromHours(t.BookingWindowHours) > utcNow
+            && isBookingOpen(t)
             && t.AvailableSeats >= requiredSeats);
         if (departureDate.HasValue)
             query = query.Where(t => t.DepartureTime.Date == departureDate.Value.Date);

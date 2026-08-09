@@ -73,6 +73,64 @@ public class RecurringTripServiceTests
         Assert.Equal(context.Request.DepartureTime, TimeOnly.FromDateTime(trip.DepartureTime));
     }
 
+    [Theory]
+    [InlineData(16, true)]
+    [InlineData(15, false)]
+    [InlineData(14, false)]
+    public async Task RecurringScheduleCreationEnforcesCutoffBoundary(
+        int departureMinutesFromNow,
+        bool succeeds)
+    {
+        var context = CreateContext();
+        var departure = DateTime.UtcNow
+            .AddMinutes(departureMinutesFromNow);
+        context.Request.StartDate = DateOnly.FromDateTime(departure);
+        context.Request.EndDate = context.Request.StartDate;
+        context.Request.DaysOfWeek = ToRecurringDay(departure.DayOfWeek);
+        context.Request.DepartureTime = TimeOnly.FromDateTime(departure);
+
+        if (succeeds)
+        {
+            await context.Service.CreateAsync(
+                context.DriverId,
+                context.Request);
+            Assert.Single(context.UnitOfWork.RecurringTripRepository.Items);
+            return;
+        }
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            context.Service.CreateAsync(
+                context.DriverId,
+                context.Request));
+    }
+
+    [Theory]
+    [InlineData(16, 1)]
+    [InlineData(15, 0)]
+    [InlineData(14, 0)]
+    public async Task GeneratorSkipsOccurrencesAtOrAfterCutoff(
+        int departureMinutesFromNow,
+        int expectedGeneratedCount)
+    {
+        var context = CreateContext();
+        await context.Service.CreateAsync(context.DriverId, context.Request);
+        var schedule = context.UnitOfWork.RecurringTripRepository.Items.Single();
+        var utcNow = DateTime.UtcNow;
+        var departure = utcNow.AddMinutes(departureMinutesFromNow);
+        schedule.StartDate = DateOnly.FromDateTime(departure);
+        schedule.EndDate = schedule.StartDate;
+        schedule.DaysOfWeek = ToRecurringDay(departure.DayOfWeek);
+        schedule.DepartureTime = TimeOnly.FromDateTime(departure);
+        schedule.BookingWindowMinutes = 15;
+
+        var generated = await context.Service.GenerateOccurrencesAsync(utcNow);
+
+        Assert.Equal(expectedGeneratedCount, generated);
+        Assert.Equal(
+            expectedGeneratedCount,
+            context.UnitOfWork.TripRepository.Items.Count);
+    }
+
     [Fact]
     public async Task PausedOrCancelledScheduleDoesNotGenerateFutureTrips()
     {
@@ -217,7 +275,8 @@ public class RecurringTripServiceTests
             {
                 GenerationHorizonDays = 14,
                 GenerationIntervalMinutes = 15
-            }));
+            }),
+            Options.Create(new TripSettings()));
         var startDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
         return new RecurringTestContext(
             unitOfWork,
@@ -238,7 +297,7 @@ public class RecurringTripServiceTests
                 EstimatedDurationMinutes = 20,
                 AvailableSeats = Math.Min(3, capacity),
                 AllowLuggage = true,
-                BookingWindowHours = 5,
+                BookingWindowMinutes = 15,
                 StartDate = startDate,
                 EndDate = startDate,
                 DaysOfWeek = ToRecurringDay(startDate.DayOfWeek),
@@ -268,7 +327,7 @@ public class RecurringTripServiceTests
             RoutePolyline = request.RoutePolyline,
             AvailableSeats = request.AvailableSeats,
             AllowLuggage = request.AllowLuggage,
-            BookingWindowHours = request.BookingWindowHours,
+            BookingWindowMinutes = request.BookingWindowMinutes,
             StartDate = request.StartDate,
             EndDate = request.EndDate,
             DaysOfWeek = request.DaysOfWeek,

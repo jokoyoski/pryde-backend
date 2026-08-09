@@ -23,7 +23,8 @@ namespace Pryde.Domain.Entities
         public TimeOnly DepartureTime { get; set; }
         public int AvailableSeats { get; set; }
         public bool AllowLuggage { get; set; }
-        public int BookingWindowHours { get; set; } = 5;
+        public int BookingWindowMinutes { get; set; } =
+            TripBookingWindow.DefaultMinutes;
 
         public DateOnly StartDate { get; set; }
         public DateOnly? EndDate { get; set; }

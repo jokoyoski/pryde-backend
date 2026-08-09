@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
+using Pryde.Domain.Common;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
@@ -372,7 +373,9 @@ public class TripBookingService(
             throw new ConflictException("This trip is not open for booking requests.");
         if (trip.DepartureTime <= now)
             throw new ConflictException("This trip has already departed.");
-        if (trip.DepartureTime - TimeSpan.FromHours(trip.BookingWindowHours) <= now)
+        if (TripBookingWindow.GetClosesAtUtc(
+                trip.DepartureTime,
+                trip.BookingWindowMinutes) <= now)
             throw new ConflictException("The booking request window for this trip is closed.");
         if (trip.AvailableSeats <= 0)
             throw new ConflictException("No seats are available for this trip.");

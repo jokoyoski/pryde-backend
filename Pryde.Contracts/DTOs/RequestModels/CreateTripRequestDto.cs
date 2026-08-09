@@ -14,6 +14,6 @@ public class CreateTripRequestDto
     public DateTime DepartureTime { get; set; }
     public int AvailableSeats { get; set; }
     public bool AllowLuggage { get; set; }
-    public int BookingWindowHours { get; set; } = 5;
+    public int? BookingWindowMinutes { get; set; }
     public string? RoutePolyline { get; set; }
 }
