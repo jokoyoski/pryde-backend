@@ -209,7 +209,7 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
             ServiceChargePercentage = trip.ServiceChargePercentage,
             PassengerServiceCharge = serviceCharge,
             PassengerTotal = trip.SeatPrice + serviceCharge,
-            BookingWindowHours = trip.BookingWindowHours,
+            BookingWindowMinutes = trip.BookingWindowMinutes,
             Status = trip.Status,
             CreatedAt = trip.CreatedAt
         };
@@ -244,7 +244,7 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
             ServiceChargePercentage = summary.ServiceChargePercentage,
             PassengerServiceCharge = summary.PassengerServiceCharge,
             PassengerTotal = summary.PassengerTotal,
-            BookingWindowHours = summary.BookingWindowHours,
+            BookingWindowMinutes = summary.BookingWindowMinutes,
             Status = summary.Status,
             CreatedAt = summary.CreatedAt,
             PendingBookingCount = trip.Bookings.Count(

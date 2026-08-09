@@ -86,12 +86,27 @@ public class TripBookingServiceTests
             new TripBookingService(unitOfWork).CreateAsync(passengerId, trip.Id));
     }
 
-    [Fact]
-    public async Task BookingRequestAfterCutoffIsRejected()
+    [Theory]
+    [InlineData(16, true)]
+    [InlineData(15, false)]
+    [InlineData(14, false)]
+    public async Task BookingRequestEnforcesCutoffBoundary(
+        int departureMinutesFromNow,
+        bool succeeds)
     {
         var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
         var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
-        trip.DepartureTime = DateTime.UtcNow.AddHours(4);
+        trip.DepartureTime = DateTime.UtcNow
+            .AddMinutes(departureMinutesFromNow);
+        trip.BookingWindowMinutes = 15;
+
+        if (succeeds)
+        {
+            await new TripBookingService(unitOfWork)
+                .CreateAsync(Guid.NewGuid(), trip.Id);
+            Assert.Single(unitOfWork.TripBookingRepository.Items);
+            return;
+        }
 
         await Assert.ThrowsAsync<ConflictException>(() =>
             new TripBookingService(unitOfWork).CreateAsync(Guid.NewGuid(), trip.Id));

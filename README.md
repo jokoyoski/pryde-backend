@@ -4,6 +4,29 @@
 
 This package contains comprehensive API documentation and frontend integration guides for the Pryde Authentication system.
 
+## Trip booking cutoff
+
+Trips close for new bookings 15 minutes before their UTC departure time by
+default. Drivers can override the default per one-time or recurring trip with
+`bookingWindowMinutes`. Trip creation and updates require the calculated cutoff
+(`departureUtc - bookingWindowMinutes`) to remain in the future; discovery,
+booking, and recurring occurrence generation use the same cutoff rule.
+
+The application default is configured in `appsettings.json`:
+
+```json
+{
+  "Trips": {
+    "DefaultBookingWindowMinutes": 15
+  }
+}
+```
+
+For deployments, override it with
+`Trips__DefaultBookingWindowMinutes`. Nearby discovery uses the validated
+request `pickupRadiusKm` when supplied and otherwise falls back to
+`Pricing__PickupRadiusKm`.
+
 ### 1. **API_DOCUMENTATION.md** 
 Complete API reference for Registration and Login endpoints.
 

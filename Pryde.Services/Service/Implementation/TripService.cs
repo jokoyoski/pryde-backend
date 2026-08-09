@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
+using Pryde.Domain.Common;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
@@ -16,10 +17,12 @@ public class TripService(
     IFareCalculator fareCalculator,
     IRouteMatchingService routeMatchingService,
     IOptions<PricingSettings> pricingSettings,
+    IOptions<TripSettings> tripSettings,
     IFinancialService financialService,
     INotificationService notificationService) : ITripService
 {
     private readonly PricingSettings _pricingSettings = pricingSettings.Value;
+    private readonly TripSettings _tripSettings = tripSettings.Value;
 
     public TripService(
         IUnitOfWork unitOfWork,
@@ -31,6 +34,7 @@ public class TripService(
             fareCalculator,
             routeMatchingService,
             pricingSettings,
+            Options.Create(new TripSettings()),
             new FinancialService(unitOfWork),
             new NotificationService(unitOfWork))
     {
@@ -47,6 +51,7 @@ public class TripService(
             fareCalculator,
             routeMatchingService,
             pricingSettings,
+            Options.Create(new TripSettings()),
             financialService,
             new NotificationService(unitOfWork))
     {
@@ -94,7 +99,7 @@ public class TripService(
         Guid? recurringTripId,
         CancellationToken cancellationToken)
     {
-        var vehicle = await ValidateCreationAsync(
+        var (vehicle, bookingWindowMinutes) = await ValidateCreationAsync(
             driverId,
             request,
             cancellationToken);
@@ -116,7 +121,7 @@ public class TripService(
             DepartureTime = request.DepartureTime.ToUniversalTime(),
             AvailableSeats = request.AvailableSeats,
             AllowLuggage = request.AllowLuggage,
-            BookingWindowHours = request.BookingWindowHours,
+            BookingWindowMinutes = bookingWindowMinutes,
             RecurringTripId = recurringTripId,
             TripFare = fare.TotalTripCost,
             SeatPrice = fare.SeatPrice,
@@ -129,16 +134,20 @@ public class TripService(
         return await GetByIdAsync(trip.Id, cancellationToken);
     }
 
-    private async Task<Vehicle> ValidateCreationAsync(
+    private async Task<(Vehicle Vehicle, int BookingWindowMinutes)>
+        ValidateCreationAsync(
         Guid driverId,
         CreateTripRequestDto request,
         CancellationToken cancellationToken)
     {
+        var bookingWindowMinutes = ResolveBookingWindowMinutes(
+            request.BookingWindowMinutes);
         ValidateTrip(request.OriginLatitude, request.OriginLongitude,
             request.DestinationLatitude, request.DestinationLongitude,
             request.OriginAddress, request.DestinationAddress,
             request.DistanceKm, request.EstimatedDurationMinutes,
-            request.DepartureTime, request.AvailableSeats, request.BookingWindowHours);
+            request.DepartureTime, request.AvailableSeats,
+            bookingWindowMinutes);
 
         await EnsureDriverAsync(driverId, cancellationToken);
         await EnsureApprovedKycAsync(driverId, cancellationToken);
@@ -150,7 +159,7 @@ public class TripService(
             throw new ValidationException(
                 "Available seats cannot exceed vehicle capacity.");
 
-        return vehicle;
+        return (vehicle, bookingWindowMinutes);
     }
 
     public async Task<IReadOnlyList<TripSummaryResponseDto>> SearchAsync(
@@ -196,9 +205,7 @@ public class TripService(
             requiredSeats,
             hasNearbyCoordinates ? request.Latitude : null,
             hasNearbyCoordinates ? request.Longitude : null,
-            hasNearbyCoordinates
-                ? _pricingSettings.PickupRadiusKm
-                : null,
+            hasNearbyCoordinates ? radius : null,
             cancellationToken);
 
         if (hasAllCoordinates)
@@ -260,11 +267,14 @@ public class TripService(
         UpdateTripRequestDto request,
         CancellationToken cancellationToken = default)
     {
+        var bookingWindowMinutes = ResolveBookingWindowMinutes(
+            request.BookingWindowMinutes);
         ValidateTrip(request.OriginLatitude, request.OriginLongitude,
             request.DestinationLatitude, request.DestinationLongitude,
             request.OriginAddress, request.DestinationAddress,
             request.DistanceKm, request.EstimatedDurationMinutes,
-            request.DepartureTime, request.AvailableSeats, request.BookingWindowHours);
+            request.DepartureTime, request.AvailableSeats,
+            bookingWindowMinutes);
 
         var trip = await unitOfWork.Trips.GetByIdForUpdateAsync(tripId, cancellationToken)
             ?? throw new NotFoundException(nameof(Trip), tripId);
@@ -292,7 +302,7 @@ public class TripService(
         trip.DepartureTime = request.DepartureTime.ToUniversalTime();
         trip.AvailableSeats = request.AvailableSeats;
         trip.AllowLuggage = request.AllowLuggage;
-        trip.BookingWindowHours = request.BookingWindowHours;
+        trip.BookingWindowMinutes = bookingWindowMinutes;
         trip.TripFare = fare.TotalTripCost;
         trip.SeatPrice = fare.SeatPrice;
         trip.ServiceChargePercentage = fare.ServiceChargePercentage;
@@ -745,7 +755,7 @@ public class TripService(
         double destinationLatitude, double destinationLongitude,
         string originAddress, string destinationAddress,
         double distanceKm, int durationMinutes, DateTime departureTime,
-        int availableSeats, int bookingWindowHours)
+        int availableSeats, int bookingWindowMinutes)
     {
         ValidateCoordinates(originLatitude, originLongitude, destinationLatitude, destinationLongitude);
         if (string.IsNullOrWhiteSpace(originAddress) || string.IsNullOrWhiteSpace(destinationAddress))
@@ -753,9 +763,27 @@ public class TripService(
         if (distanceKm <= 0) throw new ValidationException("Distance must be greater than zero.");
         if (durationMinutes <= 0) throw new ValidationException("Estimated duration must be greater than zero.");
         if (availableSeats <= 0) throw new ValidationException("Available seats must be greater than zero.");
-        if (bookingWindowHours <= 0) throw new ValidationException("Booking window must be greater than zero.");
-        if (departureTime.ToUniversalTime() <= DateTime.UtcNow)
+        if (bookingWindowMinutes <= 0)
+            throw new ValidationException(
+                "Booking window must be greater than zero minutes.");
+        var utcNow = DateTime.UtcNow;
+        var departureUtc = departureTime.ToUniversalTime();
+        if (departureUtc <= utcNow)
             throw new ValidationException("Departure time must be in the future.");
+        if (TripBookingWindow.GetClosesAtUtc(
+                departureUtc,
+                bookingWindowMinutes) <= utcNow)
+        {
+            throw new ValidationException(
+                "The booking cutoff must be in the future.");
+        }
+    }
+
+    private int ResolveBookingWindowMinutes(
+        int? bookingWindowMinutes)
+    {
+        return bookingWindowMinutes ??
+            _tripSettings.DefaultBookingWindowMinutes;
     }
 
     private static void ValidateCoordinates(
@@ -807,7 +835,7 @@ public class TripService(
             ServiceChargePercentage = trip.ServiceChargePercentage,
             PassengerServiceCharge = serviceCharge,
             PassengerTotal = trip.SeatPrice + serviceCharge,
-            BookingWindowHours = trip.BookingWindowHours,
+            BookingWindowMinutes = trip.BookingWindowMinutes,
             Status = trip.Status,
             CreatedAt = trip.CreatedAt
         };
@@ -859,7 +887,7 @@ public class TripService(
             ServiceChargePercentage = summary.ServiceChargePercentage,
             PassengerServiceCharge = summary.PassengerServiceCharge,
             PassengerTotal = summary.PassengerTotal,
-            BookingWindowHours = summary.BookingWindowHours,
+            BookingWindowMinutes = summary.BookingWindowMinutes,
             Status = summary.Status,
             CreatedAt = summary.CreatedAt,
             PendingBookingCount = trip.Bookings.Count(b => b.Status == BookingStatus.Pending),

@@ -20,7 +20,7 @@ public class RecurringTripResponseDto
     public string? RoutePolyline { get; set; }
     public int AvailableSeats { get; set; }
     public bool AllowLuggage { get; set; }
-    public int BookingWindowHours { get; set; }
+    public int BookingWindowMinutes { get; set; }
     public DateOnly StartDate { get; set; }
     public DateOnly? EndDate { get; set; }
     public RecurringDays DaysOfWeek { get; set; }

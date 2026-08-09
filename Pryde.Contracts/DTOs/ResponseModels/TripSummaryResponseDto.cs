@@ -28,7 +28,7 @@ public class TripSummaryResponseDto : WorkflowResponseDto
     public decimal ServiceChargePercentage { get; set; }
     public decimal PassengerServiceCharge { get; set; }
     public decimal PassengerTotal { get; set; }
-    public int BookingWindowHours { get; set; }
+    public int BookingWindowMinutes { get; set; }
     public TripStatus Status { get; set; }
     public DateTime CreatedAt { get; set; }
 }

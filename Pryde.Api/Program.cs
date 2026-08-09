@@ -73,6 +73,14 @@ builder.Services.Configure<PricingSettings>(
     builder.Configuration.GetSection("PricingSettings"));
 
 builder.Services
+    .AddOptions<TripSettings>()
+    .Bind(builder.Configuration.GetSection(TripSettings.SectionName))
+    .Validate(
+        settings => settings.DefaultBookingWindowMinutes > 0,
+        "Trips:DefaultBookingWindowMinutes must be greater than zero.")
+    .ValidateOnStart();
+
+builder.Services
     .AddOptions<RecurringTripSettings>()
     .Bind(builder.Configuration.GetSection(
         RecurringTripSettings.SectionName))

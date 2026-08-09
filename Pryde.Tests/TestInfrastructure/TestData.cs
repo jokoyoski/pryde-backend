@@ -50,11 +50,16 @@ internal static class TestData
         return (unitOfWork, driverId, vehicle);
     }
 
-    public static TripService CreateTripService(TestUnitOfWork unitOfWork) => new(
-        unitOfWork,
-        new FareCalculator(Options.Create(Pricing)),
-        new RouteMatchingService(),
-        Options.Create(Pricing));
+    public static TripService CreateTripService(
+        TestUnitOfWork unitOfWork,
+        TripSettings? tripSettings = null) => new(
+            unitOfWork,
+            new FareCalculator(Options.Create(Pricing)),
+            new RouteMatchingService(),
+            Options.Create(Pricing),
+            Options.Create(tripSettings ?? new TripSettings()),
+            new FinancialService(unitOfWork),
+            new NotificationService(unitOfWork));
 
     public static CreateTripRequestDto ValidTripRequest(Guid vehicleId) => new()
     {
@@ -70,7 +75,7 @@ internal static class TestData
         DepartureTime = DateTime.UtcNow.AddHours(10),
         AvailableSeats = 3,
         AllowLuggage = true,
-        BookingWindowHours = 5
+        BookingWindowMinutes = 15
     };
 
     public static Trip OpenTrip(Guid driverId, Vehicle vehicle, int availableSeats = 2) => new()
@@ -89,7 +94,7 @@ internal static class TestData
         EstimatedDurationMinutes = 20,
         DepartureTime = DateTime.UtcNow.AddHours(10),
         AvailableSeats = availableSeats,
-        BookingWindowHours = 5,
+        BookingWindowMinutes = 15,
         TripFare = 9500m,
         SeatPrice = 2375m,
         ServiceChargePercentage = 5m,

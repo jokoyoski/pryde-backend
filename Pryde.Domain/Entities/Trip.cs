@@ -29,7 +29,8 @@ namespace Pryde.Domain.Entities
         public decimal TripFare { get; set; }
         public decimal SeatPrice { get; set; }
         public decimal ServiceChargePercentage { get; set; }
-        public int BookingWindowHours { get; set; } = 5;
+        public int BookingWindowMinutes { get; set; } =
+            TripBookingWindow.DefaultMinutes;
         public string OriginAddress { get; set; } = string.Empty;
 
         public TripStatus Status { get; set; } = TripStatus.Scheduled;

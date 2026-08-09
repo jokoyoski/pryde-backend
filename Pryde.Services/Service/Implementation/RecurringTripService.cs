@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
+using Pryde.Domain.Common;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
@@ -13,13 +14,15 @@ namespace Pryde.Services.Service.Implementation;
 public sealed class RecurringTripService(
     IUnitOfWork unitOfWork,
     ITripService tripService,
-    IOptions<RecurringTripSettings> settings) : IRecurringTripService
+    IOptions<RecurringTripSettings> settings,
+    IOptions<TripSettings> tripSettings) : IRecurringTripService
 {
     private const RecurringDays AllDays = RecurringDays.Monday |
         RecurringDays.Tuesday | RecurringDays.Wednesday |
         RecurringDays.Thursday | RecurringDays.Friday |
         RecurringDays.Saturday | RecurringDays.Sunday;
     private readonly RecurringTripSettings _settings = settings.Value;
+    private readonly TripSettings _tripSettings = tripSettings.Value;
 
     public async Task<RecurringTripResponseDto> CreateAsync(
         Guid driverId,
@@ -27,18 +30,24 @@ public sealed class RecurringTripService(
         CancellationToken cancellationToken = default)
     {
         ValidateSchedule(request);
+        var bookingWindowMinutes = ResolveBookingWindowMinutes(
+            request.BookingWindowMinutes);
         var firstOccurrence = GetFirstOccurrence(
             request.StartDate,
             request.EndDate,
             request.DaysOfWeek,
-            request.DepartureTime);
+            request.DepartureTime,
+            bookingWindowMinutes);
         await tripService.ValidateRecurringTemplateAsync(
             driverId,
-            BuildTripRequest(request, firstOccurrence),
+            BuildTripRequest(
+                request,
+                firstOccurrence,
+                bookingWindowMinutes),
             cancellationToken);
 
         var schedule = new RecurringTrip { DriverId = driverId };
-        Apply(schedule, request);
+        Apply(schedule, request, bookingWindowMinutes);
         await unitOfWork.RecurringTrips.CreateAsync(schedule, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return await GetOwnedAsync(schedule.Id, driverId, cancellationToken);
@@ -70,14 +79,20 @@ public sealed class RecurringTripService(
         CancellationToken cancellationToken = default)
     {
         ValidateSchedule(request);
+        var bookingWindowMinutes = ResolveBookingWindowMinutes(
+            request.BookingWindowMinutes);
         var firstOccurrence = GetFirstOccurrence(
             request.StartDate,
             request.EndDate,
             request.DaysOfWeek,
-            request.DepartureTime);
+            request.DepartureTime,
+            bookingWindowMinutes);
         await tripService.ValidateRecurringTemplateAsync(
             driverId,
-            BuildTripRequest(request, firstOccurrence),
+            BuildTripRequest(
+                request,
+                firstOccurrence,
+                bookingWindowMinutes),
             cancellationToken);
 
         var schedule = await GetOwnedScheduleAsync(
@@ -88,7 +103,7 @@ public sealed class RecurringTripService(
             throw new ConflictException(
                 "Available seats cannot be lower than the active subscription count.");
 
-        Apply(schedule, request);
+        Apply(schedule, request, bookingWindowMinutes);
         unitOfWork.RecurringTrips.Update(schedule);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return await GetOwnedAsync(schedule.Id, driverId, cancellationToken);
@@ -269,7 +284,9 @@ public sealed class RecurringTripService(
                     continue;
 
                 var departure = ToUtc(date, schedule.DepartureTime);
-                if (departure <= utcNow ||
+                if (TripBookingWindow.GetClosesAtUtc(
+                        departure,
+                        schedule.BookingWindowMinutes) <= utcNow ||
                     await unitOfWork.Trips.RecurringOccurrenceExistsAsync(
                         schedule.Id, departure, cancellationToken))
                     continue;
@@ -358,7 +375,8 @@ public sealed class RecurringTripService(
         DateOnly startDate,
         DateOnly? endDate,
         RecurringDays days,
-        TimeOnly departureTime)
+        TimeOnly departureTime,
+        int bookingWindowMinutes)
     {
         var utcNow = DateTime.UtcNow;
         for (var offset = 0; offset < 14; offset++)
@@ -367,7 +385,10 @@ public sealed class RecurringTripService(
             if (endDate.HasValue && date > endDate.Value)
                 break;
             var departure = ToUtc(date, departureTime);
-            if (Includes(days, date.DayOfWeek) && departure > utcNow)
+            if (Includes(days, date.DayOfWeek) &&
+                TripBookingWindow.GetClosesAtUtc(
+                    departure,
+                    bookingWindowMinutes) > utcNow)
                 return departure;
         }
         throw new ValidationException(
@@ -390,9 +411,13 @@ public sealed class RecurringTripService(
     private static DateTime ToUtc(DateOnly date, TimeOnly time) =>
         DateTime.SpecifyKind(date.ToDateTime(time), DateTimeKind.Utc);
 
+    private int ResolveBookingWindowMinutes(int? bookingWindowMinutes) =>
+        bookingWindowMinutes ?? _tripSettings.DefaultBookingWindowMinutes;
+
     private static CreateTripRequestDto BuildTripRequest(
         CreateRecurringTripRequestDto request,
-        DateTime departureTime) => new()
+        DateTime departureTime,
+        int bookingWindowMinutes) => new()
         {
             VehicleId = request.VehicleId,
             OriginLatitude = request.OriginLatitude,
@@ -407,7 +432,7 @@ public sealed class RecurringTripService(
             DepartureTime = departureTime,
             AvailableSeats = request.AvailableSeats,
             AllowLuggage = request.AllowLuggage,
-            BookingWindowHours = request.BookingWindowHours
+            BookingWindowMinutes = bookingWindowMinutes
         };
 
     private static CreateTripRequestDto BuildTripRequest(
@@ -429,12 +454,13 @@ public sealed class RecurringTripService(
             DepartureTime = departureTime,
             AvailableSeats = schedule.AvailableSeats,
             AllowLuggage = schedule.AllowLuggage,
-            BookingWindowHours = schedule.BookingWindowHours
+            BookingWindowMinutes = schedule.BookingWindowMinutes
         };
 
     private static void Apply(
         RecurringTrip schedule,
-        CreateRecurringTripRequestDto request)
+        CreateRecurringTripRequestDto request,
+        int bookingWindowMinutes)
     {
         schedule.VehicleId = request.VehicleId;
         schedule.OriginLatitude = request.OriginLatitude;
@@ -450,7 +476,7 @@ public sealed class RecurringTripService(
             : request.RoutePolyline.Trim();
         schedule.AvailableSeats = request.AvailableSeats;
         schedule.AllowLuggage = request.AllowLuggage;
-        schedule.BookingWindowHours = request.BookingWindowHours;
+        schedule.BookingWindowMinutes = bookingWindowMinutes;
         schedule.StartDate = request.StartDate;
         schedule.EndDate = request.EndDate;
         schedule.DaysOfWeek = request.DaysOfWeek;
@@ -484,7 +510,7 @@ public sealed class RecurringTripService(
         RoutePolyline = schedule.RoutePolyline,
         AvailableSeats = schedule.AvailableSeats,
         AllowLuggage = schedule.AllowLuggage,
-        BookingWindowHours = schedule.BookingWindowHours,
+        BookingWindowMinutes = schedule.BookingWindowMinutes,
         StartDate = schedule.StartDate,
         EndDate = schedule.EndDate,
         DaysOfWeek = schedule.DaysOfWeek,
