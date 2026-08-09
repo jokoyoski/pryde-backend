@@ -31,6 +31,23 @@ public class PaystackWalletFundingEndpointTests
     }
 
     [Fact]
+    public void FundingRequestEndpointUsesRequiredAuthenticatedWalletRoute()
+    {
+        var controllerType = typeof(WalletController);
+        var action = controllerType.GetMethod(
+            nameof(WalletController.CreateFundingRequest))!;
+        var post = Assert.Single(
+            action.GetCustomAttributes(typeof(HttpPostAttribute), true)
+                .Cast<HttpPostAttribute>());
+
+        Assert.Equal("paystack/funding-requests", post.Template);
+        Assert.NotNull(controllerType.GetCustomAttributes(
+                typeof(AuthorizeAttribute),
+                true)
+            .Single());
+    }
+
+    [Fact]
     public void WebhookEndpointIsAnonymousAndUsesSinglePaystackRoute()
     {
         var controllerType = typeof(PaystackWebhooksController);

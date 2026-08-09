@@ -7,6 +7,7 @@ namespace Pryde.Domain.Entities
         public Guid UserId { get; set; }
         public User User { get; set; } = null!;
         public decimal Balance { get; set; }
+        public decimal WithdrawableBalance { get; set; }
         public decimal EscrowBalance { get; set; }
         public VirtualAccount? VirtualAccount { get; set; }
         public LedgerAccount? LedgerAccount { get; set; }

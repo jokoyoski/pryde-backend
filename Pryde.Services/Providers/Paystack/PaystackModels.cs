@@ -4,6 +4,12 @@ namespace Pryde.Services.Providers.Paystack;
 
 public class PaystackTransaction
 {
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
+
+    [JsonPropertyName("domain")]
+    public string Domain { get; set; } = string.Empty;
+
     [JsonPropertyName("status")]
     public string Status { get; set; } = string.Empty;
 

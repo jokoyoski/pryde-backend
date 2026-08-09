@@ -15,9 +15,55 @@ namespace Pryde.Tests.Services;
 public class WalletServiceTests
 {
     [Fact]
+    public async Task FundingRequestUsesAuthenticatedIdentityAndConvertsNairaToKobo()
+    {
+        var (unitOfWork, userId, _, _) = Context();
+        var service = PaystackService(
+            unitOfWork,
+            Transaction("unused", "user@test.local", 10000));
+
+        var result = await service.CreateFundingRequestAsync(
+            userId,
+            new WalletFundingRequestDto
+            {
+                Amount = 5000m
+            });
+
+        Assert.Equal(500000, result.AmountKobo);
+        Assert.Equal("NGN", result.Currency);
+        Assert.Equal("user@test.local", result.Email);
+        Assert.Equal("pk_test_public", result.PublicKey);
+        var fundingRequest = Assert.Single(
+            unitOfWork.PaystackWalletFundingRequestRepository.Items);
+        Assert.Equal(userId, fundingRequest.UserId);
+        Assert.Equal(result.Reference, fundingRequest.Reference);
+    }
+
+    [Fact]
+    public async Task FundingRequestOwnershipIsRequiredBeforeVerification()
+    {
+        var (unitOfWork, userId, wallet, _) = Context();
+        AddIntent(unitOfWork, Guid.NewGuid(), "stolen-ref", 10000);
+        var service = PaystackService(
+            unitOfWork,
+            Transaction("stolen-ref", "user@test.local", 10000));
+
+        await Assert.ThrowsAsync<ForbiddenException>(() =>
+            service.VerifyPaystackWalletFundingAsync(
+                userId,
+                new PaystackWalletFundingRequestDto
+                {
+                    Reference = "stolen-ref"
+                }));
+
+        Assert.Equal(0m, wallet.Balance);
+    }
+
+    [Fact]
     public async Task PaystackVerificationCreditsTrustedKoboAmountAndPostsLedger()
     {
         var (unitOfWork, userId, wallet, _) = Context();
+        AddIntent(unitOfWork, userId, "pay-ref-1", 250050);
         var service = PaystackService(
             unitOfWork,
             Transaction("pay-ref-1", "user@test.local", 250050));
@@ -60,9 +106,11 @@ public class WalletServiceTests
             "shared-ref",
             "user@test.local",
             100000);
+        AddIntent(unitOfWork, userId, "shared-ref", 100000);
         var service = PaystackService(unitOfWork, transaction);
         const string payload =
             "{\"event\":\"charge.success\",\"data\":{" +
+            "\"id\":1001,\"domain\":\"test\"," +
             "\"status\":\"success\",\"reference\":\"shared-ref\"," +
             "\"amount\":100000,\"currency\":\"NGN\"," +
             "\"customer\":{\"email\":\"user@test.local\"}}}";
@@ -85,14 +133,94 @@ public class WalletServiceTests
     }
 
     [Fact]
+    public async Task ConcurrentVerificationCreditsFundingRequestOnce()
+    {
+        var (unitOfWork, userId, wallet, _) = Context();
+        AddIntent(unitOfWork, userId, "concurrent-ref", 100000);
+        var service = PaystackService(
+            unitOfWork,
+            Transaction("concurrent-ref", "user@test.local", 100000));
+
+        await Task.WhenAll(
+            service.VerifyPaystackWalletFundingAsync(
+                userId,
+                new PaystackWalletFundingRequestDto
+                {
+                    Reference = "concurrent-ref"
+                }),
+            service.VerifyPaystackWalletFundingAsync(
+                userId,
+                new PaystackWalletFundingRequestDto
+                {
+                    Reference = "concurrent-ref"
+                }));
+
+        Assert.Equal(1000m, wallet.Balance);
+        Assert.Single(unitOfWork.WalletTransactionRepository.Items);
+        Assert.Single(unitOfWork.LedgerRepository.Transactions);
+    }
+
+    [Fact]
+    public async Task ChargeWebhookIgnoresUnknownReference()
+    {
+        var (unitOfWork, _, wallet, _) = Context();
+        var service = PaystackService(
+            unitOfWork,
+            Transaction("unknown-ref", "user@test.local", 10000));
+        const string payload =
+            "{\"event\":\"charge.success\",\"data\":{" +
+            "\"id\":1001,\"domain\":\"test\"," +
+            "\"status\":\"success\",\"reference\":\"unknown-ref\"," +
+            "\"amount\":10000,\"currency\":\"NGN\"," +
+            "\"customer\":{\"email\":\"user@test.local\"}}}";
+
+        await service.ProcessPaystackWebhookAsync(
+            Encoding.UTF8.GetBytes(payload),
+            Signature(payload));
+
+        Assert.Equal(0m, wallet.Balance);
+        Assert.Empty(unitOfWork.WalletTransactionRepository.Items);
+    }
+
+    [Theory]
+    [InlineData(10001, "NGN", "user@test.local", "test")]
+    [InlineData(10000, "USD", "user@test.local", "test")]
+    [InlineData(10000, "NGN", "other@test.local", "test")]
+    [InlineData(10000, "NGN", "user@test.local", "live")]
+    public async Task VerificationRejectsIntentMismatches(
+        long amount,
+        string currency,
+        string email,
+        string domain)
+    {
+        var (unitOfWork, userId, wallet, _) = Context();
+        AddIntent(unitOfWork, userId, "mismatch-ref", 10000);
+        var transaction = Transaction("mismatch-ref", email, amount);
+        transaction.Currency = currency;
+        transaction.Domain = domain;
+        var service = PaystackService(unitOfWork, transaction);
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            service.VerifyPaystackWalletFundingAsync(
+                userId,
+                new PaystackWalletFundingRequestDto
+                {
+                    Reference = "mismatch-ref"
+                }));
+
+        Assert.Equal(0m, wallet.Balance);
+    }
+
+    [Fact]
     public async Task VerificationRejectsTransactionOwnedByAnotherEmail()
     {
         var (unitOfWork, userId, wallet, _) = Context();
+        AddIntent(unitOfWork, userId, "foreign-ref", 10000);
         var service = PaystackService(
             unitOfWork,
             Transaction("foreign-ref", "other@test.local", 10000));
 
-        await Assert.ThrowsAsync<ForbiddenException>(() =>
+        await Assert.ThrowsAsync<ConflictException>(() =>
             service.VerifyPaystackWalletFundingAsync(
                 userId,
                 new PaystackWalletFundingRequestDto
@@ -116,6 +244,7 @@ public class WalletServiceTests
         string currency)
     {
         var (unitOfWork, userId, wallet, _) = Context();
+        AddIntent(unitOfWork, userId, "pay-ref", 10000);
         var transaction = Transaction(
             providerReference,
             "user@test.local",
@@ -186,10 +315,54 @@ public class WalletServiceTests
 
         Assert.Equal(userId, wallet.UserId);
         Assert.Equal(1000m, wallet.Balance);
+        Assert.Equal(500m, wallet.WithdrawableBalance);
         Assert.Equal(WalletTransactionStatus.Failed, withdrawal.Status);
         Assert.Equal(
             NotificationType.WithdrawalFailed,
             Assert.Single(unitOfWork.NotificationRepository.Items).Type);
+    }
+
+    [Theory]
+    [InlineData("transfer.success", WalletTransactionStatus.Successful, 500, 0)]
+    [InlineData("transfer.reversed", WalletTransactionStatus.Reversed, 1000, 500)]
+    public async Task TransferWebhookAppliesFinalStatusExactlyOnce(
+        string eventName,
+        WalletTransactionStatus expectedStatus,
+        decimal expectedBalance,
+        decimal expectedWithdrawableBalance)
+    {
+        var (unitOfWork, _, wallet, _) = Context();
+        wallet.Balance = 500m;
+        var withdrawal = new WalletTransaction
+        {
+            WalletId = wallet.Id,
+            Wallet = wallet,
+            Amount = 500m,
+            Type = WalletTransactionType.Withdrawal,
+            Reference = "pryde-wd-final",
+            Status = WalletTransactionStatus.Pending,
+            Provider = "Paystack",
+            Currency = "NGN"
+        };
+        unitOfWork.WalletTransactionRepository.Items.Add(withdrawal);
+        var service = PaystackService(
+            unitOfWork,
+            Transaction("unused", "user@test.local", 10000));
+        var payload =
+            $"{{\"event\":\"{eventName}\",\"data\":{{" +
+            "\"status\":\"pending\",\"reference\":\"pryde-wd-final\"," +
+            "\"amount\":50000,\"currency\":\"NGN\"}}";
+
+        await service.ProcessPaystackWebhookAsync(
+            Encoding.UTF8.GetBytes(payload),
+            Signature(payload));
+        await service.ProcessPaystackWebhookAsync(
+            Encoding.UTF8.GetBytes(payload),
+            Signature(payload));
+
+        Assert.Equal(expectedStatus, withdrawal.Status);
+        Assert.Equal(expectedBalance, wallet.Balance);
+        Assert.Equal(expectedWithdrawableBalance, wallet.WithdrawableBalance);
     }
 
     [Fact]
@@ -326,7 +499,9 @@ public class WalletServiceTests
             Options.Create(new PaystackSettings
             {
                 Enabled = true,
-                SecretKey = "test-secret"
+                PublicKey = "pk_test_public",
+                SecretKey = "test-secret",
+                ExpectedDomain = "test"
             }));
     }
 
@@ -337,6 +512,8 @@ public class WalletServiceTests
     {
         return new PaystackTransaction
         {
+            Id = 1001,
+            Domain = "test",
             Status = "success",
             Reference = reference,
             Amount = amount,
@@ -346,6 +523,24 @@ public class WalletServiceTests
                 Email = email
             }
         };
+    }
+
+    private static void AddIntent(
+        TestUnitOfWork unitOfWork,
+        Guid userId,
+        string reference,
+        long amountKobo)
+    {
+        unitOfWork.PaystackWalletFundingRequestRepository.Items.Add(
+            new PaystackWalletFundingRequest
+            {
+                UserId = userId,
+                Reference = reference,
+                ExpectedAmountKobo = amountKobo,
+                Currency = "NGN",
+                CustomerEmail = "user@test.local",
+                Status = PaystackWalletFundingRequestStatus.Pending
+            });
     }
 
     private static string Signature(string payload)

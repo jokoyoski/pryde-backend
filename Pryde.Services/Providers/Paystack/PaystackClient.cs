@@ -168,9 +168,8 @@ public class PaystackClient : IPaystackClient
                 .ReadAsStringAsync(cancellationToken);
 
             _logger.LogInformation(
-                "Paystack response ({StatusCode}): {Response}",
-                (int)response.StatusCode,
-                responseBody);
+                "Paystack responded with status {StatusCode}.",
+                (int)response.StatusCode);
 
             PaystackResponse<T>? providerResponse;
 
@@ -188,10 +187,10 @@ public class PaystackClient : IPaystackClient
             {
                 _logger.LogError(
                     exception,
-                    "Paystack returned an invalid response. Response: {Response}",
-                    responseBody);
+                    "Paystack returned an invalid JSON response.");
 
-                throw new ServiceUnavailableException(responseBody);
+                throw new ServiceUnavailableException(
+                    "Paystack returned an invalid response.");
             }
 
             if (!response.IsSuccessStatusCode ||
@@ -200,11 +199,11 @@ public class PaystackClient : IPaystackClient
                 providerResponse.Data == null)
             {
                 _logger.LogWarning(
-                    "Paystack rejected the request. Status: {StatusCode}, Response: {Response}",
-                    (int)response.StatusCode,
-                    responseBody);
+                    "Paystack rejected the request with status {StatusCode}.",
+                    (int)response.StatusCode);
 
-                throw new ServiceUnavailableException(responseBody);
+                throw new ServiceUnavailableException(
+                    "Paystack rejected the request.");
             }
 
             return providerResponse.Data;

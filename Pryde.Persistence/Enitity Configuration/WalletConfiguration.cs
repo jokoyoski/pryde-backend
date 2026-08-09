@@ -8,6 +8,7 @@ public class WalletConfiguration : IEntityTypeConfiguration<Wallet>
     {
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Balance).HasPrecision(18, 2);
+        builder.Property(x => x.WithdrawableBalance).HasPrecision(18, 2);
         builder.Property(x => x.EscrowBalance).HasPrecision(18, 2);
         builder.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId);
         builder.HasIndex(x => x.UserId).IsUnique();

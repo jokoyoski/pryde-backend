@@ -36,7 +36,9 @@ services:
 
       Paystack__Enabled: ${Paystack__Enabled:-false}
       Paystack__BaseUrl: ${Paystack__BaseUrl:-https://api.paystack.co}
+      Paystack__PublicKey: ${Paystack__PublicKey}
       Paystack__SecretKey: ${Paystack__SecretKey}
+      Paystack__ExpectedDomain: ${Paystack__ExpectedDomain:-live}
 
 
 
@@ -86,7 +88,9 @@ services:
 
       Paystack__Enabled: ${Paystack__Enabled:-false}
       Paystack__BaseUrl: ${Paystack__BaseUrl:-https://api.paystack.co}
+      Paystack__PublicKey: ${Paystack__PublicKey}
       Paystack__SecretKey: ${Paystack__SecretKey}
+      Paystack__ExpectedDomain: ${Paystack__ExpectedDomain:-live}
 
     ports:
       - "8080:8080"
