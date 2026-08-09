@@ -137,6 +137,7 @@ public class DriverBankAccountService : IDriverBankAccountService
             AccountNumber = accountNumber,
             AccountName = resolvedAccount.AccountName.Trim(),
             RecipientCode = transferRecipient.RecipientCode.Trim(),
+            VerifiedAt = DateTime.UtcNow,
             IsDefault = true,
             IsActive = true
         };

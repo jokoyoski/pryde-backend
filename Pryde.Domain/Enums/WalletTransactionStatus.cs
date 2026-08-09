@@ -4,5 +4,6 @@ public enum WalletTransactionStatus
 {
     Pending = 1,
     Successful = 2,
-    Failed = 3
+    Failed = 3,
+    Reversed = 4
 }

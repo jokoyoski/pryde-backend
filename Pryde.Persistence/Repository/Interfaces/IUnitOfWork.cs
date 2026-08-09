@@ -1,4 +1,4 @@
-﻿using Pryde.Persistence.Repository.Interfaces;
+using Pryde.Persistence.Repository.Interfaces;
 
 namespace Pryde.Persistence.Repository.Interfaces;
 
@@ -20,6 +20,7 @@ public interface IUnitOfWork
     ITripSubscriptionRepository TripSubscriptions { get; }
     IWalletRepository Wallets { get; }
     IWalletTransactionRepository WalletTransactions { get; }
+    IPaystackWalletFundingRequestRepository PaystackWalletFundingRequests { get; }
     IVirtualAccountRepository VirtualAccounts { get; }
     IVehicleImageRepository VehicleImages { get; }
     IVehicleAmenityRepository VehicleAmenities { get; }

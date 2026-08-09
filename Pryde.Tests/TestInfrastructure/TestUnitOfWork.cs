@@ -28,6 +28,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         Wallets = new TestWalletRepository();
         WalletTransactions = new TestWalletTransactionRepository(
             (TestWalletRepository)Wallets);
+        PaystackWalletFundingRequests = new TestPaystackWalletFundingRequestRepository();
         VirtualAccounts = new TestVirtualAccountRepository();
         KycVerifications = new TestKycVerificationRepository();
         PasswordResetCodes = new TestPasswordResetCodeRepository();
@@ -55,6 +56,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public TestProfileRepository ProfileRepository => (TestProfileRepository)Profiles;
     public TestWalletRepository WalletRepository => (TestWalletRepository)Wallets;
     public TestWalletTransactionRepository WalletTransactionRepository => (TestWalletTransactionRepository)WalletTransactions;
+    public TestPaystackWalletFundingRequestRepository PaystackWalletFundingRequestRepository =>
+        (TestPaystackWalletFundingRequestRepository)PaystackWalletFundingRequests;
     public TestVirtualAccountRepository VirtualAccountRepository => (TestVirtualAccountRepository)VirtualAccounts;
     public TestAdminListingRepository AdminListingRepository => (TestAdminListingRepository)AdminListings;
     public TestKycVerificationRepository KycVerificationRepository => (TestKycVerificationRepository)KycVerifications;
@@ -92,6 +95,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public ITripSubscriptionRepository TripSubscriptions { get; }
     public IWalletRepository Wallets { get; }
     public IWalletTransactionRepository WalletTransactions { get; }
+    public IPaystackWalletFundingRequestRepository PaystackWalletFundingRequests { get; }
     public IVirtualAccountRepository VirtualAccounts { get; }
     public IVehicleImageRepository VehicleImages { get; }
     public IVehicleAmenityRepository VehicleAmenities { get; }
@@ -937,6 +941,43 @@ internal sealed class TestWalletTransactionRepository(
             transaction.Type == WalletTransactionType.Withdrawal);
 
         return Task.FromResult(withdrawal);
+    }
+}
+
+internal sealed class TestPaystackWalletFundingRequestRepository
+    : IPaystackWalletFundingRequestRepository
+{
+    public List<PaystackWalletFundingRequest> Items { get; } = new();
+
+    public Task<PaystackWalletFundingRequest> CreateAsync(
+        PaystackWalletFundingRequest fundingRequest,
+        CancellationToken cancellationToken = default)
+    {
+        Items.Add(fundingRequest);
+        return Task.FromResult(fundingRequest);
+    }
+
+    public Task<PaystackWalletFundingRequest?> GetByReferenceAsync(
+        string reference,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Items.FirstOrDefault(
+            fundingRequest => fundingRequest.Reference == reference));
+    }
+
+    public Task<PaystackWalletFundingRequest?> GetByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Items.FirstOrDefault(
+            fundingRequest => fundingRequest.Id == id));
+    }
+
+    public Task<PaystackWalletFundingRequest?> GetByIdForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        return GetByIdAsync(id, cancellationToken);
     }
 }
 

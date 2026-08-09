@@ -35,7 +35,7 @@ public class DriverWithdrawalServiceTests
         Assert.Equal(500m, response.Amount);
         Assert.Equal("NGN", response.Currency);
         Assert.Equal(
-            WalletTransactionStatus.Successful,
+            WalletTransactionStatus.Pending,
             response.Status);
         Assert.Equal(WorkflowNextAction.None, response.NextAction);
         Assert.Equal(WorkflowActor.None, response.RequiredActor);
@@ -43,16 +43,15 @@ public class DriverWithdrawalServiceTests
         Assert.Equal(1500m, context.Wallet.Balance);
         Assert.Single(
             context.UnitOfWork.WalletTransactionRepository.Items);
-        Assert.Equal(4, context.UnitOfWork.SaveChangesCount);
+        Assert.Equal(3, context.UnitOfWork.SaveChangesCount);
         Assert.Contains(
             context.UnitOfWork.NotificationRepository.Items,
             notification =>
                 notification.UserId == context.DriverId &&
                 notification.Type == NotificationType.WithdrawalSubmitted);
-        Assert.Contains(
+        Assert.DoesNotContain(
             context.UnitOfWork.NotificationRepository.Items,
             notification =>
-                notification.UserId == context.DriverId &&
                 notification.Type == NotificationType.WithdrawalSuccessful);
     }
 
@@ -93,6 +92,7 @@ public class DriverWithdrawalServiceTests
     {
         var context = CreateContext();
         context.Wallet.Balance = 100m;
+        context.Wallet.WithdrawableBalance = 100m;
 
         await Assert.ThrowsAsync<ConflictException>(
             () => context.Service.CreateAsync(
@@ -100,6 +100,22 @@ public class DriverWithdrawalServiceTests
                 ValidRequest(context)));
 
         Assert.Equal(100m, context.Wallet.Balance);
+        Assert.Equal(0, context.PaystackClient.TransferCallCount);
+    }
+
+    [Fact]
+    public async Task PassengerFundedBalanceIsNotWithdrawableByDriver()
+    {
+        var context = CreateContext();
+        context.Wallet.Balance = 2000m;
+        context.Wallet.WithdrawableBalance = 0m;
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            context.Service.CreateAsync(
+                context.DriverId,
+                ValidRequest(context)));
+
+        Assert.Equal(2000m, context.Wallet.Balance);
         Assert.Equal(0, context.PaystackClient.TransferCallCount);
     }
 
@@ -152,7 +168,7 @@ public class DriverWithdrawalServiceTests
     }
 
     [Fact]
-    public async Task PaystackFailureDoesNotDebitOrSaveTransaction()
+    public async Task UncertainPaystackFailureKeepsOneReservedPendingWithdrawal()
     {
         var context = CreateContext();
         context.PaystackClient.Failure =
@@ -164,10 +180,34 @@ public class DriverWithdrawalServiceTests
                 context.DriverId,
                 ValidRequest(context)));
 
-        Assert.Equal(2000m, context.Wallet.Balance);
-        Assert.Empty(
-            context.UnitOfWork.WalletTransactionRepository.Items);
-        Assert.Equal(1, context.UnitOfWork.SaveChangesCount);
+        Assert.Equal(1500m, context.Wallet.Balance);
+        Assert.Equal(1500m, context.Wallet.WithdrawableBalance);
+        Assert.Equal(
+            WalletTransactionStatus.Pending,
+            Assert.Single(
+                context.UnitOfWork.WalletTransactionRepository.Items).Status);
+    }
+
+    [Fact]
+    public async Task UncertainTransferRetryReusesReferenceWithoutSecondReservation()
+    {
+        var context = CreateContext();
+        var request = ValidRequest(context);
+        context.PaystackClient.Failure =
+            new ServiceUnavailableException("Paystack is unavailable.");
+        await Assert.ThrowsAsync<ServiceUnavailableException>(() =>
+            context.Service.CreateAsync(context.DriverId, request));
+        var reference = Assert.Single(
+            context.UnitOfWork.WalletTransactionRepository.Items).Reference;
+
+        context.PaystackClient.Failure = null;
+        context.UnitOfWork.VerificationCodeRepository.Items.Add(
+            WithdrawalCode(context.DriverId, "123456"));
+        await context.Service.CreateAsync(context.DriverId, request);
+
+        Assert.Equal(reference, context.PaystackClient.Reference);
+        Assert.Equal(1500m, context.Wallet.Balance);
+        Assert.Single(context.UnitOfWork.WalletTransactionRepository.Items);
     }
 
     [Fact]
@@ -312,7 +352,7 @@ public class DriverWithdrawalServiceTests
     }
 
     [Fact]
-    public async Task OtpTransferDoesNotDebitWallet()
+    public async Task OtpTransferKeepsReservedWithdrawalPending()
     {
         var context = CreateContext();
         context.PaystackClient.Status = "otp";
@@ -322,8 +362,12 @@ public class DriverWithdrawalServiceTests
                 context.DriverId,
                 ValidRequest(context)));
 
-        Assert.Equal(2000m, context.Wallet.Balance);
-        Assert.Equal(1, context.UnitOfWork.SaveChangesCount);
+        Assert.Equal(1500m, context.Wallet.Balance);
+        Assert.Equal(1500m, context.Wallet.WithdrawableBalance);
+        Assert.Equal(
+            WalletTransactionStatus.Pending,
+            Assert.Single(
+                context.UnitOfWork.WalletTransactionRepository.Items).Status);
     }
 
     [Fact]
@@ -331,6 +375,7 @@ public class DriverWithdrawalServiceTests
     {
         var context = CreateContext();
         context.Wallet.Balance = 500m;
+        context.Wallet.WithdrawableBalance = 500m;
 
         var firstTask = context.Service.CreateAsync(
             context.DriverId,
@@ -431,6 +476,7 @@ public class DriverWithdrawalServiceTests
     {
         var context = CreateContext(seedWithdrawalOtp: false);
         context.Wallet.Balance = 100m;
+        context.Wallet.WithdrawableBalance = 100m;
 
         await Assert.ThrowsAsync<ConflictException>(() =>
             context.Service.RequestOtpAsync(
@@ -659,7 +705,8 @@ public class DriverWithdrawalServiceTests
         var wallet = new Wallet
         {
             UserId = driverId,
-            Balance = 2000m
+            Balance = 2000m,
+            WithdrawableBalance = 2000m
         };
         var bankAccount = new DriverBankAccount
         {
@@ -669,6 +716,7 @@ public class DriverWithdrawalServiceTests
             AccountNumber = "0123456789",
             AccountName = "Example Account Name",
             RecipientCode = "RCP_test_recipient",
+            VerifiedAt = DateTime.UtcNow,
             IsActive = true
         };
         unitOfWork.UserRepository.Items.Add(driver);
@@ -717,7 +765,8 @@ public class DriverWithdrawalServiceTests
         {
             DriverBankAccountId = context.BankAccount.Id,
             Amount = 500m,
-            Otp = "123456"
+            Otp = "123456",
+            IdempotencyKey = Guid.NewGuid().ToString("N")
         };
     }
 

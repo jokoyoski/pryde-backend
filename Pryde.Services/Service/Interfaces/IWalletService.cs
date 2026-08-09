@@ -35,6 +35,12 @@ public interface IWalletService
             PaystackWalletFundingRequestDto request,
             CancellationToken cancellationToken = default);
 
+    Task<WalletFundingRequestResponseDto>
+        CreateFundingRequestAsync(
+            Guid userId,
+            WalletFundingRequestDto request,
+            CancellationToken cancellationToken = default);
+
     Task ProcessPaystackWebhookAsync(
         ReadOnlyMemory<byte> payload,
         string? signature,

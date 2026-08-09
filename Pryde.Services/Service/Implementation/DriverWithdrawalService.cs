@@ -12,6 +12,8 @@ using Pryde.Services.Providers.Paystack;
 using Pryde.Services.Security.Implementation;
 using Pryde.Services.Service.Interface;
 using System.Text.Encodings.Web;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Pryde.Services.Service.Implementation;
 
@@ -212,70 +214,43 @@ public class DriverWithdrawalService : IDriverWithdrawalService
             cancellationToken);
 
         var amountInKobo = ConvertToKobo(request.Amount);
-        var providerReference = $"pryde-wd-{Guid.NewGuid():N}";
+        var providerReference = CreateProviderReference(
+            userId,
+            request.IdempotencyKey);
+        var maskedAccountNumber = MaskAccountNumber(
+            bankAccount.AccountNumber);
+        var walletTransaction = await _financialService
+            .RecordDriverWithdrawalAsync(
+                userId,
+                request.Amount,
+                providerReference,
+                bankAccount.BankName,
+                maskedAccountNumber,
+                bankAccount.AccountName,
+                WalletTransactionStatus.Pending,
+                cancellationToken);
+        if (walletTransaction.Status != WalletTransactionStatus.Pending)
+        {
+            return MapWithdrawal(walletTransaction);
+        }
+
         var transferResult = await _paystackClient.CreateTransferAsync(
             bankAccount.RecipientCode,
             amountInKobo,
             providerReference,
             WithdrawalReason,
             cancellationToken);
-        var transactionStatus = GetTransactionStatus(
-            transferResult,
-            providerReference);
-        var maskedAccountNumber = MaskAccountNumber(
-            bankAccount.AccountNumber);
-
-        try
-        {
-            var walletTransaction = await _financialService
-                .RecordDriverWithdrawalAsync(
-                    userId,
-                    request.Amount,
-                    providerReference,
-                    bankAccount.BankName,
-                    maskedAccountNumber,
-                    bankAccount.AccountName,
-                    transactionStatus,
-                    cancellationToken);
-
-            var response =
-                walletTransaction.Adapt<DriverWithdrawalResponseDto>();
-            response.NextAction = WorkflowNextAction.None;
-            response.RequiredActor = WorkflowActor.None;
-            await _notificationService.TryCreateAsync(
-                NewWithdrawalNotification(
-                    userId,
-                    walletTransaction.Id,
-                    NotificationType.WithdrawalSubmitted,
-                    "Withdrawal submitted",
-                    "Your withdrawal request was submitted successfully.",
-                    $"withdrawal-submitted:{walletTransaction.Id}"),
-                cancellationToken);
-
-            if (transactionStatus == WalletTransactionStatus.Successful)
-            {
-                await _notificationService.TryCreateAsync(
-                    NewWithdrawalNotification(
-                        userId,
-                        walletTransaction.Id,
-                        NotificationType.WithdrawalSuccessful,
-                        "Withdrawal sent",
-                        "Your withdrawal payout was sent successfully.",
-                        $"withdrawal-completed:{walletTransaction.Id}"),
-                    cancellationToken);
-            }
-
-            return response;
-        }
-        catch (Exception exception)
-        {
-            _logger.LogCritical(
-                exception,
-                "Paystack accepted driver withdrawal {ProviderReference}, but the local transaction failed.",
-                providerReference);
-
-            throw;
-        }
+        EnsureTransferAccepted(transferResult, providerReference);
+        await _notificationService.TryCreateAsync(
+            NewWithdrawalNotification(
+                userId,
+                walletTransaction.Id,
+                NotificationType.WithdrawalSubmitted,
+                "Withdrawal submitted",
+                "Your withdrawal request was submitted successfully.",
+                $"withdrawal-submitted:{walletTransaction.Id}"),
+            cancellationToken);
+        return MapWithdrawal(walletTransaction);
     }
 
     private static CreateNotificationRequest NewWithdrawalNotification(
@@ -352,7 +327,7 @@ public class DriverWithdrawalService : IDriverWithdrawalService
         return (long)amountInKobo;
     }
 
-    private static WalletTransactionStatus GetTransactionStatus(
+    private static void EnsureTransferAccepted(
         PaystackTransferResult transferResult,
         string providerReference)
     {
@@ -368,14 +343,14 @@ public class DriverWithdrawalService : IDriverWithdrawalService
                 "success",
                 StringComparison.OrdinalIgnoreCase))
         {
-            return WalletTransactionStatus.Successful;
+            return;
         }
 
         if (transferResult.Status.Equals(
                 "pending",
                 StringComparison.OrdinalIgnoreCase))
         {
-            return WalletTransactionStatus.Pending;
+            return;
         }
 
         if (transferResult.Status.Equals(
@@ -388,6 +363,26 @@ public class DriverWithdrawalService : IDriverWithdrawalService
 
         throw new ServiceUnavailableException(
             "Paystack did not accept the withdrawal.");
+    }
+
+    private static DriverWithdrawalResponseDto MapWithdrawal(
+        WalletTransaction walletTransaction)
+    {
+        var response = walletTransaction.Adapt<DriverWithdrawalResponseDto>();
+        response.NextAction = WorkflowNextAction.None;
+        response.RequiredActor = WorkflowActor.None;
+        return response;
+    }
+
+    private static string CreateProviderReference(
+        Guid userId,
+        string idempotencyKey)
+    {
+        var bytes = Encoding.UTF8.GetBytes(
+            $"{userId:N}:{idempotencyKey.Trim()}");
+        var hash = Convert.ToHexString(SHA256.HashData(bytes))
+            .ToLowerInvariant();
+        return $"pryde-wd-{hash}";
     }
 
     private static string MaskAccountNumber(string accountNumber)
@@ -420,6 +415,13 @@ public class DriverWithdrawalService : IDriverWithdrawalService
         {
             throw new ValidationException(
                 "A six-digit withdrawal verification code is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.IdempotencyKey) ||
+            request.IdempotencyKey.Trim().Length > 100)
+        {
+            throw new ValidationException(
+                "Withdrawal idempotency key is required and cannot exceed 100 characters.");
         }
     }
 
@@ -467,7 +469,8 @@ public class DriverWithdrawalService : IDriverWithdrawalService
                 nameof(DriverBankAccount),
                 driverBankAccountId);
 
-        if (string.IsNullOrWhiteSpace(bankAccount.RecipientCode))
+        if (string.IsNullOrWhiteSpace(bankAccount.RecipientCode) ||
+            !bankAccount.VerifiedAt.HasValue)
         {
             throw new ConflictException(
                 "The selected bank account is not ready for withdrawals.");
@@ -478,10 +481,10 @@ public class DriverWithdrawalService : IDriverWithdrawalService
             cancellationToken)
             ?? throw new NotFoundException(nameof(Wallet), userId);
 
-        if (wallet.Balance < amount)
+        if (wallet.WithdrawableBalance < amount)
         {
             throw new ConflictException(
-                "The wallet balance is insufficient for this withdrawal.");
+                "Settled driver earnings are insufficient for this withdrawal.");
         }
 
         return bankAccount;
@@ -598,7 +601,7 @@ public class DriverWithdrawalService : IDriverWithdrawalService
 
                 <div style="padding:20px 32px; text-align:center; background-color:#f9fafb; border-top:1px solid #e5e7eb;">
                     <p style="margin:0; font-size:13px; color:#6b7280;">
-                        © {DateTime.UtcNow.Year} Pryde. All rights reserved.
+                        &copy; {DateTime.UtcNow.Year} Pryde. All rights reserved.
                     </p>
                 </div>
 

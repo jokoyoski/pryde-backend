@@ -5,6 +5,7 @@ public class CreateDriverWithdrawalRequestDto
     public Guid DriverBankAccountId { get; set; }
     public decimal Amount { get; set; }
     public string Otp { get; set; } = string.Empty;
+    public string IdempotencyKey { get; set; } = string.Empty;
 }
 
 public class DriverWithdrawalOtpRequestDto

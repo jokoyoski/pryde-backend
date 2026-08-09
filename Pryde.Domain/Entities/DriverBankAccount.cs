@@ -11,6 +11,7 @@ public class DriverBankAccount : BaseEntity
     public string AccountNumber { get; set; } = string.Empty;
     public string AccountName { get; set; } = string.Empty;
     public string RecipientCode { get; set; } = string.Empty;
+    public DateTime? VerifiedAt { get; set; }
     public bool IsDefault { get; set; }
     public bool IsActive { get; set; } = true;
 }

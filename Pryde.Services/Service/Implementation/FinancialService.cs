@@ -499,6 +499,7 @@ public class FinancialService(
 
                 passengerWallet.EscrowBalance -= escrow.Amount;
                 driverWallet.Balance += escrow.DriverAmount;
+                driverWallet.WithdrawableBalance += escrow.DriverAmount;
                 unitOfWork.Wallets.Update(passengerWallet);
                 await unitOfWork.WalletTransactions.CreateAsync(
                     new WalletTransaction
@@ -705,15 +706,33 @@ public class FinancialService(
         return await unitOfWork.ExecuteInTransactionAsync(
             async transactionToken =>
             {
+                var existing = await unitOfWork.WalletTransactions
+                    .GetWithdrawalByProviderReferenceForUpdateAsync(
+                        providerReference,
+                        transactionToken);
+                if (existing is not null)
+                {
+                    if (existing.Wallet.UserId != userId ||
+                        existing.Amount != amount ||
+                        existing.BankName != bankName ||
+                        existing.MaskedAccountNumber != maskedAccountNumber)
+                    {
+                        throw new ConflictException(
+                            "The withdrawal reference is already in use.");
+                    }
+
+                    return existing;
+                }
+
                 var wallet = await unitOfWork.Wallets.GetByUserIdAsync(
                     userId,
                     transactionToken)
                     ?? throw new NotFoundException(nameof(Wallet), userId);
 
-                if (wallet.Balance < amount)
+                if (wallet.WithdrawableBalance < amount)
                 {
                     throw new ConflictException(
-                        "The wallet balance is insufficient for this withdrawal.");
+                        "Settled driver earnings are insufficient for this withdrawal.");
                 }
 
                 var walletAccount = await EnsureWalletAccountAsync(
@@ -756,6 +775,7 @@ public class FinancialService(
                     transactionToken);
 
                 wallet.Balance -= amount;
+                wallet.WithdrawableBalance -= amount;
                 unitOfWork.Wallets.Update(wallet);
 
                 var walletTransaction = new WalletTransaction
@@ -771,9 +791,7 @@ public class FinancialService(
                     BankName = bankName,
                     MaskedAccountNumber = maskedAccountNumber,
                     AccountName = accountName,
-                    CompletedAt = status == WalletTransactionStatus.Successful
-                        ? now
-                        : null
+                    CompletedAt = null
                 };
 
                 await unitOfWork.WalletTransactions.CreateAsync(
@@ -865,6 +883,178 @@ public class FinancialService(
                 return (wallet, walletTransaction);
             },
             cancellationToken);
+    }
+
+    public async Task<(
+        Wallet Wallet,
+        WalletTransaction Transaction,
+        bool Created)> CompletePaystackWalletFundingRequestAsync(
+        Guid fundingRequestId,
+        long paystackTransactionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (fundingRequestId == Guid.Empty || paystackTransactionId <= 0)
+        {
+            throw new ValidationException(
+                "Wallet funding request and Paystack transaction ID are required.");
+        }
+
+        var snapshot = await unitOfWork.PaystackWalletFundingRequests.GetByIdAsync(
+            fundingRequestId,
+            cancellationToken)
+            ?? throw new NotFoundException(
+                nameof(PaystackWalletFundingRequest),
+                fundingRequestId);
+        var amount = snapshot.ExpectedAmountKobo / 100m;
+        (Wallet Wallet, WalletTransaction Transaction, bool Created) result;
+
+        try
+        {
+            result = await unitOfWork.ExecuteInTransactionOnceAsync(
+                async transactionToken =>
+                {
+                    var fundingRequest = await unitOfWork.PaystackWalletFundingRequests
+                        .GetByIdForUpdateAsync(
+                            fundingRequestId,
+                            transactionToken)
+                        ?? throw new NotFoundException(
+                            nameof(PaystackWalletFundingRequest),
+                            fundingRequestId);
+                    if (fundingRequest.Status ==
+                        PaystackWalletFundingRequestStatus.Successful)
+                    {
+                        if (fundingRequest.PaystackTransactionId !=
+                            paystackTransactionId)
+                        {
+                            throw new ConflictException(
+                                "The wallet funding request was completed by a different Paystack transaction.");
+                        }
+
+                        var existingWallet = await unitOfWork.Wallets
+                            .GetByUserIdAsync(
+                                fundingRequest.UserId,
+                                transactionToken)
+                            ?? throw new NotFoundException(
+                                nameof(Wallet),
+                                fundingRequest.UserId);
+                        return await ExistingPaystackFundingAsync(
+                            existingWallet,
+                            fundingRequest.ExpectedAmountKobo / 100m,
+                            fundingRequest.Reference,
+                            transactionToken);
+                    }
+
+                    var wallet = await unitOfWork.Wallets.GetByUserIdAsync(
+                        fundingRequest.UserId,
+                        transactionToken)
+                        ?? throw new NotFoundException(
+                            nameof(Wallet),
+                            fundingRequest.UserId);
+                    var walletAccount = await EnsureWalletAccountAsync(
+                        wallet,
+                        transactionToken);
+                    var fundingAccount = await EnsureSystemAccountAsync(
+                        PaystackFundingAccountCode,
+                        "Paystack Wallet Funding",
+                        LedgerAccountType.ExternalFunding,
+                        transactionToken);
+                    var now = DateTime.UtcNow;
+                    var fundingAmount = fundingRequest.ExpectedAmountKobo / 100m;
+                    var ledgerTransaction = new LedgerTransaction
+                    {
+                        Reference = $"PAYSTACK-FUND-{Guid.NewGuid():N}",
+                        IdempotencyKey =
+                            $"paystack-charge:{fundingRequest.Reference}",
+                        TransactionType =
+                            LedgerTransactionType.PaystackWalletFunding,
+                        Status = LedgerTransactionStatus.Posted,
+                        Amount = fundingAmount,
+                        Currency = fundingRequest.Currency,
+                        ExternalProvider = PaystackProvider,
+                        ExternalReference = fundingRequest.Reference,
+                        CompletedAt = now
+                    };
+                    await AddBalancedEntriesAsync(
+                        ledgerTransaction,
+                        new List<LedgerEntry>
+                        {
+                            NewEntry(
+                                ledgerTransaction,
+                                fundingAccount,
+                                LedgerEntryType.Debit,
+                                fundingAmount),
+                            NewEntry(
+                                ledgerTransaction,
+                                walletAccount,
+                                LedgerEntryType.Credit,
+                                fundingAmount)
+                        },
+                        transactionToken);
+
+                    wallet.Balance += fundingAmount;
+                    unitOfWork.Wallets.Update(wallet);
+                    var walletTransaction = new WalletTransaction
+                    {
+                        WalletId = wallet.Id,
+                        Amount = fundingAmount,
+                        Type = WalletTransactionType.Credit,
+                        Reference = fundingRequest.Reference,
+                        Status = WalletTransactionStatus.Successful,
+                        Description = "Paystack wallet funding",
+                        Provider = PaystackProvider,
+                        Currency = fundingRequest.Currency,
+                        CompletedAt = now
+                    };
+                    await unitOfWork.WalletTransactions.CreateAsync(
+                        walletTransaction,
+                        transactionToken);
+                    fundingRequest.Status = PaystackWalletFundingRequestStatus.Successful;
+                    fundingRequest.PaystackTransactionId = paystackTransactionId;
+                    fundingRequest.CompletedAt = now;
+                    await unitOfWork.SaveChangesAsync(transactionToken);
+                    return (wallet, walletTransaction, true);
+                },
+                cancellationToken);
+        }
+        catch (Exception exception) when (IsPaystackFundingRace(exception))
+        {
+            unitOfWork.ClearTracking();
+            var currentFundingRequest = await unitOfWork.PaystackWalletFundingRequests
+                .GetByIdAsync(fundingRequestId, cancellationToken);
+            if (currentFundingRequest?.Status !=
+                    PaystackWalletFundingRequestStatus.Successful ||
+                currentFundingRequest.PaystackTransactionId != paystackTransactionId)
+            {
+                throw;
+            }
+
+            var committed = await GetCommittedPaystackFundingAsync(
+                currentFundingRequest.UserId,
+                amount,
+                currentFundingRequest.Reference,
+                cancellationToken);
+            if (committed is null)
+            {
+                throw;
+            }
+
+            result = committed.Value;
+        }
+
+        await notificationService.TryCreateAsync(
+            new CreateNotificationRequest
+            {
+                UserId = snapshot.UserId,
+                Type = NotificationType.WalletCredited,
+                Title = "Wallet funded",
+                Message = $"Your wallet was credited with NGN {amount:N2}.",
+                RelatedEntityId = result.Transaction.Id,
+                RelatedEntityType = nameof(WalletTransaction),
+                DeduplicationKey =
+                    $"paystack-wallet-funded:{snapshot.Reference}"
+            },
+            cancellationToken);
+        return result;
     }
 
     public async Task<(
@@ -1060,7 +1250,9 @@ public class FinancialService(
 
                 if (normalizedStatus == "success")
                 {
-                    if (withdrawal.Status == WalletTransactionStatus.Failed)
+                    if (withdrawal.Status is
+                        WalletTransactionStatus.Failed or
+                        WalletTransactionStatus.Reversed)
                     {
                         return new WithdrawalStatusResult(
                             true,
@@ -1079,7 +1271,12 @@ public class FinancialService(
                         true);
                 }
 
-                if (withdrawal.Status != WalletTransactionStatus.Failed)
+                var finalFailureStatus = normalizedStatus == "reversed"
+                    ? WalletTransactionStatus.Reversed
+                    : WalletTransactionStatus.Failed;
+                if (withdrawal.Status is not (
+                    WalletTransactionStatus.Failed or
+                    WalletTransactionStatus.Reversed))
                 {
                     var reversalKey =
                         $"paystack-transfer-reversal:{reference}";
@@ -1110,7 +1307,7 @@ public class FinancialService(
                             Amount = amount,
                             Currency = Currency,
                             ExternalProvider = PaystackProvider,
-                            ExternalReference = reference,
+                            ExternalReference = $"reversal:{reference}",
                             CompletedAt = now
                         };
 
@@ -1130,10 +1327,11 @@ public class FinancialService(
                             ],
                             transactionToken);
                         withdrawal.Wallet.Balance += amount;
+                        withdrawal.Wallet.WithdrawableBalance += amount;
                         unitOfWork.Wallets.Update(withdrawal.Wallet);
                     }
 
-                    withdrawal.Status = WalletTransactionStatus.Failed;
+                    withdrawal.Status = finalFailureStatus;
                     withdrawal.CompletedAt = DateTime.UtcNow;
                     await unitOfWork.SaveChangesAsync(transactionToken);
                 }

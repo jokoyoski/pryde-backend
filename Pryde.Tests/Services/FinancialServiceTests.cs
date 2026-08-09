@@ -136,6 +136,7 @@ public class FinancialServiceTests
         var summary = await service.GetSummaryAsync();
 
         Assert.Equal(2400m, context.DriverWallet.Balance);
+        Assert.Equal(2400m, context.DriverWallet.WithdrawableBalance);
         Assert.Equal(100m, summary.TotalPlatformEarnings);
         Assert.Equal(2400m, summary.TotalDriverPayouts);
         Assert.Equal(EscrowStatus.Released, context.UnitOfWork.EscrowRepository.Items.Single().Status);

@@ -135,7 +135,55 @@ public class WalletService : IWalletService
         {
             Id = wallet.Id,
             Balance = wallet.Balance,
+            WithdrawableBalance = wallet.WithdrawableBalance,
             EscrowBalance = wallet.EscrowBalance
+        };
+    }
+
+    public async Task<WalletFundingRequestResponseDto>
+        CreateFundingRequestAsync(
+            Guid userId,
+            WalletFundingRequestDto request,
+            CancellationToken cancellationToken = default)
+    {
+        if (request is null)
+        {
+            throw new ValidationException("Request cannot be null.");
+        }
+
+        var expectedAmountKobo = ConvertToKobo(request.Amount);
+        var user = await unitOfWork.Users.GetByIdAsync(
+            userId,
+            cancellationToken)
+            ?? throw new NotFoundException(nameof(User), userId);
+        if (string.IsNullOrWhiteSpace(user.Email))
+        {
+            throw new ValidationException(
+                "The authenticated user email is required.");
+        }
+
+        await GetWalletAsync(userId, cancellationToken);
+        var fundingRequest = new PaystackWalletFundingRequest
+        {
+            UserId = userId,
+            Reference = $"pryde-fund-{Guid.NewGuid():N}",
+            ExpectedAmountKobo = expectedAmountKobo,
+            Currency = Currency,
+            CustomerEmail = user.Email.Trim(),
+            Status = PaystackWalletFundingRequestStatus.Pending
+        };
+        await unitOfWork.PaystackWalletFundingRequests.CreateAsync(
+            fundingRequest,
+            cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return new WalletFundingRequestResponseDto
+        {
+            Reference = fundingRequest.Reference,
+            AmountKobo = fundingRequest.ExpectedAmountKobo,
+            Currency = fundingRequest.Currency,
+            Email = fundingRequest.CustomerEmail,
+            PublicKey = PaystackSettings.PublicKey
         };
     }
 
@@ -202,31 +250,41 @@ public class WalletService : IWalletService
         }
 
         var reference = ValidatePaystackReference(request.Reference);
-        var user = await unitOfWork.Users.GetByIdAsync(
-            userId,
-            cancellationToken)
-            ?? throw new NotFoundException(nameof(User), userId);
+        var fundingRequest = await unitOfWork.PaystackWalletFundingRequests
+            .GetByReferenceAsync(reference, cancellationToken)
+            ?? throw new NotFoundException(
+                nameof(PaystackWalletFundingRequest),
+                reference);
+        if (fundingRequest.UserId != userId)
+        {
+            throw new ForbiddenException(
+                "The wallet funding request does not belong to the authenticated user.");
+        }
+
+        if (fundingRequest.Status == PaystackWalletFundingRequestStatus.Successful &&
+            fundingRequest.PaystackTransactionId.HasValue)
+        {
+            var existing = await FinancialService
+                .CompletePaystackWalletFundingRequestAsync(
+                    fundingRequest.Id,
+                    fundingRequest.PaystackTransactionId.Value,
+                    cancellationToken);
+            return MapPaystackFunding(
+                existing.Wallet,
+                existing.Transaction);
+        }
+
         var transaction = await PaystackClient.VerifyTransactionAsync(
             reference,
             cancellationToken);
 
         ValidateSuccessfulPaystackTransaction(
             transaction,
-            reference);
-        if (!transaction.Customer!.Email.Equals(
-                user.Email,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ForbiddenException(
-                "The Paystack transaction does not belong to the authenticated user.");
-        }
-
-        var amount = ConvertFromKobo(transaction.Amount);
+            fundingRequest);
         var result = await FinancialService
-            .RecordPaystackWalletFundingAsync(
-                userId,
-                amount,
-                reference,
+            .CompletePaystackWalletFundingRequestAsync(
+                fundingRequest.Id,
+                transaction.Id,
                 cancellationToken);
 
         return MapPaystackFunding(result.Wallet, result.Transaction);
@@ -263,22 +321,19 @@ public class WalletService : IWalletService
                     "Paystack webhook transaction data is required.");
             var reference = ValidatePaystackReference(
                 transaction.Reference);
-            ValidateSuccessfulPaystackTransaction(
-                transaction,
-                reference);
-            var email = transaction.Customer!.Email.Trim();
-            var user = await unitOfWork.Users.GetByEmailAsync(
-                email,
-                cancellationToken);
-            if (user is null)
+            var fundingRequest = await unitOfWork.PaystackWalletFundingRequests
+                .GetByReferenceAsync(reference, cancellationToken);
+            if (fundingRequest is null)
             {
                 return;
             }
 
-            await FinancialService.RecordPaystackWalletFundingAsync(
-                user.Id,
-                ConvertFromKobo(transaction.Amount),
-                reference,
+            ValidateSuccessfulPaystackTransaction(
+                transaction,
+                fundingRequest);
+            await FinancialService.CompletePaystackWalletFundingRequestAsync(
+                fundingRequest.Id,
+                transaction.Id,
                 cancellationToken);
             return;
         }
@@ -320,6 +375,10 @@ public class WalletService : IWalletService
         _financialService ?? throw new InvalidOperationException(
             "Financial service is not available.");
 
+    private PaystackSettings PaystackSettings =>
+        _paystackSettings ?? throw new InvalidOperationException(
+            "Paystack settings are not available.");
+
     private static PaystackWalletFundingResponseDto MapPaystackFunding(
         Wallet wallet,
         WalletTransaction transaction)
@@ -336,9 +395,9 @@ public class WalletService : IWalletService
         };
     }
 
-    private static void ValidateSuccessfulPaystackTransaction(
+    private void ValidateSuccessfulPaystackTransaction(
         PaystackTransaction transaction,
-        string expectedReference)
+        PaystackWalletFundingRequest fundingRequest)
     {
         if (transaction is null)
         {
@@ -355,19 +414,54 @@ public class WalletService : IWalletService
         }
 
         if (!transaction.Reference.Equals(
-                expectedReference,
+                fundingRequest.Reference,
                 StringComparison.Ordinal))
         {
             throw new ConflictException(
                 "Paystack returned a different transaction reference.");
         }
 
-        ValidatePaystackCurrencyAndAmount(transaction);
+        if (transaction.Amount != fundingRequest.ExpectedAmountKobo)
+        {
+            throw new ConflictException(
+                "Paystack transaction amount does not match the wallet funding request.");
+        }
+
+        if (!transaction.Currency.Equals(
+                fundingRequest.Currency,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ConflictException(
+                "Paystack transaction currency does not match the wallet funding request.");
+        }
+
+        if (!transaction.Domain.Equals(
+                PaystackSettings.ExpectedDomain,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ConflictException(
+                "Paystack transaction domain does not match this environment.");
+        }
+
+        if (transaction.Id <= 0)
+        {
+            throw new ValidationException(
+                "Paystack transaction ID is invalid.");
+        }
+
         if (transaction.Customer is null ||
             string.IsNullOrWhiteSpace(transaction.Customer.Email))
         {
             throw new ValidationException(
                 "Paystack transaction customer is invalid.");
+        }
+
+        if (!transaction.Customer.Email.Trim().Equals(
+                fundingRequest.CustomerEmail,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ConflictException(
+                "Paystack transaction customer does not match the wallet funding request.");
         }
     }
 
@@ -398,6 +492,29 @@ public class WalletService : IWalletService
         }
 
         return amountInKobo / 100m;
+    }
+
+    private static long ConvertToKobo(decimal amount)
+    {
+        if (amount <= 0)
+        {
+            throw new ValidationException(
+                "Funding amount must be greater than zero.");
+        }
+
+        var amountInKobo = amount * 100m;
+        if (amountInKobo != decimal.Truncate(amountInKobo))
+        {
+            throw new ValidationException(
+                "Funding amount cannot contain more than two decimal places.");
+        }
+
+        if (amountInKobo > long.MaxValue)
+        {
+            throw new ValidationException("Funding amount is too large.");
+        }
+
+        return (long)amountInKobo;
     }
 
     private static string ValidatePaystackReference(string? reference)

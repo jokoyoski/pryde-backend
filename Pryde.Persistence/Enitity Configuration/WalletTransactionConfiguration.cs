@@ -16,5 +16,8 @@ public class WalletTransactionConfiguration : IEntityTypeConfiguration<WalletTra
         builder.Property(x => x.AccountName).HasMaxLength(200);
         builder.HasOne(x => x.Wallet).WithMany().HasForeignKey(x => x.WalletId);
         builder.HasIndex(x => new { x.WalletId, x.Type, x.CreatedAt });
+        builder.HasIndex(x => new { x.Provider, x.Reference })
+            .IsUnique()
+            .HasFilter("\"Provider\" IS NOT NULL AND \"Reference\" IS NOT NULL");
     }
 }

@@ -45,6 +45,11 @@ public interface IFinancialService
             decimal amount,
             string providerReference,
             CancellationToken cancellationToken = default);
+    Task<(Wallet Wallet, WalletTransaction Transaction, bool Created)>
+        CompletePaystackWalletFundingRequestAsync(
+            Guid fundingRequestId,
+            long paystackTransactionId,
+            CancellationToken cancellationToken = default);
     Task<bool> ProcessPaystackTransferStatusAsync(
         string providerReference,
         long amountInKobo,

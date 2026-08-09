@@ -6,5 +6,7 @@ public class PaystackSettings
 
     public bool Enabled { get; set; }
     public string BaseUrl { get; set; } = "https://api.paystack.co";
+    public string PublicKey { get; set; } = string.Empty;
     public string SecretKey { get; set; } = string.Empty;
+    public string ExpectedDomain { get; set; } = "live";
 }

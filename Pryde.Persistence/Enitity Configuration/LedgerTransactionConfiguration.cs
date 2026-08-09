@@ -15,6 +15,9 @@ public class LedgerTransactionConfiguration : IEntityTypeConfiguration<LedgerTra
         builder.Property(x => x.ExternalReference).HasMaxLength(100);
         builder.HasIndex(x => x.Reference).IsUnique();
         builder.HasIndex(x => x.IdempotencyKey).IsUnique();
+        builder.HasIndex(x => x.ExternalReference)
+            .IsUnique()
+            .HasFilter("\"ExternalReference\" IS NOT NULL");
         builder.HasIndex(x => x.BookingId);
         builder.HasIndex(x => x.EscrowId);
         builder.HasOne(x => x.Escrow)

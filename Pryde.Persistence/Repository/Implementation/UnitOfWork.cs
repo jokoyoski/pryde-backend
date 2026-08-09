@@ -1,4 +1,4 @@
-﻿using Pryde.Domain.Entities;
+using Pryde.Domain.Entities;
 using Pryde.Persistence.Context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -24,6 +24,7 @@ public class UnitOfWork(
     ITripSubscriptionRepository tripSubscription,
     IWalletRepository wallet,
     IWalletTransactionRepository walletTransaction,
+    IPaystackWalletFundingRequestRepository paystackFundingRequest,
     IVirtualAccountRepository virtualAccount,
     IVehicleImageRepository vehicleImage,
     IVehicleAmenityRepository vehicleAmenity,
@@ -51,6 +52,8 @@ public class UnitOfWork(
     public ITripSubscriptionRepository TripSubscriptions { get; } = tripSubscription;
     public IWalletRepository Wallets { get; } = wallet;
     public IWalletTransactionRepository WalletTransactions { get; } = walletTransaction;
+    public IPaystackWalletFundingRequestRepository PaystackWalletFundingRequests { get; } =
+        paystackFundingRequest;
     public IVirtualAccountRepository VirtualAccounts { get; } = virtualAccount;
     public IVehicleImageRepository VehicleImages { get; } = vehicleImage;
     public IVehicleAmenityRepository VehicleAmenities { get; } = vehicleAmenity;
