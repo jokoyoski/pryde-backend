@@ -119,4 +119,9 @@ public class UnitOfWork(
             }
         });
     }
+
+    public void ClearTracking()
+    {
+        context.ChangeTracker.Clear();
+    }
 }

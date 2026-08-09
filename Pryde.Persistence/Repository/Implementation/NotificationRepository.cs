@@ -149,23 +149,24 @@ public class NotificationRepository(
             DateTime? createdTo,
             CancellationToken cancellationToken = default)
     {
-        var query = AdminQuery();
+        var notifications = context.Notifications
+            .AsNoTracking();
 
         if (userId.HasValue)
         {
-            query = query.Where(notification =>
+            notifications = notifications.Where(notification =>
                 notification.UserId == userId.Value);
         }
 
         if (type.HasValue)
         {
-            query = query.Where(notification =>
+            notifications = notifications.Where(notification =>
                 notification.Type == type.Value);
         }
 
         if (isRead.HasValue)
         {
-            query = query.Where(notification =>
+            notifications = notifications.Where(notification =>
                 notification.IsRead == isRead.Value);
         }
 
@@ -173,7 +174,7 @@ public class NotificationRepository(
         {
             var utcFrom =
                 createdFrom.Value.ToUniversalTime();
-            query = query.Where(notification =>
+            notifications = notifications.Where(notification =>
                 notification.CreatedAt >= utcFrom);
         }
 
@@ -181,19 +182,20 @@ public class NotificationRepository(
         {
             var utcTo =
                 createdTo.Value.ToUniversalTime();
-            query = query.Where(notification =>
+            notifications = notifications.Where(notification =>
                 notification.CreatedAt <= utcTo);
         }
 
-        var totalCount = await query.CountAsync(
+        var totalCount = await notifications.CountAsync(
             cancellationToken);
-        var items = await query
+        var page = notifications
             .OrderByDescending(notification =>
                 notification.CreatedAt)
             .ThenByDescending(notification =>
                 notification.Id)
             .Skip((pageNumber - 1) * pageSize)
-            .Take(pageSize)
+            .Take(pageSize);
+        var items = await AdminQuery(page)
             .ToListAsync(cancellationToken);
 
         return (items, totalCount);
@@ -203,10 +205,12 @@ public class NotificationRepository(
         Guid notificationId,
         CancellationToken cancellationToken = default)
     {
-        return AdminQuery().FirstOrDefaultAsync(
-            notification =>
-                notification.Id == notificationId,
-            cancellationToken);
+        var notifications = context.Notifications
+            .AsNoTracking()
+            .Where(notification =>
+                notification.Id == notificationId);
+        return AdminQuery(notifications)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     public void Detach(Notification notification)
@@ -216,17 +220,18 @@ public class NotificationRepository(
     }
 
     private IQueryable<AdminNotificationRecord>
-        AdminQuery()
+        AdminQuery(IQueryable<Notification> notifications)
     {
         return
-            from notification in context.Notifications
-                .AsNoTracking()
+            from notification in notifications
             join user in context.Users.AsNoTracking()
                 on notification.UserId equals user.Id
             join profile in context.Profiles.AsNoTracking()
                 on user.Id equals profile.UserId
                 into profiles
             from profile in profiles.DefaultIfEmpty()
+            orderby notification.CreatedAt descending,
+                notification.Id descending
             select new AdminNotificationRecord(
                 notification.Id,
                 notification.UserId,

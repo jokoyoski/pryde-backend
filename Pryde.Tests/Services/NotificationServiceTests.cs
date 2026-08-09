@@ -1,6 +1,7 @@
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
+using Pryde.Domain.Constants;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Services.Service.Implementation;
@@ -50,7 +51,11 @@ public class NotificationServiceTests
     public async Task NotificationCreationWorks()
     {
         var unitOfWork = Context(out var user);
-        var realtimeSender = new TestRealtimeSender();
+        var realtimeSender = new TestRealtimeSender
+        {
+            SaveChangesCount = () =>
+                unitOfWork.SaveChangesCount
+        };
         var service = new NotificationService(
             unitOfWork,
             realtimeSender,
@@ -70,6 +75,7 @@ public class NotificationServiceTests
         Assert.Equal(1, unitOfWork.SaveChangesCount);
         Assert.Equal(user.Id, realtimeSender.UserId);
         Assert.Same(result, realtimeSender.Notification);
+        Assert.Equal(1, realtimeSender.SaveChangesCountAtSend);
     }
 
     [Fact]
@@ -95,6 +101,28 @@ public class NotificationServiceTests
             result.Type);
         Assert.Single(
             unitOfWork.NotificationRepository.Items);
+        Assert.Equal(1, unitOfWork.SaveChangesCount);
+    }
+
+    [Fact]
+    public async Task ZeroRowSaveIsNotReportedAsPersistedOrSentRealtime()
+    {
+        var unitOfWork = Context(out var user);
+        unitOfWork.SaveChangesResults.Enqueue(0);
+        var realtimeSender = new TestRealtimeSender();
+        var service = new NotificationService(
+            unitOfWork,
+            realtimeSender,
+            new TestLogger<NotificationService>());
+
+        var result = await service.TryCreateAsync(
+            Request(
+                user.Id,
+                NotificationType.BookingApproved));
+
+        Assert.Null(result);
+        Assert.Empty(unitOfWork.NotificationRepository.Items);
+        Assert.Empty(realtimeSender.Deliveries);
         Assert.Equal(1, unitOfWork.SaveChangesCount);
     }
 
@@ -329,6 +357,122 @@ public class NotificationServiceTests
         Assert.Null(matching.ReadAt);
     }
 
+    [Theory]
+    [InlineData(NotificationAudience.All, 4)]
+    [InlineData(NotificationAudience.Drivers, 3)]
+    [InlineData(NotificationAudience.Passengers, 2)]
+    public async Task BroadcastTargetsAuthenticatableAudienceAndUsesExistingDeliveryFlow(
+        NotificationAudience audience,
+        int expectedCount)
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var driver = AddBroadcastUser(unitOfWork, "driver@test.local", UserStatus.Active, RoleNames.Driver);
+        var pendingDriver = AddBroadcastUser(unitOfWork, "pending-driver@test.local", UserStatus.Pending, RoleNames.Driver);
+        var passenger = AddBroadcastUser(unitOfWork, "passenger@test.local", UserStatus.Active, RoleNames.Passenger);
+        var dualRole = AddBroadcastUser(unitOfWork, "dual@test.local", UserStatus.Active, RoleNames.Driver, RoleNames.Passenger);
+        AddBroadcastUser(unitOfWork, "suspended@test.local", UserStatus.Suspended, RoleNames.Driver);
+        AddBroadcastUser(unitOfWork, "admin@test.local", UserStatus.Active, RoleNames.Admin);
+        AddBroadcastUser(unitOfWork, "admin-passenger@test.local", UserStatus.Active, RoleNames.Admin, RoleNames.Passenger);
+        var realtimeSender = new TestRealtimeSender();
+        var service = new NotificationService(
+            unitOfWork,
+            realtimeSender,
+            new TestLogger<NotificationService>());
+
+        var result = await service.BroadcastAsync(
+            new AdminBroadcastNotificationRequestDto
+            {
+                Title = "Service update",
+                Message = "A new service update is available.",
+                Audience = audience
+            });
+
+        Assert.Equal(expectedCount, result.Count);
+        Assert.Equal(expectedCount, unitOfWork.NotificationRepository.Items.Count);
+        Assert.Equal(expectedCount, unitOfWork.SaveChangesCount);
+        Assert.Equal(expectedCount, realtimeSender.Deliveries.Count);
+        Assert.All(unitOfWork.NotificationRepository.Items, notification =>
+        {
+            Assert.Equal(NotificationType.SystemAnnouncement, notification.Type);
+            Assert.Equal("Service update", notification.Title);
+            Assert.Equal("A new service update is available.", notification.Message);
+            Assert.False(notification.IsRead);
+        });
+        Assert.Equal(
+            unitOfWork.NotificationRepository.Items.Select(notification => notification.UserId).Order(),
+            realtimeSender.Deliveries.Select(delivery => delivery.UserId).Order());
+
+        var expectedIds = audience switch
+        {
+            NotificationAudience.Drivers => new[] { driver.Id, pendingDriver.Id, dualRole.Id },
+            NotificationAudience.Passengers => new[] { passenger.Id, dualRole.Id },
+            _ => new[] { driver.Id, pendingDriver.Id, passenger.Id, dualRole.Id }
+        };
+        Assert.Equal(
+            expectedIds.Order(),
+            unitOfWork.NotificationRepository.Items.Select(notification => notification.UserId).Order());
+    }
+
+    [Fact]
+    public async Task BroadcastCountIncludesOnlyPersistedNotifications()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        AddBroadcastUser(
+            unitOfWork,
+            "driver-one@test.local",
+            UserStatus.Active,
+            RoleNames.Driver);
+        AddBroadcastUser(
+            unitOfWork,
+            "driver-two@test.local",
+            UserStatus.Active,
+            RoleNames.Driver);
+        unitOfWork.SaveChangesResults.Enqueue(1);
+        unitOfWork.SaveChangesResults.Enqueue(0);
+        var realtimeSender = new TestRealtimeSender();
+        var service = new NotificationService(
+            unitOfWork,
+            realtimeSender,
+            new TestLogger<NotificationService>());
+
+        var result = await service.BroadcastAsync(
+            new AdminBroadcastNotificationRequestDto
+            {
+                Title = "Service update",
+                Message = "A new service update is available.",
+                Audience = NotificationAudience.Drivers
+            });
+
+        Assert.Equal(1, result.Count);
+        Assert.Single(unitOfWork.NotificationRepository.Items);
+        Assert.Single(realtimeSender.Deliveries);
+        Assert.Equal(2, unitOfWork.SaveChangesCount);
+    }
+
+    [Theory]
+    [InlineData("", "Message", NotificationAudience.All)]
+    [InlineData("Title", "", NotificationAudience.All)]
+    [InlineData("Title", "Message", (NotificationAudience)999)]
+    public async Task BroadcastRejectsInvalidRequest(
+        string title,
+        string message,
+        NotificationAudience audience)
+    {
+        var unitOfWork = new TestUnitOfWork();
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            new NotificationService(unitOfWork).BroadcastAsync(
+                new AdminBroadcastNotificationRequestDto
+                {
+                    Title = title,
+                    Message = message,
+                    Audience = audience
+                }));
+
+        Assert.Empty(unitOfWork.NotificationRepository.Items);
+        Assert.Equal(0, unitOfWork.SaveChangesCount);
+    }
+
     [Fact]
     public void DeduplicationKeyIsNotExposed()
     {
@@ -365,6 +509,29 @@ public class NotificationServiceTests
         user.Profile.UserId = user.Id;
         user.Profile.User = user;
         unitOfWork.UserRepository.Items.Add(user);
+        return user;
+    }
+
+    private static User AddBroadcastUser(
+        TestUnitOfWork unitOfWork,
+        string email,
+        UserStatus status,
+        params string[] roles)
+    {
+        var user = AddUser(unitOfWork, email);
+        user.Status = status;
+        foreach (var roleName in roles)
+        {
+            var role = new Role { Name = roleName };
+            user.UserRoles.Add(new UserRole
+            {
+                UserId = user.Id,
+                User = user,
+                RoleId = role.Id,
+                Role = role
+            });
+        }
+
         return user;
     }
 
@@ -434,9 +601,12 @@ public class NotificationServiceTests
     private sealed class TestRealtimeSender
         : INotificationRealtimeSender
     {
+        public List<(Guid UserId, NotificationResponseDto Notification)> Deliveries { get; } = [];
         public Guid? UserId { get; private set; }
         public NotificationResponseDto? Notification { get; private set; }
         public Exception? Exception { get; init; }
+        public Func<int>? SaveChangesCount { get; init; }
+        public int? SaveChangesCountAtSend { get; private set; }
 
         public Task SendAsync(
             Guid userId,
@@ -445,6 +615,8 @@ public class NotificationServiceTests
         {
             UserId = userId;
             Notification = notification;
+            SaveChangesCountAtSend = SaveChangesCount?.Invoke();
+            Deliveries.Add((userId, notification));
 
             if (Exception is not null)
             {

@@ -35,4 +35,14 @@ public class AdminNotificationsController(
             notificationId,
             cancellationToken));
     }
+
+    [HttpPost("broadcast")]
+    public async Task<IActionResult> Broadcast(
+        [FromBody] AdminBroadcastNotificationRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await notificationService.BroadcastAsync(
+            request,
+            cancellationToken));
+    }
 }

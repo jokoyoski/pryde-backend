@@ -6,5 +6,7 @@ public enum LedgerTransactionType
     EscrowRelease = 2,
     EscrowRefund = 3,
     DriverWithdrawal = 4,
-    TestWalletFunding = 5
+    TestWalletFunding = 5,
+    PaystackWalletFunding = 6,
+    DriverWithdrawalReversal = 7
 }

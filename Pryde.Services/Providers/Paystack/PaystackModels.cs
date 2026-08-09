@@ -2,6 +2,39 @@ using System.Text.Json.Serialization;
 
 namespace Pryde.Services.Providers.Paystack;
 
+public class PaystackTransaction
+{
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    [JsonPropertyName("reference")]
+    public string Reference { get; set; } = string.Empty;
+
+    [JsonPropertyName("amount")]
+    public long Amount { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = string.Empty;
+
+    [JsonPropertyName("customer")]
+    public PaystackCustomer? Customer { get; set; }
+}
+
+public class PaystackCustomer
+{
+    [JsonPropertyName("email")]
+    public string Email { get; set; } = string.Empty;
+}
+
+public class PaystackWebhookEvent
+{
+    [JsonPropertyName("event")]
+    public string Event { get; set; } = string.Empty;
+
+    [JsonPropertyName("data")]
+    public PaystackTransaction? Data { get; set; }
+}
+
 public class PaystackBank
 {
     [JsonPropertyName("name")]

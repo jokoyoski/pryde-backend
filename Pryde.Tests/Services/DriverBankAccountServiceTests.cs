@@ -518,6 +518,13 @@ public class DriverBankAccountServiceTests
         public int ResolveCallCount { get; private set; }
         public int CreateRecipientCallCount { get; private set; }
 
+        public Task<PaystackTransaction> VerifyTransactionAsync(
+            string reference,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
         public Task<IReadOnlyList<PaystackBank>> GetBanksAsync(
             CancellationToken cancellationToken = default)
         {

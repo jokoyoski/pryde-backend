@@ -23,6 +23,10 @@ public interface IUserRepository
     Task<IReadOnlyList<User>> GetAllAsync(
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<Guid>> GetActiveNotificationRecipientIdsAsync(
+        string? role,
+        CancellationToken cancellationToken = default);
+
     Task<bool> ExistsAsync(
         string email,
         string? phoneNumber,

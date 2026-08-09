@@ -24,6 +24,21 @@ public class PaystackClient : IPaystackClient
         _logger = logger;
     }
 
+    public async Task<PaystackTransaction> VerifyTransactionAsync(
+        string reference,
+        CancellationToken cancellationToken = default)
+    {
+        var encodedReference = Uri.EscapeDataString(reference);
+        using (var request = new HttpRequestMessage(
+                   HttpMethod.Get,
+                   $"transaction/verify/{encodedReference}"))
+        {
+            return await SendAsync<PaystackTransaction>(
+                request,
+                cancellationToken);
+        }
+    }
+
     public async Task<IReadOnlyList<PaystackBank>> GetBanksAsync(
         CancellationToken cancellationToken = default)
     {

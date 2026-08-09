@@ -73,6 +73,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         (TestTripSubscriptionRepository)TripSubscriptions;
     public int SaveChangesCount { get; private set; }
     public int TransactionCount { get; private set; }
+    public Queue<int> SaveChangesResults { get; } = [];
 
     public IUserRepository Users { get; }
     public IRoleRepository Roles { get; }
@@ -103,7 +104,10 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         SaveChangesCount++;
-        return Task.FromResult(1);
+        return Task.FromResult(
+            SaveChangesResults.TryDequeue(out var result)
+                ? result
+                : 1);
     }
 
     public async Task<T> ExecuteInTransactionAsync<T>(
@@ -137,6 +141,10 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         return ExecuteInTransactionAsync(
             action,
             cancellationToken);
+    }
+
+    public void ClearTracking()
+    {
     }
 }
 
@@ -530,6 +538,7 @@ internal sealed class TestNotificationRepository(
 
     public void Detach(Notification notification)
     {
+        Items.Remove(notification);
     }
 
     private IEnumerable<AdminNotificationRecord> Records()
@@ -673,6 +682,15 @@ internal sealed class TestUserRepository(List<User> items) : IUserRepository
     public Task<User?> GetByEmailAsync(string email, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(user => user.Email.Equals(email, StringComparison.OrdinalIgnoreCase)));
     public Task<User?> GetByPhoneNumberAsync(string phoneNumber, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(user => user.PhoneNumber == phoneNumber));
     public Task<IReadOnlyList<User>> GetAllAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<User>>(Items.ToList());
+    public Task<IReadOnlyList<Guid>> GetActiveNotificationRecipientIdsAsync(string? role, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Guid>>(Items
+            .Where(user => user.Status != UserStatus.Suspended &&
+                           user.Status != UserStatus.Deactivated &&
+                           !user.UserRoles.Any(userRole => userRole.Role.Name is "Admin" or "SuperAdmin") &&
+                           user.UserRoles.Any(userRole => userRole.Role.Name is "Driver" or "Passenger") &&
+                           (string.IsNullOrWhiteSpace(role) || user.UserRoles.Any(userRole => userRole.Role.Name == role)))
+            .Select(user => user.Id)
+            .ToList());
     public Task<bool> ExistsAsync(string email, string? phoneNumber, CancellationToken cancellationToken = default) => Task.FromResult(Items.Any(user => user.Email.Equals(email, StringComparison.OrdinalIgnoreCase) || (!string.IsNullOrWhiteSpace(phoneNumber) && user.PhoneNumber == phoneNumber)));
     public Task<bool> HasProtectedDeletionRecordsAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(ProtectedDeletionUserIds.Contains(userId));
     public Task DeleteWithRelatedDataAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -815,6 +833,20 @@ internal sealed class TestWalletTransactionRepository(
 {
     public List<WalletTransaction> Items { get; } = [];
     public Task<WalletTransaction> CreateAsync(WalletTransaction transaction, CancellationToken cancellationToken = default) { Items.Add(transaction); return Task.FromResult(transaction); }
+    public Task<WalletTransaction?> GetByProviderReferenceAsync(string provider, string reference, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Items.FirstOrDefault(transaction => transaction.Provider == provider && transaction.Reference == reference));
+    public Task<WalletTransaction?> GetWithdrawalByProviderReferenceForUpdateAsync(string reference, CancellationToken cancellationToken = default)
+    {
+        var transaction = Items.FirstOrDefault(item =>
+            item.Type == WalletTransactionType.Withdrawal &&
+            item.Provider == "Paystack" &&
+            item.Reference == reference);
+        if (transaction is not null && transaction.Wallet is null)
+        {
+            transaction.Wallet = wallets.Items.Single(wallet => wallet.Id == transaction.WalletId);
+        }
+        return Task.FromResult(transaction);
+    }
     public int PagedQueryCount { get; private set; }
     public int SumQueryCount { get; private set; }
 

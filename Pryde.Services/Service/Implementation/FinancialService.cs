@@ -19,6 +19,9 @@ public class FinancialService(
     private const string PlatformRevenueAccountCode = "SYSTEM:PLATFORM_REVENUE:NGN";
     private const string DriverWithdrawalAccountCode = "SYSTEM:DRIVER_WITHDRAWALS:NGN";
     private const string TestFundingAccountCode = "SYSTEM:TEST_FUNDING:NGN";
+    private const string PaystackFundingAccountCode =
+        "EXTERNAL:PAYSTACK_FUNDING:NGN";
+    private const string PaystackProvider = "Paystack";
 
     public FinancialService(IUnitOfWork unitOfWork)
         : this(unitOfWork, new NotificationService(unitOfWork))
@@ -864,6 +867,315 @@ public class FinancialService(
             cancellationToken);
     }
 
+    public async Task<(
+        Wallet Wallet,
+        WalletTransaction Transaction,
+        bool Created)> RecordPaystackWalletFundingAsync(
+            Guid userId,
+            decimal amount,
+            string providerReference,
+            CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty)
+        {
+            throw new ValidationException("User ID is required.");
+        }
+
+        if (amount <= 0)
+        {
+            throw new ValidationException(
+                "Funding amount must be greater than zero.");
+        }
+
+        var reference = ValidatePaystackReference(providerReference);
+        var idempotencyKey = $"paystack-charge:{reference}";
+        (Wallet Wallet, WalletTransaction Transaction, bool Created) result;
+
+        try
+        {
+            result = await unitOfWork.ExecuteInTransactionOnceAsync(
+                async transactionToken =>
+                {
+                    var wallet = await unitOfWork.Wallets.GetByUserIdAsync(
+                        userId,
+                        transactionToken)
+                        ?? throw new NotFoundException(
+                            nameof(Wallet),
+                            userId);
+                    var priorLedger = await unitOfWork.Ledger
+                        .GetByIdempotencyKeyAsync(
+                            idempotencyKey,
+                            transactionToken);
+
+                    if (priorLedger is not null)
+                    {
+                        return await ExistingPaystackFundingAsync(
+                            wallet,
+                            amount,
+                            reference,
+                            transactionToken);
+                    }
+
+                    var walletAccount = await EnsureWalletAccountAsync(
+                        wallet,
+                        transactionToken);
+                    var fundingAccount = await EnsureSystemAccountAsync(
+                        PaystackFundingAccountCode,
+                        "Paystack Wallet Funding",
+                        LedgerAccountType.ExternalFunding,
+                        transactionToken);
+                    var now = DateTime.UtcNow;
+                    var ledgerTransaction = new LedgerTransaction
+                    {
+                        Reference = $"PAYSTACK-FUND-{Guid.NewGuid():N}",
+                        IdempotencyKey = idempotencyKey,
+                        TransactionType =
+                            LedgerTransactionType.PaystackWalletFunding,
+                        Status = LedgerTransactionStatus.Posted,
+                        Amount = amount,
+                        Currency = Currency,
+                        ExternalProvider = PaystackProvider,
+                        ExternalReference = reference,
+                        CompletedAt = now
+                    };
+
+                    await AddBalancedEntriesAsync(
+                        ledgerTransaction,
+                        [
+                            NewEntry(
+                                ledgerTransaction,
+                                fundingAccount,
+                                LedgerEntryType.Debit,
+                                amount),
+                            NewEntry(
+                                ledgerTransaction,
+                                walletAccount,
+                                LedgerEntryType.Credit,
+                                amount)
+                        ],
+                        transactionToken);
+
+                    wallet.Balance += amount;
+                    unitOfWork.Wallets.Update(wallet);
+
+                    var walletTransaction = new WalletTransaction
+                    {
+                        WalletId = wallet.Id,
+                        Amount = amount,
+                        Type = WalletTransactionType.Credit,
+                        Reference = reference,
+                        Status = WalletTransactionStatus.Successful,
+                        Description = "Paystack wallet funding",
+                        Provider = PaystackProvider,
+                        Currency = Currency,
+                        CompletedAt = now
+                    };
+
+                    await unitOfWork.WalletTransactions.CreateAsync(
+                        walletTransaction,
+                        transactionToken);
+                    await unitOfWork.SaveChangesAsync(transactionToken);
+
+                    return (wallet, walletTransaction, true);
+                },
+                cancellationToken);
+        }
+        catch (Exception exception)
+            when (IsPaystackFundingRace(exception))
+        {
+            unitOfWork.ClearTracking();
+            var existing = await GetCommittedPaystackFundingAsync(
+                userId,
+                amount,
+                reference,
+                cancellationToken);
+            if (existing is null)
+            {
+                throw;
+            }
+
+            result = existing.Value;
+        }
+
+        await notificationService.TryCreateAsync(
+            new CreateNotificationRequest
+            {
+                UserId = userId,
+                Type = NotificationType.WalletCredited,
+                Title = "Wallet funded",
+                Message =
+                    $"Your wallet was credited with NGN {amount:N2}.",
+                RelatedEntityId = result.Transaction.Id,
+                RelatedEntityType = nameof(WalletTransaction),
+                DeduplicationKey =
+                    $"paystack-wallet-funded:{reference}"
+            },
+            cancellationToken);
+
+        return result;
+    }
+
+    public async Task<bool> ProcessPaystackTransferStatusAsync(
+        string providerReference,
+        long amountInKobo,
+        string status,
+        CancellationToken cancellationToken = default)
+    {
+        var reference = ValidatePaystackReference(providerReference);
+        if (amountInKobo <= 0)
+        {
+            throw new ValidationException(
+                "Paystack transfer amount is invalid.");
+        }
+
+        var normalizedStatus = status?.Trim().ToLowerInvariant();
+        if (normalizedStatus is not ("success" or "failed" or "reversed"))
+        {
+            throw new ValidationException(
+                "Paystack transfer status is invalid.");
+        }
+
+        var amount = amountInKobo / 100m;
+        var result = await unitOfWork.ExecuteInTransactionOnceAsync(
+            async transactionToken =>
+            {
+                var withdrawal = await unitOfWork.WalletTransactions
+                    .GetWithdrawalByProviderReferenceForUpdateAsync(
+                        reference,
+                        transactionToken);
+                if (withdrawal is null)
+                {
+                    return new WithdrawalStatusResult(
+                        false,
+                        Guid.Empty,
+                        Guid.Empty,
+                        false);
+                }
+
+                if (withdrawal.Amount != amount)
+                {
+                    throw new ConflictException(
+                        "Paystack transfer amount does not match the withdrawal.");
+                }
+
+                if (normalizedStatus == "success")
+                {
+                    if (withdrawal.Status == WalletTransactionStatus.Failed)
+                    {
+                        return new WithdrawalStatusResult(
+                            true,
+                            withdrawal.Wallet.UserId,
+                            withdrawal.Id,
+                            false);
+                    }
+
+                    withdrawal.Status = WalletTransactionStatus.Successful;
+                    withdrawal.CompletedAt ??= DateTime.UtcNow;
+                    await unitOfWork.SaveChangesAsync(transactionToken);
+                    return new WithdrawalStatusResult(
+                        true,
+                        withdrawal.Wallet.UserId,
+                        withdrawal.Id,
+                        true);
+                }
+
+                if (withdrawal.Status != WalletTransactionStatus.Failed)
+                {
+                    var reversalKey =
+                        $"paystack-transfer-reversal:{reference}";
+                    var priorReversal = await unitOfWork.Ledger
+                        .GetByIdempotencyKeyAsync(
+                            reversalKey,
+                            transactionToken);
+                    if (priorReversal is null)
+                    {
+                        var walletAccount = await EnsureWalletAccountAsync(
+                            withdrawal.Wallet,
+                            transactionToken);
+                        var withdrawalAccount =
+                            await EnsureSystemAccountAsync(
+                                DriverWithdrawalAccountCode,
+                                "Driver Withdrawals",
+                                LedgerAccountType.ExternalPayout,
+                                transactionToken);
+                        var now = DateTime.UtcNow;
+                        var reversal = new LedgerTransaction
+                        {
+                            Reference =
+                                $"WITHDRAWAL-REVERSAL-{Guid.NewGuid():N}",
+                            IdempotencyKey = reversalKey,
+                            TransactionType =
+                                LedgerTransactionType.DriverWithdrawalReversal,
+                            Status = LedgerTransactionStatus.Posted,
+                            Amount = amount,
+                            Currency = Currency,
+                            ExternalProvider = PaystackProvider,
+                            ExternalReference = reference,
+                            CompletedAt = now
+                        };
+
+                        await AddBalancedEntriesAsync(
+                            reversal,
+                            [
+                                NewEntry(
+                                    reversal,
+                                    withdrawalAccount,
+                                    LedgerEntryType.Debit,
+                                    amount),
+                                NewEntry(
+                                    reversal,
+                                    walletAccount,
+                                    LedgerEntryType.Credit,
+                                    amount)
+                            ],
+                            transactionToken);
+                        withdrawal.Wallet.Balance += amount;
+                        unitOfWork.Wallets.Update(withdrawal.Wallet);
+                    }
+
+                    withdrawal.Status = WalletTransactionStatus.Failed;
+                    withdrawal.CompletedAt = DateTime.UtcNow;
+                    await unitOfWork.SaveChangesAsync(transactionToken);
+                }
+
+                return new WithdrawalStatusResult(
+                    true,
+                    withdrawal.Wallet.UserId,
+                    withdrawal.Id,
+                    false);
+            },
+            cancellationToken);
+
+        if (!result.Found)
+        {
+            return false;
+        }
+
+        var successful = result.Successful;
+        await notificationService.TryCreateAsync(
+            new CreateNotificationRequest
+            {
+                UserId = result.UserId,
+                Type = successful
+                    ? NotificationType.WithdrawalSuccessful
+                    : NotificationType.WithdrawalFailed,
+                Title = successful
+                    ? "Withdrawal sent"
+                    : "Withdrawal failed",
+                Message = successful
+                    ? "Your withdrawal payout was sent successfully."
+                    : "Your withdrawal could not be completed and the funds were returned to your wallet.",
+                RelatedEntityId = result.TransactionId,
+                RelatedEntityType = nameof(WalletTransaction),
+                DeduplicationKey = successful
+                    ? $"withdrawal-completed:{result.TransactionId}"
+                    : $"withdrawal-failed:{result.TransactionId}"
+            },
+            cancellationToken);
+
+        return true;
+    }
+
     private async Task RefundEscrowAsync(Escrow escrow, CancellationToken cancellationToken)
     {
         if (escrow.Status == EscrowStatus.Refunded)
@@ -1029,6 +1341,128 @@ public class FinancialService(
         target.CompletedAt = source.CompletedAt;
     }
 
+    private async Task<(
+        Wallet Wallet,
+        WalletTransaction Transaction,
+        bool Created)> ExistingPaystackFundingAsync(
+            Wallet wallet,
+            decimal amount,
+            string reference,
+            CancellationToken cancellationToken)
+    {
+        var transaction = await unitOfWork.WalletTransactions
+            .GetByProviderReferenceAsync(
+                PaystackProvider,
+                reference,
+                cancellationToken)
+            ?? throw new ConflictException(
+                "The prior Paystack funding record is incomplete.");
+
+        ValidateExistingPaystackFunding(
+            wallet.Id,
+            amount,
+            transaction);
+        return (wallet, transaction, false);
+    }
+
+    private async Task<(
+        Wallet Wallet,
+        WalletTransaction Transaction,
+        bool Created)?> GetCommittedPaystackFundingAsync(
+            Guid userId,
+            decimal amount,
+            string reference,
+            CancellationToken cancellationToken)
+    {
+        var transaction = await unitOfWork.WalletTransactions
+            .GetByProviderReferenceAsync(
+                PaystackProvider,
+                reference,
+                cancellationToken);
+        if (transaction is null)
+        {
+            return null;
+        }
+
+        var wallet = await unitOfWork.Wallets.GetByUserIdAsync(
+            userId,
+            cancellationToken);
+        var balance = await unitOfWork.Wallets.GetBalanceByUserIdAsync(
+            userId,
+            cancellationToken);
+        if (wallet is null || !balance.HasValue)
+        {
+            return null;
+        }
+
+        ValidateExistingPaystackFunding(
+            wallet.Id,
+            amount,
+            transaction);
+        return (
+            new Wallet
+            {
+                Id = wallet.Id,
+                UserId = userId,
+                Balance = balance.Value,
+                EscrowBalance = wallet.EscrowBalance
+            },
+            transaction,
+            false);
+    }
+
+    private static void ValidateExistingPaystackFunding(
+        Guid walletId,
+        decimal amount,
+        WalletTransaction transaction)
+    {
+        if (transaction.WalletId != walletId ||
+            transaction.Amount != amount ||
+            transaction.Type != WalletTransactionType.Credit ||
+            transaction.Status != WalletTransactionStatus.Successful)
+        {
+            throw new ConflictException(
+                "The Paystack reference has already been used for another wallet funding operation.");
+        }
+    }
+
+    private static string ValidatePaystackReference(string reference)
+    {
+        if (string.IsNullOrWhiteSpace(reference))
+        {
+            throw new ValidationException(
+                "Paystack reference is required.");
+        }
+
+        var normalized = reference.Trim();
+        if (normalized.Length > 100)
+        {
+            throw new ValidationException(
+                "Paystack reference cannot exceed 100 characters.");
+        }
+
+        return normalized;
+    }
+
+    private static bool IsPaystackFundingRace(Exception exception)
+    {
+        for (Exception? current = exception;
+             current is not null;
+             current = current.InnerException)
+        {
+            if (current is PostgresException postgresException &&
+                postgresException.SqlState is
+                    PostgresErrorCodes.UniqueViolation or
+                    PostgresErrorCodes.SerializationFailure or
+                    PostgresErrorCodes.DeadlockDetected)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static PagedResponseDto<T> Page<T>(IReadOnlyList<T> items, int totalCount, int pageNumber, int pageSize) => new()
     {
         Items = items,
@@ -1105,6 +1539,12 @@ public class FinancialService(
     private sealed record PaymentHoldResult(
         EscrowResponseDto? Response,
         bool Expired);
+
+    private sealed record WithdrawalStatusResult(
+        bool Found,
+        Guid UserId,
+        Guid TransactionId,
+        bool Successful);
 
     private sealed record TripCompletionNotificationData(
         Guid DriverId,

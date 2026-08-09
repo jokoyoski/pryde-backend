@@ -6,6 +6,13 @@ namespace Pryde.Persistence.Repository.Interfaces;
 public interface IWalletTransactionRepository
 {
     Task<WalletTransaction> CreateAsync(WalletTransaction transaction, CancellationToken cancellationToken = default);
+    Task<WalletTransaction?> GetByProviderReferenceAsync(
+        string provider,
+        string reference,
+        CancellationToken cancellationToken = default);
+    Task<WalletTransaction?> GetWithdrawalByProviderReferenceForUpdateAsync(
+        string reference,
+        CancellationToken cancellationToken = default);
     Task<(
         IReadOnlyList<WalletTransaction> Items,
         int TotalCount)> GetByWalletIdAsync(
