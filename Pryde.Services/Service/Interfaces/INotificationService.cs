@@ -35,6 +35,9 @@ public interface INotificationService
     Task<AdminNotificationResponseDto> AdminGetByIdAsync(
         Guid notificationId,
         CancellationToken cancellationToken = default);
+    Task<NotificationCountResponseDto> BroadcastAsync(
+        AdminBroadcastNotificationRequestDto request,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class CreateNotificationRequest

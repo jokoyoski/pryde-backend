@@ -28,4 +28,15 @@ public interface IWalletService
     Task<VirtualAccountResponseDto> GetVirtualAccountAsync(
         Guid userId,
         CancellationToken cancellationToken = default);
+
+    Task<PaystackWalletFundingResponseDto>
+        VerifyPaystackWalletFundingAsync(
+            Guid userId,
+            PaystackWalletFundingRequestDto request,
+            CancellationToken cancellationToken = default);
+
+    Task ProcessPaystackWebhookAsync(
+        ReadOnlyMemory<byte> payload,
+        string? signature,
+        CancellationToken cancellationToken = default);
 }

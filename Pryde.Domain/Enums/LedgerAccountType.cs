@@ -6,5 +6,6 @@ public enum LedgerAccountType
     Escrow = 2,
     PlatformRevenue = 3,
     ExternalPayout = 4,
-    SystemFunding = 5
+    SystemFunding = 5,
+    ExternalFunding = 6
 }

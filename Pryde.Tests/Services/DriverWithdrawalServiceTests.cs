@@ -766,6 +766,13 @@ public class DriverWithdrawalServiceTests
         public string Reference { get; private set; } = string.Empty;
         public string Reason { get; private set; } = string.Empty;
 
+        public Task<PaystackTransaction> VerifyTransactionAsync(
+            string reference,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
         public Task<IReadOnlyList<PaystackBank>> GetBanksAsync(
             CancellationToken cancellationToken = default)
         {

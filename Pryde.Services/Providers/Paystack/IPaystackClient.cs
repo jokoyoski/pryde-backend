@@ -2,6 +2,10 @@ namespace Pryde.Services.Providers.Paystack;
 
 public interface IPaystackClient
 {
+    Task<PaystackTransaction> VerifyTransactionAsync(
+        string reference,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<PaystackBank>> GetBanksAsync(
         CancellationToken cancellationToken = default);
 

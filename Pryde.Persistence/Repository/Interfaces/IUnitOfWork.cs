@@ -38,4 +38,5 @@ public interface IUnitOfWork
     Task<T> ExecuteInTransactionOnceAsync<T>(
         Func<CancellationToken, Task<T>> action,
         CancellationToken cancellationToken = default);
+    void ClearTracking();
 }

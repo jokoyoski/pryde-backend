@@ -10,6 +10,37 @@ namespace Pryde.Tests.Services;
 public class PaystackClientTests
 {
     [Fact]
+    public async Task VerifyTransactionUsesReferenceAndParsesTrustedFields()
+    {
+        const string responseJson =
+            "{\"status\":true,\"message\":\"Verification successful\"," +
+            "\"data\":{\"status\":\"success\",\"reference\":\"pay-ref-1\"," +
+            "\"amount\":250050,\"currency\":\"NGN\"," +
+            "\"customer\":{\"email\":\"user@test.local\"}}}";
+        var handler = new RecordingHttpMessageHandler(
+            HttpStatusCode.OK,
+            responseJson);
+
+        using var httpClient = new HttpClient(handler);
+        var client = CreateClient(httpClient);
+
+        var transaction = await client.VerifyTransactionAsync(
+            "pay-ref-1");
+
+        Assert.Equal(HttpMethod.Get, handler.RequestMethod);
+        Assert.Equal(
+            "/transaction/verify/pay-ref-1",
+            handler.RequestPathAndQuery);
+        Assert.Equal("success", transaction.Status);
+        Assert.Equal("pay-ref-1", transaction.Reference);
+        Assert.Equal(250050, transaction.Amount);
+        Assert.Equal("NGN", transaction.Currency);
+        Assert.Equal(
+            "user@test.local",
+            transaction.Customer!.Email);
+    }
+
+    [Fact]
     public async Task GetBanksUsesExpectedRequestAndReturnsOnlyActiveBanks()
     {
         const string responseJson =

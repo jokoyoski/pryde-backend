@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Pryde.Domain.Constants;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Context;
@@ -65,6 +66,35 @@ public class UserRepository(PrydeDbContext context) : IUserRepository
         return await context.Users
             .AsNoTracking()
             .OrderByDescending(user => user.CreatedAt)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Guid>>
+        GetActiveNotificationRecipientIdsAsync(
+            string? role,
+            CancellationToken cancellationToken = default)
+    {
+        var query = context.Users
+            .AsNoTracking()
+            .Where(user =>
+                user.Status != UserStatus.Suspended &&
+                user.Status != UserStatus.Deactivated &&
+                !user.UserRoles.Any(userRole =>
+                    userRole.Role.Name == RoleNames.Admin ||
+                    userRole.Role.Name == RoleNames.SuperAdmin) &&
+                user.UserRoles.Any(userRole =>
+                    userRole.Role.Name == RoleNames.Driver ||
+                    userRole.Role.Name == RoleNames.Passenger));
+
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            query = query.Where(user =>
+                user.UserRoles.Any(userRole =>
+                    userRole.Role.Name == role));
+        }
+
+        return await query
+            .Select(user => user.Id)
             .ToListAsync(cancellationToken);
     }
 

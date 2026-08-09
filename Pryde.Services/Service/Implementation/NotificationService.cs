@@ -5,6 +5,7 @@ using Npgsql;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
+using Pryde.Domain.Constants;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
@@ -89,8 +90,15 @@ public class NotificationService : INotificationService
 
         try
         {
-            await _unitOfWork.SaveChangesAsync(
+            var affectedRows = await _unitOfWork.SaveChangesAsync(
                 cancellationToken);
+            if (affectedRows <= 0)
+            {
+                _unitOfWork.Notifications.Detach(notification);
+                throw new InvalidOperationException(
+                    "Notification persistence did not affect any database rows.");
+            }
+
             var response = Map(notification);
             await TrySendRealtimeAsync(
                 notification.UserId,
@@ -123,6 +131,11 @@ public class NotificationService : INotificationService
         try
         {
             return await CreateAsync(request, cancellationToken);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception)
         {
@@ -255,6 +268,76 @@ public class NotificationService : INotificationService
                 nameof(Notification),
                 notificationId);
         return MapAdmin(notification);
+    }
+
+    public async Task<NotificationCountResponseDto>
+        BroadcastAsync(
+            AdminBroadcastNotificationRequestDto request,
+            CancellationToken cancellationToken = default)
+    {
+        ValidateBroadcastRequest(request);
+
+        var role = request.Audience switch
+        {
+            NotificationAudience.All => null,
+            NotificationAudience.Drivers => RoleNames.Driver,
+            NotificationAudience.Passengers => RoleNames.Passenger,
+            _ => throw new ValidationException(
+                "Notification audience is invalid.")
+        };
+        var recipientIds = await _unitOfWork.Users
+            .GetActiveNotificationRecipientIdsAsync(
+                role,
+                cancellationToken);
+
+        var persistedCount = 0;
+        foreach (var recipientId in recipientIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var notification = await TryCreateAsync(
+                new CreateNotificationRequest
+                {
+                    UserId = recipientId,
+                    Type = NotificationType.SystemAnnouncement,
+                    Title = request.Title,
+                    Message = request.Message
+                },
+                cancellationToken);
+            if (notification is not null)
+            {
+                persistedCount++;
+            }
+        }
+
+        return new NotificationCountResponseDto
+        {
+            Count = persistedCount
+        };
+    }
+
+    private static void ValidateBroadcastRequest(
+        AdminBroadcastNotificationRequestDto request)
+    {
+        if (request is null)
+        {
+            throw new ValidationException(
+                "Broadcast notification request is required.");
+        }
+
+        if (!Enum.IsDefined(request.Audience))
+        {
+            throw new ValidationException(
+                "Notification audience is invalid.");
+        }
+
+        ValidateRequired(
+            request.Title,
+            "Notification title",
+            MaximumTitleLength);
+        ValidateRequired(
+            request.Message,
+            "Notification message",
+            MaximumMessageLength);
     }
 
     private static void ValidateCreateRequest(

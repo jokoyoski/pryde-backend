@@ -31,5 +31,16 @@ public class WalletController(IWalletService walletService) : ControllerBase
             cancellationToken));
     }
 
+    [HttpPost("paystack/verify")]
+    public async Task<IActionResult> VerifyPaystackFunding(
+        [FromBody] PaystackWalletFundingRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await walletService.VerifyPaystackWalletFundingAsync(
+            GetUserId(),
+            request,
+            cancellationToken));
+    }
+
     private Guid GetUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }

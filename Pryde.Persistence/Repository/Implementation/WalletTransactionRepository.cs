@@ -14,6 +14,35 @@ public class WalletTransactionRepository(PrydeDbContext context) : IWalletTransa
         return transaction;
     }
 
+    public Task<WalletTransaction?> GetByProviderReferenceAsync(
+        string provider,
+        string reference,
+        CancellationToken cancellationToken = default)
+    {
+        return context.WalletTransactions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                transaction =>
+                    transaction.Provider == provider &&
+                    transaction.Reference == reference,
+                cancellationToken);
+    }
+
+    public Task<WalletTransaction?>
+        GetWithdrawalByProviderReferenceForUpdateAsync(
+            string reference,
+            CancellationToken cancellationToken = default)
+    {
+        return context.WalletTransactions
+            .Include(transaction => transaction.Wallet)
+            .FirstOrDefaultAsync(
+                transaction =>
+                    transaction.Type == WalletTransactionType.Withdrawal &&
+                    transaction.Provider == "Paystack" &&
+                    transaction.Reference == reference,
+                cancellationToken);
+    }
+
     public async Task<(
         IReadOnlyList<WalletTransaction> Items,
         int TotalCount)> GetByWalletIdAsync(

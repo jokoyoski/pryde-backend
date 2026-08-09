@@ -337,6 +337,97 @@ public class FinancialServiceTests
         Assert.Equal(2, context.Trip.AvailableSeats);
     }
 
+    [Fact]
+    public async Task FailedPaystackTransferRestoresWalletOnlyOnce()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var userId = Guid.NewGuid();
+        var wallet = new Wallet
+        {
+            UserId = userId,
+            Balance = 500m
+        };
+        var withdrawal = new WalletTransaction
+        {
+            WalletId = wallet.Id,
+            Wallet = wallet,
+            Amount = 500m,
+            Type = WalletTransactionType.Withdrawal,
+            Reference = "pryde-wd-webhook",
+            Status = WalletTransactionStatus.Pending,
+            Provider = "Paystack",
+            Currency = "NGN"
+        };
+        unitOfWork.WalletRepository.Items.Add(wallet);
+        unitOfWork.WalletTransactionRepository.Items.Add(withdrawal);
+        var service = new FinancialService(unitOfWork);
+
+        var first = await service.ProcessPaystackTransferStatusAsync(
+            withdrawal.Reference,
+            50000,
+            "failed");
+        var second = await service.ProcessPaystackTransferStatusAsync(
+            withdrawal.Reference,
+            50000,
+            "failed");
+
+        Assert.True(first);
+        Assert.True(second);
+        Assert.Equal(1000m, wallet.Balance);
+        Assert.Equal(WalletTransactionStatus.Failed, withdrawal.Status);
+        var reversal = Assert.Single(
+            unitOfWork.LedgerRepository.Transactions);
+        Assert.Equal(
+            LedgerTransactionType.DriverWithdrawalReversal,
+            reversal.TransactionType);
+        AssertBalanced(reversal);
+        Assert.Equal(
+            NotificationType.WithdrawalFailed,
+            Assert.Single(unitOfWork.NotificationRepository.Items).Type);
+    }
+
+    [Fact]
+    public async Task SuccessfulPaystackTransferCompletesExistingWithdrawal()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var userId = Guid.NewGuid();
+        var wallet = new Wallet
+        {
+            UserId = userId,
+            Balance = 500m
+        };
+        var withdrawal = new WalletTransaction
+        {
+            WalletId = wallet.Id,
+            Wallet = wallet,
+            Amount = 500m,
+            Type = WalletTransactionType.Withdrawal,
+            Reference = "pryde-wd-success",
+            Status = WalletTransactionStatus.Pending,
+            Provider = "Paystack",
+            Currency = "NGN"
+        };
+        unitOfWork.WalletRepository.Items.Add(wallet);
+        unitOfWork.WalletTransactionRepository.Items.Add(withdrawal);
+
+        var handled = await new FinancialService(unitOfWork)
+            .ProcessPaystackTransferStatusAsync(
+                withdrawal.Reference,
+                50000,
+                "success");
+
+        Assert.True(handled);
+        Assert.Equal(500m, wallet.Balance);
+        Assert.Equal(
+            WalletTransactionStatus.Successful,
+            withdrawal.Status);
+        Assert.NotNull(withdrawal.CompletedAt);
+        Assert.Empty(unitOfWork.LedgerRepository.Transactions);
+        Assert.Equal(
+            NotificationType.WithdrawalSuccessful,
+            Assert.Single(unitOfWork.NotificationRepository.Items).Type);
+    }
+
     private static async Task<bool> CaptureConflictAsync(
         Func<Task<EscrowResponseDto>> action)
     {
