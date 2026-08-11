@@ -412,6 +412,7 @@ public class TripBookingService(
             ServiceCharge = booking.ServiceCharge,
             TotalAmount = booking.TotalAmount,
             Status = booking.Status,
+            TripStatus = trip.Status,
             RequestedAt = booking.RequestedAt,
             ApprovedAt = booking.ApprovedAt,
             PaidAt = booking.PaidAt,
