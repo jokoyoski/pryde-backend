@@ -196,9 +196,13 @@ public class TripBookingService(
 
         booking.Status = BookingStatus.Approved;
         var approvedAt = DateTime.UtcNow;
-        booking.ApprovedAt = approvedAt;
-        booking.PaymentExpiresAt = approvedAt.AddMinutes(
+        var paymentWindowEndsAt = approvedAt.AddMinutes(
             _bookingPaymentSettings.PaymentWindowMinutes);
+        booking.ApprovedAt = approvedAt;
+        booking.PaymentExpiresAt = paymentWindowEndsAt <
+            booking.Trip.DepartureTime
+                ? paymentWindowEndsAt
+                : booking.Trip.DepartureTime;
         booking.Trip.AvailableSeats--;
         if (booking.Trip.AvailableSeats < 0)
         {
