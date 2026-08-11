@@ -414,6 +414,8 @@ public class TripBookingService(
             Status = booking.Status,
             RequestedAt = booking.RequestedAt,
             ApprovedAt = booking.ApprovedAt,
+            PaidAt = booking.PaidAt,
+            IsPaid = booking.PaidAt.HasValue,
             PaymentExpiresAt = booking.PaymentExpiresAt
         };
     }

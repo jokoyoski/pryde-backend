@@ -127,6 +127,8 @@ public class TripBookingServiceTests
             result.NextAction);
         Assert.Equal(WorkflowActor.Passenger, result.RequiredActor);
         Assert.NotNull(result.ApprovedAt);
+        Assert.Null(result.PaidAt);
+        Assert.False(result.IsPaid);
         Assert.Equal(
             result.ApprovedAt.Value.AddMinutes(60),
             result.PaymentExpiresAt);
@@ -413,12 +415,18 @@ public class TripBookingServiceTests
     {
         var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
         var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
-        AddBooking(unitOfWork, trip, status: BookingStatus.Approved);
+        var booking = AddBooking(
+            unitOfWork,
+            trip,
+            status: BookingStatus.Approved);
+        booking.PaidAt = DateTime.UtcNow.AddMinutes(-5);
 
         var result = await new TripBookingService(unitOfWork).GetConfirmedPassengersAsync(trip.Id, driverId);
 
         Assert.Single(result);
         Assert.Equal(BookingStatus.Approved, result[0].Status);
+        Assert.Equal(booking.PaidAt, result[0].PaidAt);
+        Assert.True(result[0].IsPaid);
     }
 
     [Fact]
