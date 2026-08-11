@@ -15,6 +15,7 @@ public class TripBookingResponseDto : WorkflowResponseDto
     public decimal ServiceCharge { get; set; }
     public decimal TotalAmount { get; set; }
     public BookingStatus Status { get; set; }
+    public TripStatus TripStatus { get; set; }
     public DateTime RequestedAt { get; set; }
     public DateTime? ApprovedAt { get; set; }
     public DateTime? PaidAt { get; set; }

@@ -398,16 +398,50 @@ public class TripBookingServiceTests
     }
 
     [Fact]
-    public async Task PassengerCanViewTheirBookings()
+    public async Task PassengerBookingsIncludeBookingAndLiveTripStatuses()
     {
         var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
-        var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
         var passengerId = Guid.NewGuid();
-        AddBooking(unitOfWork, trip, passengerId);
+        var scheduledTrip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        var inProgressTrip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        inProgressTrip.Status = TripStatus.InProgress;
+        var completedTrip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        completedTrip.Status = TripStatus.Completed;
+        AddBooking(
+            unitOfWork,
+            scheduledTrip,
+            passengerId,
+            BookingStatus.Pending);
+        AddBooking(
+            unitOfWork,
+            inProgressTrip,
+            passengerId,
+            BookingStatus.Approved);
+        AddBooking(
+            unitOfWork,
+            completedTrip,
+            passengerId,
+            BookingStatus.Completed);
 
         var result = await new TripBookingService(unitOfWork).GetMineAsync(passengerId);
 
-        Assert.Single(result);
+        Assert.Collection(
+            result.OrderBy(booking => booking.TripStatus),
+            booking =>
+            {
+                Assert.Equal(BookingStatus.Pending, booking.Status);
+                Assert.Equal(TripStatus.Scheduled, booking.TripStatus);
+            },
+            booking =>
+            {
+                Assert.Equal(BookingStatus.Approved, booking.Status);
+                Assert.Equal(TripStatus.InProgress, booking.TripStatus);
+            },
+            booking =>
+            {
+                Assert.Equal(BookingStatus.Completed, booking.Status);
+                Assert.Equal(TripStatus.Completed, booking.TripStatus);
+            });
     }
 
     [Fact]
