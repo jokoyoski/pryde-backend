@@ -128,7 +128,7 @@ public class TripBookingServiceTests
         Assert.Equal(WorkflowActor.Passenger, result.RequiredActor);
         Assert.NotNull(result.ApprovedAt);
         Assert.Equal(
-            result.ApprovedAt.Value.AddMinutes(15),
+            result.ApprovedAt.Value.AddMinutes(60),
             result.PaymentExpiresAt);
         Assert.Equal(1, trip.AvailableSeats);
         Assert.Equal(2, unitOfWork.SaveChangesCount);
@@ -139,7 +139,7 @@ public class TripBookingServiceTests
     }
 
     [Fact]
-    public async Task ApprovalUsesConfiguredPaymentWindow()
+    public async Task ApprovalUsesConfiguredPaymentWindowBeforeDeparture()
     {
         var (unitOfWork, driverId, vehicle) =
             TestData.CreateDriverContext();
@@ -147,13 +147,14 @@ public class TripBookingServiceTests
             unitOfWork,
             driverId,
             vehicle);
+        trip.DepartureTime = DateTime.UtcNow.AddHours(2);
         var booking = AddBooking(unitOfWork, trip);
         var service = new TripBookingService(
             unitOfWork,
             new FinancialService(unitOfWork),
             Options.Create(new BookingPaymentSettings
             {
-                PaymentWindowMinutes = 7,
+                PaymentWindowMinutes = 45,
                 ExpiryCheckIntervalMinutes = 1
             }));
 
@@ -163,8 +164,47 @@ public class TripBookingServiceTests
 
         Assert.NotNull(result.ApprovedAt);
         Assert.Equal(
-            result.ApprovedAt.Value.AddMinutes(7),
+            result.ApprovedAt.Value.AddMinutes(45),
             result.PaymentExpiresAt);
+    }
+
+    [Fact]
+    public async Task ApprovalLessThan60MinutesBeforeDepartureExpiresAtDeparture()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        trip.DepartureTime = DateTime.UtcNow.AddMinutes(30);
+        trip.BookingWindowMinutes = 15;
+        var booking = AddBooking(unitOfWork, trip);
+
+        var result = await new TripBookingService(unitOfWork).ApproveAsync(
+            booking.Id,
+            driverId);
+
+        Assert.Equal(trip.DepartureTime, result.PaymentExpiresAt);
+    }
+
+    [Theory]
+    [InlineData(16)]
+    [InlineData(30)]
+    [InlineData(120)]
+    public async Task PaymentExpiryNeverExceedsDepartureTime(
+        int departureMinutesFromNow)
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        trip.DepartureTime = DateTime.UtcNow.AddMinutes(
+            departureMinutesFromNow);
+        trip.BookingWindowMinutes = 15;
+        var booking = AddBooking(unitOfWork, trip);
+
+        var result = await new TripBookingService(unitOfWork).ApproveAsync(
+            booking.Id,
+            driverId);
+
+        Assert.True(result.PaymentExpiresAt <= trip.DepartureTime);
     }
 
     [Fact]
