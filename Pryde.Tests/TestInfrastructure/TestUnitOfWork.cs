@@ -29,7 +29,6 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         WalletTransactions = new TestWalletTransactionRepository(
             (TestWalletRepository)Wallets);
         PaystackWalletFundingRequests = new TestPaystackWalletFundingRequestRepository();
-        VirtualAccounts = new TestVirtualAccountRepository();
         KycVerifications = new TestKycVerificationRepository();
         KycVerificationAttempts = new TestKycVerificationAttemptRepository();
         PasswordResetCodes = new TestPasswordResetCodeRepository();
@@ -59,7 +58,6 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public TestWalletTransactionRepository WalletTransactionRepository => (TestWalletTransactionRepository)WalletTransactions;
     public TestPaystackWalletFundingRequestRepository PaystackWalletFundingRequestRepository =>
         (TestPaystackWalletFundingRequestRepository)PaystackWalletFundingRequests;
-    public TestVirtualAccountRepository VirtualAccountRepository => (TestVirtualAccountRepository)VirtualAccounts;
     public TestAdminListingRepository AdminListingRepository => (TestAdminListingRepository)AdminListings;
     public TestKycVerificationRepository KycVerificationRepository => (TestKycVerificationRepository)KycVerifications;
     public TestKycVerificationAttemptRepository KycVerificationAttemptRepository =>
@@ -100,7 +98,6 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public IWalletRepository Wallets { get; }
     public IWalletTransactionRepository WalletTransactions { get; }
     public IPaystackWalletFundingRequestRepository PaystackWalletFundingRequests { get; }
-    public IVirtualAccountRepository VirtualAccounts { get; }
     public IVehicleImageRepository VehicleImages { get; }
     public IVehicleAmenityRepository VehicleAmenities { get; }
     public IAdminListingRepository AdminListings { get; }
@@ -985,15 +982,6 @@ internal sealed class TestPaystackWalletFundingRequestRepository
     }
 }
 
-internal sealed class TestVirtualAccountRepository : IVirtualAccountRepository
-{
-    public List<VirtualAccount> Items { get; } = [];
-    public Task<VirtualAccount?> GetByWalletIdAsync(Guid walletId, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(account => account.WalletId == walletId));
-    public Task<VirtualAccount?> GetByAccountNumberAsync(string accountNumber, CancellationToken cancellationToken = default) => Task.FromResult(Items.FirstOrDefault(account => account.AccountNumber == accountNumber));
-    public Task<bool> ExistsByAccountNumberAsync(string accountNumber, CancellationToken cancellationToken = default) => Task.FromResult(Items.Any(account => account.AccountNumber == accountNumber));
-    public Task<VirtualAccount> CreateAsync(VirtualAccount virtualAccount, CancellationToken cancellationToken = default) { Items.Add(virtualAccount); return Task.FromResult(virtualAccount); }
-}
-
 internal sealed class TestKycVerificationAttemptRepository
     : IKycVerificationAttemptRepository
 {
@@ -1036,6 +1024,7 @@ internal sealed class TestKycVerificationAttemptRepository
     {
     }
 }
+
 internal sealed class TestAdminListingRepository : IAdminListingRepository
 {
     public List<User> Users { get; } = [];

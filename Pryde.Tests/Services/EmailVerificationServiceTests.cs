@@ -40,7 +40,6 @@ public class EmailVerificationServiceTests
         Assert.Empty(((TestKycVerificationRepository)
             context.UnitOfWork.KycVerifications).Items);
         Assert.Empty(context.UnitOfWork.WalletRepository.Items);
-        Assert.Empty(context.UnitOfWork.VirtualAccountRepository.Items);
         Assert.Null(typeof(RegisterResponseDto).GetProperty("AccessToken"));
         Assert.Null(typeof(RegisterResponseDto).GetProperty("RefreshToken"));
         Assert.Null(typeof(RegisterResponseDto).GetProperty("Roles"));
@@ -121,7 +120,6 @@ public class EmailVerificationServiceTests
         Assert.Single(((TestKycVerificationRepository)
             context.UnitOfWork.KycVerifications).Items);
         Assert.Single(context.UnitOfWork.WalletRepository.Items);
-        Assert.Single(context.UnitOfWork.VirtualAccountRepository.Items);
     }
 
     [Theory]

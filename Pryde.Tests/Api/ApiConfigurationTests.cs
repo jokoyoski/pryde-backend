@@ -539,7 +539,8 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/trips/{tripId}/complete", paths);
         Assert.Contains("/api/v1/wallet/mine", paths);
         Assert.Contains("/api/v1/wallet/mine/transactions", paths);
-        Assert.Contains("/api/v1/virtual-accounts/mine", paths);
+        Assert.DoesNotContain("/api/v1/virtual-accounts/mine", paths);
+        Assert.DoesNotContain("/api/v1/virtual-accounts/fund", paths);
         Assert.Contains("/api/v1/admin/users", paths);
         Assert.Contains(
             "/api/v1/admin/users/{userId}/ratings",

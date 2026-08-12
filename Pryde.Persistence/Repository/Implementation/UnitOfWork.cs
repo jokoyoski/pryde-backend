@@ -26,7 +26,6 @@ public class UnitOfWork(
     IWalletRepository wallet,
     IWalletTransactionRepository walletTransaction,
     IPaystackWalletFundingRequestRepository paystackFundingRequest,
-    IVirtualAccountRepository virtualAccount,
     IVehicleImageRepository vehicleImage,
     IVehicleAmenityRepository vehicleAmenity,
     IAdminListingRepository adminListings,
@@ -56,7 +55,6 @@ public class UnitOfWork(
     public IWalletTransactionRepository WalletTransactions { get; } = walletTransaction;
     public IPaystackWalletFundingRequestRepository PaystackWalletFundingRequests { get; } =
         paystackFundingRequest;
-    public IVirtualAccountRepository VirtualAccounts { get; } = virtualAccount;
     public IVehicleImageRepository VehicleImages { get; } = vehicleImage;
     public IVehicleAmenityRepository VehicleAmenities { get; } = vehicleAmenity;
     public IAdminListingRepository AdminListings { get; } = adminListings;
