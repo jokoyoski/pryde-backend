@@ -13,6 +13,7 @@ public class UnitOfWork(
     IUserRoleRepository userRoles,
     IProfileRepository profiles,
     IKycVerificationRepository kycVerifications,
+    IKycVerificationAttemptRepository kycVerificationAttempts,
     IVehicleRepository vehicles,
     IVehicleDocumentRepository vehicleDocuments,
     IRefreshTokenRepository refreshTokenRepository,
@@ -25,7 +26,6 @@ public class UnitOfWork(
     IWalletRepository wallet,
     IWalletTransactionRepository walletTransaction,
     IPaystackWalletFundingRequestRepository paystackFundingRequest,
-    IVirtualAccountRepository virtualAccount,
     IVehicleImageRepository vehicleImage,
     IVehicleAmenityRepository vehicleAmenity,
     IAdminListingRepository adminListings,
@@ -41,6 +41,7 @@ public class UnitOfWork(
     public IUserRoleRepository UserRoles { get; } = userRoles;
     public IProfileRepository Profiles { get; } = profiles;
     public IKycVerificationRepository KycVerifications { get; } = kycVerifications;
+    public IKycVerificationAttemptRepository KycVerificationAttempts { get; } = kycVerificationAttempts;
     public IVehicleRepository Vehicles { get; } = vehicles;
     public IVehicleDocumentRepository VehicleDocuments { get; } = vehicleDocuments;
     public IRefreshTokenRepository RefreshTokens { get; } = refreshTokenRepository;
@@ -54,7 +55,6 @@ public class UnitOfWork(
     public IWalletTransactionRepository WalletTransactions { get; } = walletTransaction;
     public IPaystackWalletFundingRequestRepository PaystackWalletFundingRequests { get; } =
         paystackFundingRequest;
-    public IVirtualAccountRepository VirtualAccounts { get; } = virtualAccount;
     public IVehicleImageRepository VehicleImages { get; } = vehicleImage;
     public IVehicleAmenityRepository VehicleAmenities { get; } = vehicleAmenity;
     public IAdminListingRepository AdminListings { get; } = adminListings;

@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
@@ -11,23 +12,26 @@ using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Service.Interface;
 using Pryde.Services.Settings;
+using Pryde.Services.Providers.Kyc;
 
 namespace Pryde.Services.Service.Implementation;
 
-public class DojahKycService(
+public class DojahKycProvider(
     IUnitOfWork unitOfWork,
     IOptions<DojahSettings> options,
-    ILogger<DojahKycService> logger,
-    INotificationService notificationService) : IDojahKycService
+    ILogger<DojahKycProvider> logger,
+    INotificationService notificationService) : IDojahKycService, IKycProvider
 {
     private const string ProviderName = "Dojah";
 
+    public string Name => ProviderName;
+
     private readonly DojahSettings _settings = options.Value;
 
-    public DojahKycService(
+    public DojahKycProvider(
         IUnitOfWork unitOfWork,
         IOptions<DojahSettings> options,
-        ILogger<DojahKycService> logger)
+        ILogger<DojahKycProvider> logger)
         : this(
             unitOfWork,
             options,
@@ -35,6 +39,16 @@ public class DojahKycService(
             new NotificationService(unitOfWork))
     {
     }
+
+    public async Task<KycProviderResult> CreateSessionAsync(
+        KycProviderRequest request,
+        CancellationToken cancellationToken = default) =>
+        ToProviderResult(await GetConfigAsync(request.UserId, cancellationToken));
+
+    async Task<KycProviderResult> IKycProvider.RetryAsync(
+        KycProviderRequest request,
+        CancellationToken cancellationToken) =>
+        ToProviderResult(await RetryAsync(request.UserId, cancellationToken));
 
     public async Task<DojahKycConfigResponseDto> GetConfigAsync(
         Guid userId,
@@ -73,6 +87,11 @@ public class DojahKycService(
             requiresSave = true;
         }
 
+        if (await EnsureAttemptExistsAsync(kyc, cancellationToken))
+        {
+            requiresSave = true;
+        }
+
         if (requiresSave)
         {
             await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -104,6 +123,8 @@ public class DojahKycService(
                         "Only rejected KYC verification can be retried.");
                 }
 
+                await EnsureAttemptExistsAsync(kyc, transactionToken);
+
                 kyc.Status = KycStatus.Pending;
                 kyc.VerifiedAt = null;
                 kyc.ProviderName = ProviderName;
@@ -112,6 +133,11 @@ public class DojahKycService(
                 kyc.ProviderStatus = null;
                 kyc.RejectionReason = null;
                 kyc.LastProviderUpdatedAt = null;
+
+                await EnsureAttemptExistsAsync(
+                    kyc,
+                    transactionToken,
+                    DateTime.UtcNow);
 
                 unitOfWork.KycVerifications.Update(kyc);
 
@@ -178,7 +204,7 @@ public class DojahKycService(
                 _settings.ShareableLink,
                 kyc.ProviderReference!),
             WidgetId = widgetId,
-            ReferenceId = kyc.ProviderReference,
+            ReferenceId = kyc.ProviderReference!,
             ProviderReference = kyc.ProviderReference!,
             Metadata = new Dictionary<string, string>
             {
@@ -212,6 +238,20 @@ public class DojahKycService(
         var kyc = correlation.Kyc;
 
         ValidateActiveAttemptReference(webhook, kyc);
+
+        var attempt = await unitOfWork.KycVerificationAttempts
+            .GetByCorrelationReferenceAsync(
+                ProviderName,
+                kyc.ProviderReference!,
+                cancellationToken);
+        var attemptCreated = attempt is null;
+        attempt ??= CreateAttempt(kyc);
+        if (attemptCreated)
+        {
+            await unitOfWork.KycVerificationAttempts.CreateAsync(
+                attempt,
+                cancellationToken);
+        }
 
         var dojahReferenceChanged = false;
 
@@ -288,11 +328,19 @@ public class DojahKycService(
                 webhook.Status)
             : null;
 
+        var resultCode = webhook.ResultCode ?? webhook.Status;
+
         if (!dojahReferenceChanged &&
             kyc.ProviderStatus == webhook.Status &&
             kyc.Status == nextStatus &&
-            kyc.RejectionReason == rejectionReason)
+            kyc.RejectionReason == rejectionReason &&
+            attempt.ResultCode == resultCode)
         {
+            if (attemptCreated)
+            {
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
             logger.LogInformation(
                 "Duplicate Dojah webhook ignored for KYC {KycId}.",
                 kyc.Id);
@@ -309,7 +357,18 @@ public class DojahKycService(
             ? DateTime.UtcNow
             : null;
 
+        attempt.ProviderReference = kyc.DojahReference;
+        attempt.Status = ToProviderStatus(nextStatus);
+        attempt.RawStatus = webhook.Status;
+        attempt.ResultCode = resultCode;
+        attempt.FailureReason = rejectionReason;
+        attempt.ProviderUpdatedAt = kyc.LastProviderUpdatedAt;
+        attempt.CompletedAt = nextStatus is KycStatus.Approved or KycStatus.Rejected
+            ? DateTime.UtcNow
+            : null;
+
         unitOfWork.KycVerifications.Update(kyc);
+        unitOfWork.KycVerificationAttempts.Update(attempt);
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -510,7 +569,10 @@ public class DojahKycService(
             referenceId,
             providerReference,
             status.Trim(),
-            parsed.Message);
+            parsed.Message,
+            ValidateOptionalReference(
+                parsed.ResultCode ?? parsed.Code,
+                "result_code/code"));
     }
 
     private static string ValidateRequiredReference(
@@ -791,7 +853,8 @@ public class DojahKycService(
         string ReferenceId,
         string? ProviderReference,
         string Status,
-        string? Message);
+        string? Message,
+        string? ResultCode);
 
     private sealed class DojahWebhookPayload
     {
@@ -809,6 +872,12 @@ public class DojahKycService(
 
         [JsonPropertyName("message")]
         public string? Message { get; init; }
+
+        [JsonPropertyName("result_code")]
+        public string? ResultCode { get; init; }
+
+        [JsonPropertyName("code")]
+        public string? Code { get; init; }
 
         [JsonPropertyName("vendor_reference")]
         public string? VendorReference { get; init; }
@@ -848,4 +917,106 @@ public class DojahKycService(
         KycVerification Kyc,
         string? DojahReference,
         bool IsLegacy);
+
+    private static KycProviderResult ToProviderResult(
+        DojahKycConfigResponseDto config) => new()
+    {
+        Provider = ProviderName,
+        Reference = config.ProviderReference,
+        Status = ToProviderStatus(config.Status),
+        SessionUrl = config.ShareableLink,
+        ClientConfiguration = new Dictionary<string, string>
+        {
+            ["appId"] = config.AppId,
+            ["publicKey"] = config.PublicKey,
+            ["widgetId"] = config.WidgetId
+        },
+        Metadata = config.Metadata
+    };
+
+    private async Task<bool> EnsureAttemptExistsAsync(
+        KycVerification kyc,
+        CancellationToken cancellationToken,
+        DateTime? startedAt = null)
+    {
+        if (string.IsNullOrWhiteSpace(kyc.ProviderReference))
+        {
+            return false;
+        }
+
+        var existing = await unitOfWork.KycVerificationAttempts
+            .GetByCorrelationReferenceAsync(
+                ProviderName,
+                kyc.ProviderReference,
+                cancellationToken);
+
+        if (existing is not null)
+        {
+            return false;
+        }
+
+        await unitOfWork.KycVerificationAttempts.CreateAsync(
+            CreateAttempt(kyc, startedAt),
+            cancellationToken);
+        return true;
+    }
+
+    private static KycVerificationAttempt CreateAttempt(
+        KycVerification kyc,
+        DateTime? startedAt = null) => new()
+    {
+        KycVerificationId = kyc.Id,
+        ProviderName = ProviderName,
+        CorrelationReference = kyc.ProviderReference!,
+        ProviderReference = kyc.DojahReference,
+        Status = ToProviderStatus(kyc.Status),
+        RawStatus = kyc.ProviderStatus,
+        ResultCode = kyc.ProviderStatus,
+        FailureReason = kyc.RejectionReason,
+        StartedAt = startedAt ?? kyc.CreatedAt,
+        ProviderUpdatedAt = kyc.LastProviderUpdatedAt,
+        CompletedAt = kyc.Status is KycStatus.Approved or KycStatus.Rejected
+            ? kyc.VerifiedAt ?? kyc.LastProviderUpdatedAt
+            : null
+    };
+
+    private static KycProviderStatus ToProviderStatus(KycStatus status) =>
+        status switch
+        {
+            KycStatus.Submitted => KycProviderStatus.Submitted,
+            KycStatus.Approved => KycProviderStatus.Approved,
+            KycStatus.Rejected => KycProviderStatus.Rejected,
+            _ => KycProviderStatus.Pending
+        };
+}
+
+public sealed class DojahKycService : IDojahKycService
+{
+    private readonly DojahKycProvider _provider;
+
+    public DojahKycService(
+        IUnitOfWork unitOfWork,
+        IOptions<DojahSettings> options,
+        ILogger<DojahKycService> logger)
+    {
+        _provider = new DojahKycProvider(
+            unitOfWork,
+            options,
+            NullLogger<DojahKycProvider>.Instance,
+            new NotificationService(unitOfWork));
+    }
+
+    internal DojahKycService(DojahKycProvider provider)
+    {
+        _provider = provider;
+    }
+
+    public Task<DojahKycConfigResponseDto> GetConfigAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        _provider.GetConfigAsync(userId, cancellationToken);
+
+    public Task<DojahKycConfigResponseDto> RetryAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        _provider.RetryAsync(userId, cancellationToken);
+
+    public Task ProcessWebhookAsync(ReadOnlyMemory<byte> payload, string? signatureV1, string? signatureV2, CancellationToken cancellationToken = default) =>
+        _provider.ProcessWebhookAsync(payload, signatureV1, signatureV2, cancellationToken);
 }

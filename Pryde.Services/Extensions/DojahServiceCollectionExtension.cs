@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Pryde.Services.Providers.Dojah;
+using Pryde.Services.Providers.Kyc;
 using Pryde.Services.Service.Implementation;
 using Pryde.Services.Service.Interface;
 using Pryde.Services.Settings;
@@ -15,6 +16,8 @@ public static class DojahServiceCollectionExtension
         IConfiguration configuration)
     {
         services.AddSingleton<IValidateOptions<DojahSettings>, DojahSettingsValidator>();
+        services.AddOptions<KycSettings>()
+            .Bind(configuration.GetSection(KycSettings.SectionName));
         services.AddOptions<DojahSettings>()
             .Bind(configuration.GetSection(DojahSettings.SectionName))
             .ValidateOnStart();
@@ -26,7 +29,14 @@ public static class DojahServiceCollectionExtension
                 client.BaseAddress = baseAddress;
             }
         });
-        services.AddScoped<IDojahKycService, DojahKycService>();
+        services.AddScoped<DojahKycProvider>();
+        services.AddScoped<IKycProvider>(serviceProvider =>
+            serviceProvider.GetRequiredService<DojahKycProvider>());
+        services.AddScoped<IDojahKycService>(serviceProvider =>
+            new DojahKycService(
+                serviceProvider.GetRequiredService<DojahKycProvider>()));
+        services.AddScoped<IKycProviderResolver, KycProviderResolver>();
+        services.AddScoped<IKycProviderService, KycProviderService>();
         return services;
     }
 }

@@ -315,7 +315,29 @@ public class ApiConfigurationTests
     }
 
     [Theory]
+    [InlineData(nameof(KycController.CreateSession), "session")]
+    [InlineData(nameof(KycController.RetryVerification), "retry")]
+    [InlineData(nameof(KycController.RetryDojahVerification), "dojah/retry")]
+    [InlineData(nameof(KycController.ProcessDojahWebhook), "dojah/webhook")]
+    public void GenericAndLegacyKycPostRoutesRemainAvailable(
+        string actionName,
+        string route)
+    {
+        var action = typeof(KycController).GetMethod(actionName);
+        Assert.NotNull(action);
+        var attribute = action.GetCustomAttributes(
+                typeof(HttpPostAttribute),
+                true)
+            .Cast<HttpPostAttribute>()
+            .Single();
+
+        Assert.Equal(route, attribute.Template);
+    }
+
+    [Theory]
     [InlineData(nameof(KycController.GetMine))]
+    [InlineData(nameof(KycController.CreateSession))]
+    [InlineData(nameof(KycController.RetryVerification))]
     [InlineData(nameof(KycController.GetDojahConfig))]
     [InlineData(nameof(KycController.RetryDojahVerification))]
     public void CustomerKycActionsRequireEmailVerification(string actionName)
@@ -517,7 +539,8 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/trips/{tripId}/complete", paths);
         Assert.Contains("/api/v1/wallet/mine", paths);
         Assert.Contains("/api/v1/wallet/mine/transactions", paths);
-        Assert.Contains("/api/v1/virtual-accounts/mine", paths);
+        Assert.DoesNotContain("/api/v1/virtual-accounts/mine", paths);
+        Assert.DoesNotContain("/api/v1/virtual-accounts/fund", paths);
         Assert.Contains("/api/v1/admin/users", paths);
         Assert.Contains(
             "/api/v1/admin/users/{userId}/ratings",
@@ -560,6 +583,8 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/admin/notifications/{notificationId}", paths);
         Assert.DoesNotContain("/api/v1/kyc/documents", paths);
         Assert.Contains("/api/v1/kyc/mine", paths);
+        Assert.Contains("/api/v1/kyc/session", paths);
+        Assert.Contains("/api/v1/kyc/retry", paths);
         Assert.Contains("/api/v1/kyc/dojah/config", paths);
         Assert.Contains("/api/v1/kyc/dojah/retry", paths);
         Assert.Contains("/api/v1/kyc/dojah/webhook", paths);

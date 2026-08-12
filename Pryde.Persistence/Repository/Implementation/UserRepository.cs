@@ -223,9 +223,6 @@ public class UserRepository(PrydeDbContext context) : IUserRepository
         await context.Vehicles
             .Where(vehicle => vehicle.UserId == userId)
             .ExecuteDeleteAsync(cancellationToken);
-        await context.VirtualAccounts
-            .Where(account => walletIds.Contains(account.WalletId))
-            .ExecuteDeleteAsync(cancellationToken);
         await context.Wallets
             .Where(wallet => wallet.UserId == userId)
             .ExecuteDeleteAsync(cancellationToken);

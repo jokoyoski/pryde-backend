@@ -169,6 +169,14 @@ public class DojahKycServiceTests
         Assert.Equal(KycStatus.Pending, result.Status);
         Assert.Equal(KycStatus.Pending, kyc.Status);
         Assert.Equal("Dojah", kyc.ProviderName);
+        var attempts = unitOfWork.KycVerificationAttemptRepository.Items;
+        Assert.Equal(2, attempts.Count);
+        Assert.Contains(attempts, attempt =>
+            attempt.CorrelationReference == "PRYDE-old-rejected-attempt" &&
+            attempt.Status == KycProviderStatus.Rejected);
+        Assert.Contains(attempts, attempt =>
+            attempt.CorrelationReference == result.ProviderReference &&
+            attempt.Status == KycProviderStatus.Pending);
     }
 
     [Fact]
@@ -865,6 +873,11 @@ public class DojahKycServiceTests
             updatedAt,
             unitOfWork.KycVerificationRepository.Items[0].LastProviderUpdatedAt);
         Assert.Single(unitOfWork.NotificationRepository.Items);
+        var attempt = Assert.Single(
+            unitOfWork.KycVerificationAttemptRepository.Items);
+        Assert.Equal(KycProviderStatus.Approved, attempt.Status);
+        Assert.Equal("Completed", attempt.RawStatus);
+        Assert.Equal(dojahReference, attempt.ProviderReference);
     }
 
     [Fact]

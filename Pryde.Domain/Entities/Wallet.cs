@@ -9,7 +9,6 @@ namespace Pryde.Domain.Entities
         public decimal Balance { get; set; }
         public decimal WithdrawableBalance { get; set; }
         public decimal EscrowBalance { get; set; }
-        public VirtualAccount? VirtualAccount { get; set; }
         public LedgerAccount? LedgerAccount { get; set; }
     }
 }

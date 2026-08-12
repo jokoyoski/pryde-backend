@@ -38,6 +38,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRoleRepository, RoleRepository>();
         services.AddScoped<IKycVerificationRepository, KycVerificationRepository>();
+        services.AddScoped<IKycVerificationAttemptRepository, KycVerificationAttemptRepository>();
         services.AddScoped<IUserRoleRepository, UserRoleRepository>();
         services.AddScoped<IProfileRepository, ProfileRepository>();
         services.AddScoped<IVehicleRepository, VehicleRepository>();
@@ -52,7 +53,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IWalletRepository, WalletRepository>();
         services.AddScoped<IWalletTransactionRepository, WalletTransactionRepository>();
         services.AddScoped<IPaystackWalletFundingRequestRepository, PaystackWalletFundingRequestRepository>();
-        services.AddScoped<IVirtualAccountRepository, VirtualAccountRepository>();
         services.AddScoped<IVehicleImageRepository, VehicleImageRepository>();
         services.AddScoped<IVehicleAmenityRepository, VehicleAmenityRepository>();
         services.AddScoped<IAdminListingRepository, AdminListingRepository>();

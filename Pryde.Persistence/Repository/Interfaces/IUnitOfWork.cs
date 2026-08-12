@@ -9,6 +9,7 @@ public interface IUnitOfWork
     IUserRoleRepository UserRoles { get; }
     IProfileRepository Profiles { get; }
     IKycVerificationRepository KycVerifications { get; }
+    IKycVerificationAttemptRepository KycVerificationAttempts { get; }
     IVehicleRepository Vehicles { get; }
     IVehicleDocumentRepository VehicleDocuments { get; }
     IRefreshTokenRepository RefreshTokens { get; }
@@ -21,7 +22,6 @@ public interface IUnitOfWork
     IWalletRepository Wallets { get; }
     IWalletTransactionRepository WalletTransactions { get; }
     IPaystackWalletFundingRequestRepository PaystackWalletFundingRequests { get; }
-    IVirtualAccountRepository VirtualAccounts { get; }
     IVehicleImageRepository VehicleImages { get; }
     IVehicleAmenityRepository VehicleAmenities { get; }
     IAdminListingRepository AdminListings { get; }

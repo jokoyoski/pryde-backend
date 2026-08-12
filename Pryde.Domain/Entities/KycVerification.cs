@@ -23,5 +23,7 @@ namespace Pryde.Domain.Entities
         public string? RejectionReason { get; set; }
         public DateTime? LastProviderUpdatedAt { get; set; }
         public User User { get; set; } = null!;
+        public ICollection<KycVerificationAttempt> Attempts { get; set; } =
+            new List<KycVerificationAttempt>();
     }
 }
