@@ -14,6 +14,7 @@ namespace Pryde.Api.Controllers.V1;
 [Authorize]
 public class KycController(
     IKycService kycService,
+    IKycProviderService kycProviderService,
     IDojahKycService dojahKycService) : ControllerBase
 {
     [HttpGet("mine")]
@@ -26,6 +27,26 @@ public class KycController(
             cancellationToken);
 
         return Ok(result);
+    }
+
+    [HttpPost("session")]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
+    public async Task<IActionResult> CreateSession(
+        CancellationToken cancellationToken)
+    {
+        return Ok(await kycProviderService.CreateSessionAsync(
+            GetUserId(),
+            cancellationToken));
+    }
+
+    [HttpPost("retry")]
+    [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
+    public async Task<IActionResult> RetryVerification(
+        CancellationToken cancellationToken)
+    {
+        return Ok(await kycProviderService.RetryAsync(
+            GetUserId(),
+            cancellationToken));
     }
 
     [HttpGet("dojah/config")]

@@ -9,6 +9,7 @@ public interface IUnitOfWork
     IUserRoleRepository UserRoles { get; }
     IProfileRepository Profiles { get; }
     IKycVerificationRepository KycVerifications { get; }
+    IKycVerificationAttemptRepository KycVerificationAttempts { get; }
     IVehicleRepository Vehicles { get; }
     IVehicleDocumentRepository VehicleDocuments { get; }
     IRefreshTokenRepository RefreshTokens { get; }

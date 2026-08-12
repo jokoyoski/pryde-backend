@@ -13,6 +13,7 @@ public class UnitOfWork(
     IUserRoleRepository userRoles,
     IProfileRepository profiles,
     IKycVerificationRepository kycVerifications,
+    IKycVerificationAttemptRepository kycVerificationAttempts,
     IVehicleRepository vehicles,
     IVehicleDocumentRepository vehicleDocuments,
     IRefreshTokenRepository refreshTokenRepository,
@@ -41,6 +42,7 @@ public class UnitOfWork(
     public IUserRoleRepository UserRoles { get; } = userRoles;
     public IProfileRepository Profiles { get; } = profiles;
     public IKycVerificationRepository KycVerifications { get; } = kycVerifications;
+    public IKycVerificationAttemptRepository KycVerificationAttempts { get; } = kycVerificationAttempts;
     public IVehicleRepository Vehicles { get; } = vehicles;
     public IVehicleDocumentRepository VehicleDocuments { get; } = vehicleDocuments;
     public IRefreshTokenRepository RefreshTokens { get; } = refreshTokenRepository;

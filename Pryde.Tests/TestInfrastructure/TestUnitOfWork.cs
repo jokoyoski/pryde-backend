@@ -31,6 +31,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         PaystackWalletFundingRequests = new TestPaystackWalletFundingRequestRepository();
         VirtualAccounts = new TestVirtualAccountRepository();
         KycVerifications = new TestKycVerificationRepository();
+        KycVerificationAttempts = new TestKycVerificationAttemptRepository();
         PasswordResetCodes = new TestPasswordResetCodeRepository();
         VerificationCodes = new TestVerificationCodeRepository();
         RefreshTokens = new TestRefreshTokenRepository();
@@ -61,6 +62,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public TestVirtualAccountRepository VirtualAccountRepository => (TestVirtualAccountRepository)VirtualAccounts;
     public TestAdminListingRepository AdminListingRepository => (TestAdminListingRepository)AdminListings;
     public TestKycVerificationRepository KycVerificationRepository => (TestKycVerificationRepository)KycVerifications;
+    public TestKycVerificationAttemptRepository KycVerificationAttemptRepository =>
+        (TestKycVerificationAttemptRepository)KycVerificationAttempts;
     public TestEscrowRepository EscrowRepository => (TestEscrowRepository)Escrows;
     public TestLedgerRepository LedgerRepository => (TestLedgerRepository)Ledger;
     public TestVerificationCodeRepository VerificationCodeRepository =>
@@ -84,6 +87,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public IUserRoleRepository UserRoles { get; }
     public IProfileRepository Profiles { get; }
     public IKycVerificationRepository KycVerifications { get; }
+    public IKycVerificationAttemptRepository KycVerificationAttempts { get; }
     public IVehicleRepository Vehicles { get; }
     public IVehicleDocumentRepository VehicleDocuments { get; }
     public IRefreshTokenRepository RefreshTokens { get; }
@@ -990,6 +994,48 @@ internal sealed class TestVirtualAccountRepository : IVirtualAccountRepository
     public Task<VirtualAccount> CreateAsync(VirtualAccount virtualAccount, CancellationToken cancellationToken = default) { Items.Add(virtualAccount); return Task.FromResult(virtualAccount); }
 }
 
+internal sealed class TestKycVerificationAttemptRepository
+    : IKycVerificationAttemptRepository
+{
+    public List<KycVerificationAttempt> Items { get; } = [];
+
+    public Task<KycVerificationAttempt?> GetByCorrelationReferenceAsync(
+        string providerName,
+        string correlationReference,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Items.FirstOrDefault(x =>
+            x.ProviderName.Equals(providerName, StringComparison.OrdinalIgnoreCase) &&
+            x.CorrelationReference.Equals(correlationReference, StringComparison.OrdinalIgnoreCase)));
+
+    public Task<KycVerificationAttempt?> GetByProviderReferenceAsync(
+        string providerName,
+        string providerReference,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Items.FirstOrDefault(x =>
+            x.ProviderName.Equals(providerName, StringComparison.OrdinalIgnoreCase) &&
+            x.ProviderReference != null &&
+            x.ProviderReference.Equals(providerReference, StringComparison.OrdinalIgnoreCase)));
+
+    public Task<IReadOnlyList<KycVerificationAttempt>> GetByKycVerificationIdAsync(
+        Guid kycVerificationId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<KycVerificationAttempt>>(
+            Items.Where(x => x.KycVerificationId == kycVerificationId)
+                .OrderBy(x => x.StartedAt)
+                .ToList());
+
+    public Task<KycVerificationAttempt> CreateAsync(
+        KycVerificationAttempt attempt,
+        CancellationToken cancellationToken = default)
+    {
+        Items.Add(attempt);
+        return Task.FromResult(attempt);
+    }
+
+    public void Update(KycVerificationAttempt attempt)
+    {
+    }
+}
 internal sealed class TestAdminListingRepository : IAdminListingRepository
 {
     public List<User> Users { get; } = [];
