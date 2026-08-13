@@ -13,6 +13,7 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     public DbSet<Role> Roles { get; set; }
     public DbSet<UserRole> UserRoles { get; set; }
     public DbSet<KycVerification> KycVerifications { get; set; }
+    public DbSet<KycVerificationAttempt> KycVerificationAttempts { get; set; }
     public DbSet<Vehicle> Vehicles { get; set; }
     public DbSet<VehicleDocument> VehicleDocuments { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
@@ -25,7 +26,6 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     public DbSet<Wallet> Wallets { get; set; }
     public DbSet<WalletTransaction> WalletTransactions { get; set; }
     public DbSet<PaystackWalletFundingRequest> PaystackWalletFundingRequests { get; set; }
-    public DbSet<VirtualAccount> VirtualAccounts { get; set; }
     public DbSet<VehicleImage> VehicleImages { get; set; }
     public DbSet<VehicleAmenity> VehicleAmenities { get; set; }
     public DbSet<Escrow> Escrows { get; set; }

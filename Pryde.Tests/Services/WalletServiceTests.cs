@@ -5,6 +5,7 @@ using Pryde.Contracts.RequestModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
+using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Service.Implementation;
 using Pryde.Services.Providers.Paystack;
 using Pryde.Services.Settings;
@@ -15,9 +16,30 @@ namespace Pryde.Tests.Services;
 public class WalletServiceTests
 {
     [Fact]
+    public async Task CreateWalletForUserCreatesOnlyWallet()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            Email = "wallet-only@test.local"
+        };
+        var service = new WalletService(unitOfWork);
+
+        var wallet = await service.CreateWalletForUserAsync(
+            user,
+            "Wallet Only User");
+
+        Assert.Equal(user.Id, wallet.UserId);
+        Assert.Single(unitOfWork.WalletRepository.Items);
+        Assert.Null(typeof(Wallet).GetProperty("VirtualAccount"));
+        Assert.Null(typeof(IUnitOfWork).GetProperty("VirtualAccounts"));
+    }
+
+    [Fact]
     public async Task FundingRequestUsesAuthenticatedIdentityAndConvertsNairaToKobo()
     {
-        var (unitOfWork, userId, _, _) = Context();
+        var (unitOfWork, userId, _) = Context();
         var service = PaystackService(
             unitOfWork,
             Transaction("unused", "user@test.local", 10000));
@@ -42,7 +64,7 @@ public class WalletServiceTests
     [Fact]
     public async Task FundingRequestOwnershipIsRequiredBeforeVerification()
     {
-        var (unitOfWork, userId, wallet, _) = Context();
+        var (unitOfWork, userId, wallet) = Context();
         AddIntent(unitOfWork, Guid.NewGuid(), "stolen-ref", 10000);
         var service = PaystackService(
             unitOfWork,
@@ -62,7 +84,7 @@ public class WalletServiceTests
     [Fact]
     public async Task PaystackVerificationCreditsTrustedKoboAmountAndPostsLedger()
     {
-        var (unitOfWork, userId, wallet, _) = Context();
+        var (unitOfWork, userId, wallet) = Context();
         AddIntent(unitOfWork, userId, "pay-ref-1", 250050);
         var service = PaystackService(
             unitOfWork,
@@ -101,7 +123,7 @@ public class WalletServiceTests
     [Fact]
     public async Task WebhookThenVerifyReturnsExistingFundingWithoutDoubleCredit()
     {
-        var (unitOfWork, userId, wallet, _) = Context();
+        var (unitOfWork, userId, wallet) = Context();
         var transaction = Transaction(
             "shared-ref",
             "user@test.local",
@@ -135,7 +157,7 @@ public class WalletServiceTests
     [Fact]
     public async Task ConcurrentVerificationCreditsFundingRequestOnce()
     {
-        var (unitOfWork, userId, wallet, _) = Context();
+        var (unitOfWork, userId, wallet) = Context();
         AddIntent(unitOfWork, userId, "concurrent-ref", 100000);
         var service = PaystackService(
             unitOfWork,
@@ -163,7 +185,7 @@ public class WalletServiceTests
     [Fact]
     public async Task ChargeWebhookIgnoresUnknownReference()
     {
-        var (unitOfWork, _, wallet, _) = Context();
+        var (unitOfWork, _, wallet) = Context();
         var service = PaystackService(
             unitOfWork,
             Transaction("unknown-ref", "user@test.local", 10000));
@@ -193,7 +215,7 @@ public class WalletServiceTests
         string email,
         string domain)
     {
-        var (unitOfWork, userId, wallet, _) = Context();
+        var (unitOfWork, userId, wallet) = Context();
         AddIntent(unitOfWork, userId, "mismatch-ref", 10000);
         var transaction = Transaction("mismatch-ref", email, amount);
         transaction.Currency = currency;
@@ -214,7 +236,7 @@ public class WalletServiceTests
     [Fact]
     public async Task VerificationRejectsTransactionOwnedByAnotherEmail()
     {
-        var (unitOfWork, userId, wallet, _) = Context();
+        var (unitOfWork, userId, wallet) = Context();
         AddIntent(unitOfWork, userId, "foreign-ref", 10000);
         var service = PaystackService(
             unitOfWork,
@@ -243,7 +265,7 @@ public class WalletServiceTests
         long amount,
         string currency)
     {
-        var (unitOfWork, userId, wallet, _) = Context();
+        var (unitOfWork, userId, wallet) = Context();
         AddIntent(unitOfWork, userId, "pay-ref", 10000);
         var transaction = Transaction(
             providerReference,
@@ -271,7 +293,7 @@ public class WalletServiceTests
     [Fact]
     public async Task WebhookRejectsInvalidSignature()
     {
-        var (unitOfWork, _, _, _) = Context();
+        var (unitOfWork, _, _) = Context();
         var service = PaystackService(
             unitOfWork,
             Transaction("pay-ref", "user@test.local", 10000));
@@ -287,7 +309,7 @@ public class WalletServiceTests
     [Fact]
     public async Task TransferFailedWebhookRestoresExistingWithdrawal()
     {
-        var (unitOfWork, userId, wallet, _) = Context();
+        var (unitOfWork, userId, wallet) = Context();
         wallet.Balance = 500m;
         var withdrawal = new WalletTransaction
         {
@@ -331,7 +353,7 @@ public class WalletServiceTests
         decimal expectedBalance,
         decimal expectedWithdrawableBalance)
     {
-        var (unitOfWork, _, wallet, _) = Context();
+        var (unitOfWork, _, wallet) = Context();
         wallet.Balance = 500m;
         var withdrawal = new WalletTransaction
         {
@@ -366,50 +388,20 @@ public class WalletServiceTests
     }
 
     [Fact]
-    public async Task UserCanRetrieveWalletAndVirtualAccount()
+    public async Task UserCanRetrieveWallet()
     {
-        var (unitOfWork, userId, wallet, account) = Context();
+        var (unitOfWork, userId, wallet) = Context();
         var service = new WalletService(unitOfWork);
 
         var walletResult = await service.GetMineAsync(userId);
-        var accountResult = await service.GetVirtualAccountAsync(userId);
 
         Assert.Equal(wallet.Id, walletResult.Id);
-        Assert.Equal(account.AccountNumber, accountResult.AccountNumber);
-    }
-
-    [Fact]
-    public async Task DevelopmentFundingUpdatesOwnBalanceAndCreatesOneTransaction()
-    {
-        var (unitOfWork, userId, wallet, account) = Context();
-        var service = new WalletService(unitOfWork);
-
-        var result = await service.FundVirtualAccountAsync(userId, new FundVirtualAccountRequestDto
-        {
-            AccountNumber = account.AccountNumber,
-            Amount = 2500m
-        });
-
-        Assert.Equal(2500m, wallet.Balance);
-        Assert.Equal(2500m, result.UpdatedBalance);
-        Assert.Single(unitOfWork.WalletTransactionRepository.Items);
-        Assert.Equal(1, unitOfWork.SaveChangesCount);
-    }
-
-    [Fact]
-    public async Task UserCannotFundAnotherUsersWallet()
-    {
-        var (unitOfWork, _, _, account) = Context();
-        var service = new WalletService(unitOfWork);
-
-        await Assert.ThrowsAsync<ForbiddenException>(() => service.FundVirtualAccountAsync(
-            Guid.NewGuid(), new FundVirtualAccountRequestDto { AccountNumber = account.AccountNumber, Amount = 1m }));
     }
 
     [Fact]
     public async Task TransactionHistoryIsPagedAndUserScoped()
     {
-        var (unitOfWork, userId, wallet, _) = Context();
+        var (unitOfWork, userId, wallet) = Context();
         var otherUserId = Guid.NewGuid();
         var otherWallet = new Wallet
         {
@@ -467,25 +459,19 @@ public class WalletServiceTests
         };
     }
 
-    private static (TestUnitOfWork UnitOfWork, Guid UserId, Wallet Wallet, VirtualAccount Account) Context()
+    private static (TestUnitOfWork UnitOfWork, Guid UserId, Wallet Wallet) Context()
     {
         var unitOfWork = new TestUnitOfWork();
         var userId = Guid.NewGuid();
         var wallet = new Wallet { Id = Guid.NewGuid(), UserId = userId };
-        var account = new VirtualAccount
-        {
-            Id = Guid.NewGuid(), WalletId = wallet.Id, Wallet = wallet,
-            AccountNumber = "1000000001", AccountName = "Test User", BankName = "Pryde Test Bank", IsActive = true
-        };
         unitOfWork.WalletRepository.Items.Add(wallet);
-        unitOfWork.VirtualAccountRepository.Items.Add(account);
         unitOfWork.UserRepository.Items.Add(new User
         {
             Id = userId,
             Email = "user@test.local",
             Status = UserStatus.Active
         });
-        return (unitOfWork, userId, wallet, account);
+        return (unitOfWork, userId, wallet);
     }
 
     private static WalletService PaystackService(
