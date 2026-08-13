@@ -15,7 +15,8 @@ namespace Pryde.Api.Controllers.V1;
 public class KycController(
     IKycService kycService,
     IKycProviderService kycProviderService,
-    IDojahKycService dojahKycService) : ControllerBase
+    IDojahKycService dojahKycService,
+    ISmileIdKycService smileIdKycService) : ControllerBase
 {
     [HttpGet("mine")]
     [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
@@ -96,6 +97,26 @@ public class KycController(
             Request.Headers["x-dojah-signature-v2"].FirstOrDefault(),
             cancellationToken);
 
+        return Ok();
+    }
+
+    [HttpPost("providers/smile-id/callback")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ProcessSmileIdCallback(
+        CancellationToken cancellationToken)
+    {
+        const int maximumPayloadBytes = 1_572_864;
+        if (Request.ContentLength > maximumPayloadBytes)
+        {
+            throw new Pryde.Domain.Common.Exceptions.ValidationException(
+                "Webhook payload is too large.");
+        }
+
+        var payload = await ReadWebhookPayloadAsync(
+            Request.Body,
+            maximumPayloadBytes,
+            cancellationToken);
+        await smileIdKycService.ProcessCallbackAsync(payload, cancellationToken);
         return Ok();
     }
 

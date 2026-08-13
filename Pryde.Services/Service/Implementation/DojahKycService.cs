@@ -20,13 +20,15 @@ public class DojahKycProvider(
     IUnitOfWork unitOfWork,
     IOptions<DojahSettings> options,
     ILogger<DojahKycProvider> logger,
-    INotificationService notificationService) : IDojahKycService, IKycProvider
+    INotificationService notificationService,
+    IOptions<KycSettings>? kycOptions = null) : IDojahKycService, IKycProvider
 {
     private const string ProviderName = "Dojah";
 
     public string Name => ProviderName;
 
     private readonly DojahSettings _settings = options.Value;
+    private readonly KycSettings? _kycSettings = kycOptions?.Value;
 
     public DojahKycProvider(
         IUnitOfWork unitOfWork,
@@ -418,7 +420,11 @@ public class DojahKycProvider(
 
     private void EnsureEnabled()
     {
-        if (!_settings.Enabled)
+        if (!_settings.Enabled &&
+            !string.Equals(
+                _kycSettings?.ActiveProvider,
+                ProviderName,
+                StringComparison.OrdinalIgnoreCase))
         {
             throw new ServiceUnavailableException(
                 "Dojah verification is currently unavailable.");

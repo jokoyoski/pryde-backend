@@ -13,6 +13,15 @@ public class KycVerificationAttempt : BaseEntity
     public string? RawStatus { get; set; }
     public string? ResultCode { get; set; }
     public string? FailureReason { get; set; }
+    public string? ResultText { get; set; }
+    public string? FlowType { get; set; }
+    public string? AttemptGroupReference { get; set; }
+    public string? ExternalUserReference { get; set; }
+    public bool SmileActionSucceeded { get; set; }
+    public bool SmileIdentitySucceeded { get; set; }
+    public DateTime? ProviderEventTimestamp { get; set; }
+    public string? CallbackPayloadHash { get; set; }
+    public string? VerificationUrl { get; set; }
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ProviderUpdatedAt { get; set; }
     public DateTime? CompletedAt { get; set; }

@@ -36,7 +36,38 @@ public class KycService(
             throw new NotFoundException( nameof(KycVerification), userId);
         }
 
-        return kyc.Adapt<KycVerificationResponseDto>();
+        var response = kyc.Adapt<KycVerificationResponseDto>();
+        if (!string.Equals(kyc.ProviderName, "SmileId", StringComparison.OrdinalIgnoreCase))
+        {
+            return response;
+        }
+
+        var attempts = await unitOfWork.KycVerificationAttempts
+            .GetByKycVerificationIdAsync(kyc.Id, cancellationToken);
+        var latest = attempts
+            .Where(x => x.ProviderName == "SmileId" &&
+                        x.AttemptGroupReference == kyc.ProviderReference)
+            .GroupBy(x => x.FlowType)
+            .Select(group => group.OrderByDescending(x => x.StartedAt).ThenByDescending(x => x.CreatedAt).First())
+            .ToDictionary(x => x.FlowType!);
+        var roles = await unitOfWork.UserRoles.GetByUserIdAsync(userId, cancellationToken);
+        var requiredFlows = roles.Any(x => x.Role.Name == RoleNames.Driver)
+            ? new[] { "BiometricKyc", "DriverLicenceDocumentVerification" }
+            : new[] { "BiometricKyc" };
+        response.Flows = requiredFlows.Select(flow =>
+        {
+            latest.TryGetValue(flow, out var attempt);
+            return new KycFlowStatusResponseDto
+            {
+                Flow = flow,
+                Required = true,
+                Status = attempt?.Status ?? KycProviderStatus.Pending,
+                RawStatus = attempt?.RawStatus ?? "Blocked",
+                ResultCode = attempt?.ResultCode,
+                FailureReason = attempt?.FailureReason
+            };
+        }).ToList();
+        return response;
     }
 
     public async Task<KycVerificationResponseDto> ApproveAsync(

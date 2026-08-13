@@ -2,11 +2,17 @@ using Microsoft.Extensions.Options;
 
 namespace Pryde.Services.Settings;
 
-public class DojahSettingsValidator : IValidateOptions<DojahSettings>
+public class DojahSettingsValidator(IOptions<KycSettings>? kycOptions = null) : IValidateOptions<DojahSettings>
 {
     public ValidateOptionsResult Validate(string? name, DojahSettings settings)
     {
-        if (!settings.Enabled)
+        if (kycOptions is not null &&
+            !string.Equals(kycOptions.Value.ActiveProvider, "Dojah", StringComparison.OrdinalIgnoreCase))
+        {
+            return ValidateOptionsResult.Success;
+        }
+
+        if (kycOptions is null && !settings.Enabled)
         {
             return ValidateOptionsResult.Success;
         }

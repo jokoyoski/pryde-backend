@@ -312,6 +312,12 @@ public class ApiConfigurationTests
         var webhook = typeof(KycController).GetMethod(nameof(KycController.ProcessDojahWebhook));
         Assert.NotNull(webhook);
         Assert.NotEmpty(webhook.GetCustomAttributes(typeof(AllowAnonymousAttribute), true));
+
+        var smileWebhook = typeof(KycController).GetMethod(
+            nameof(KycController.ProcessSmileIdCallback));
+        Assert.NotNull(smileWebhook);
+        Assert.NotEmpty(smileWebhook.GetCustomAttributes(
+            typeof(AllowAnonymousAttribute), true));
     }
 
     [Theory]
@@ -319,6 +325,7 @@ public class ApiConfigurationTests
     [InlineData(nameof(KycController.RetryVerification), "retry")]
     [InlineData(nameof(KycController.RetryDojahVerification), "dojah/retry")]
     [InlineData(nameof(KycController.ProcessDojahWebhook), "dojah/webhook")]
+    [InlineData(nameof(KycController.ProcessSmileIdCallback), "providers/smile-id/callback")]
     public void GenericAndLegacyKycPostRoutesRemainAvailable(
         string actionName,
         string route)
@@ -588,6 +595,7 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/kyc/dojah/config", paths);
         Assert.Contains("/api/v1/kyc/dojah/retry", paths);
         Assert.Contains("/api/v1/kyc/dojah/webhook", paths);
+        Assert.Contains("/api/v1/kyc/providers/smile-id/callback", paths);
         Assert.Contains("/api/v1/auth/email-verification/resend", paths);
         Assert.Contains("/api/v1/auth/email-verification/verify", paths);
         Assert.Contains("/api/v1/auth/verification-status", paths);

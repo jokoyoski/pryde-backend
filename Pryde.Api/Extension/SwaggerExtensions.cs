@@ -9,6 +9,7 @@ public static class SwaggerExtensions
     {
         services.AddSwaggerGen(options =>
         {
+            options.OperationFilter<KycEndpointDocumentationFilter>();
             options.SwaggerDoc("v1", new OpenApiInfo
             {
                 Title = "Pryde.Api",
