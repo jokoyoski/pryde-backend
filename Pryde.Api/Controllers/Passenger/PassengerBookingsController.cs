@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pryde.Api.Controllers.Driver.Authorization;
 using Pryde.Contracts.RequestModels;
+using Pryde.Contracts.ResponseModels;
 using Pryde.Services.Service.Interface;
 
 namespace Pryde.Api.Controllers.V1;
@@ -17,6 +18,7 @@ public class PassengerBookingsController(
 {
     [HttpPost("trip-bookings")]
     [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
+    [ProducesResponseType(typeof(TripBookingResponseDto), StatusCodes.Status201Created)]
     public async Task<IActionResult> Create(
         [FromBody] CreateTripBookingRequestDto request,
         CancellationToken cancellationToken)
@@ -26,6 +28,7 @@ public class PassengerBookingsController(
     }
 
     [HttpGet("trip-bookings/mine")]
+    [ProducesResponseType(typeof(IReadOnlyList<TripBookingResponseDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetMine(CancellationToken cancellationToken)
     {
         return Ok(await tripBookingService.GetMineAsync(GetUserId(), cancellationToken));
@@ -33,6 +36,7 @@ public class PassengerBookingsController(
 
     [HttpPatch("trip-bookings/{bookingId:guid}/cancel")]
     [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
+    [ProducesResponseType(typeof(TripBookingResponseDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Cancel(Guid bookingId, CancellationToken cancellationToken)
     {
         return Ok(await tripBookingService.CancelAsync(bookingId, GetUserId(), cancellationToken));

@@ -17,11 +17,16 @@ public class TripBookingService(
     IUnitOfWork unitOfWork,
     IFinancialService financialService,
     IOptions<BookingPaymentSettings> bookingPaymentOptions,
-    INotificationService notificationService)
+    INotificationService notificationService,
+    TimeProvider? timeProvider = null)
     : ITripBookingService
 {
+    private static readonly TimeSpan RatingWindow =
+        TimeSpan.FromHours(24);
     private readonly BookingPaymentSettings _bookingPaymentSettings =
         bookingPaymentOptions.Value;
+    private readonly TimeProvider _timeProvider =
+        timeProvider ?? TimeProvider.System;
 
     public TripBookingService(IUnitOfWork unitOfWork)
         : this(
@@ -123,7 +128,16 @@ public class TripBookingService(
         var bookings = await unitOfWork.TripBookings.GetByPassengerIdAsync(passengerId, cancellationToken);
         var profile = await unitOfWork.Profiles.GetByUserIdAsync(passengerId, cancellationToken);
         var passengerName = profile is null ? null : GetName(profile);
-        return bookings.Select(b => MapResponse(b, b.Trip, passengerName)).ToList();
+        var ratings = await GetRatingStatesAsync(
+            bookings,
+            passengerId,
+            cancellationToken);
+        return bookings.Select(b => MapResponse(
+            b,
+            b.Trip,
+            passengerName,
+            passengerId,
+            ratings)).ToList();
     }
 
     public async Task<IReadOnlyList<TripBookingResponseDto>> GetPendingForTripAsync(
@@ -133,7 +147,16 @@ public class TripBookingService(
     {
         await EnsureTripOwnerAsync(tripId, driverId, cancellationToken);
         var bookings = await unitOfWork.TripBookings.GetPendingByTripIdAsync(tripId, cancellationToken);
-        return bookings.Select(b => MapResponse(b, b.Trip, GetPassengerName(b))).ToList();
+        var ratings = await GetRatingStatesAsync(
+            bookings,
+            driverId,
+            cancellationToken);
+        return bookings.Select(b => MapResponse(
+            b,
+            b.Trip,
+            GetPassengerName(b),
+            driverId,
+            ratings)).ToList();
     }
 
     public async Task<PagedResponseDto<DriverPendingBookingRequestResponseDto>>
@@ -183,7 +206,16 @@ public class TripBookingService(
     {
         await EnsureTripOwnerAsync(tripId, driverId, cancellationToken);
         var bookings = await unitOfWork.TripBookings.GetApprovedByTripIdAsync(tripId, cancellationToken);
-        return bookings.Select(b => MapResponse(b, b.Trip, GetPassengerName(b))).ToList();
+        var ratings = await GetRatingStatesAsync(
+            bookings,
+            driverId,
+            cancellationToken);
+        return bookings.Select(b => MapResponse(
+            b,
+            b.Trip,
+            GetPassengerName(b),
+            driverId,
+            ratings)).ToList();
     }
 
     public async Task<TripBookingResponseDto> ApproveAsync(
@@ -397,8 +429,35 @@ public class TripBookingService(
         }
     }
 
-    private static TripBookingResponseDto MapResponse(TripBooking booking, Trip trip, string? passengerName)
+    private TripBookingResponseDto MapResponse(
+        TripBooking booking,
+        Trip trip,
+        string? passengerName,
+        Guid? requesterId = null,
+        IReadOnlyDictionary<Guid, DateTime>? ratings = null)
     {
+        DateTime? ratedAt = null;
+        var hasRated = false;
+        if (ratings is not null &&
+            ratings.TryGetValue(booking.Id, out var requesterRatedAt))
+        {
+            hasRated = true;
+            ratedAt = requesterRatedAt;
+        }
+        var isParticipant = requesterId.HasValue &&
+            (requesterId.Value == booking.PassengerId ||
+             requesterId.Value == trip.DriverId);
+        var completedAt = trip.CompletedAt ??
+            trip.AutoCompletedAt ??
+            trip.UpdatedAt;
+        var canRate = !hasRated &&
+            isParticipant &&
+            booking.Status == BookingStatus.Completed &&
+            trip.Status == TripStatus.Completed &&
+            completedAt.HasValue &&
+            _timeProvider.GetUtcNow().UtcDateTime <=
+                completedAt.Value.Add(RatingWindow);
+
         return new TripBookingResponseDto
         {
             BookingId = booking.Id,
@@ -417,11 +476,14 @@ public class TripBookingService(
             ApprovedAt = booking.ApprovedAt,
             PaidAt = booking.PaidAt,
             IsPaid = booking.PaidAt.HasValue,
-            PaymentExpiresAt = booking.PaymentExpiresAt
+            PaymentExpiresAt = booking.PaymentExpiresAt,
+            HasRated = hasRated,
+            CanRate = canRate,
+            RatedAt = hasRated ? ratedAt : null
         };
     }
 
-    private static TripBookingResponseDto WorkflowResponse(
+    private TripBookingResponseDto WorkflowResponse(
         TripBooking booking,
         Trip trip,
         string? passengerName,
@@ -439,6 +501,19 @@ public class TripBookingService(
 
     private static string? GetPassengerName(TripBooking booking) =>
         booking.Passenger?.Profile is null ? null : GetName(booking.Passenger.Profile);
+
+    private Task<IReadOnlyDictionary<Guid, DateTime>>
+        GetRatingStatesAsync(
+            IReadOnlyCollection<TripBooking> bookings,
+            Guid requesterId,
+            CancellationToken cancellationToken)
+    {
+        return unitOfWork.TripRatings
+            .GetCreatedAtByBookingIdsAndRaterAsync(
+                bookings.Select(booking => booking.Id).ToArray(),
+                requesterId,
+                cancellationToken);
+    }
 
     private static string GetName(Profile profile) => $"{profile.FirstName} {profile.LastName}".Trim();
 }

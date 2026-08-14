@@ -3,6 +3,7 @@ using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pryde.Contracts.RequestModels;
+using Pryde.Contracts.ResponseModels;
 using Pryde.Services.Service.Interface;
 
 namespace Pryde.Api.Controllers.V1;
@@ -15,6 +16,7 @@ public class TripRatingsController(
     ITripRatingService tripRatingService) : ControllerBase
 {
     [HttpPost("trip-bookings/{bookingId:guid}/ratings")]
+    [ProducesResponseType(typeof(TripRatingResponseDto), StatusCodes.Status201Created)]
     public async Task<IActionResult> Create(
         Guid bookingId,
         [FromBody] TripRatingRequestDto request,

@@ -8,6 +8,11 @@ public interface ITripRatingRepository
         Guid bookingId,
         Guid raterId,
         CancellationToken cancellationToken = default);
+    Task<IReadOnlyDictionary<Guid, DateTime>>
+        GetCreatedAtByBookingIdsAndRaterAsync(
+            IReadOnlyCollection<Guid> bookingIds,
+            Guid raterId,
+            CancellationToken cancellationToken = default);
     Task<RatingSummaryData> GetSummaryAsync(
         Guid ratedUserId,
         CancellationToken cancellationToken = default);

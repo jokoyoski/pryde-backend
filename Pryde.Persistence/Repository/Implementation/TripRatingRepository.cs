@@ -20,6 +20,28 @@ public class TripRatingRepository(PrydeDbContext context)
             cancellationToken);
     }
 
+    public async Task<IReadOnlyDictionary<Guid, DateTime>>
+        GetCreatedAtByBookingIdsAndRaterAsync(
+            IReadOnlyCollection<Guid> bookingIds,
+            Guid raterId,
+            CancellationToken cancellationToken = default)
+    {
+        if (bookingIds.Count == 0)
+        {
+            return new Dictionary<Guid, DateTime>();
+        }
+
+        return await context.TripRatings
+            .AsNoTracking()
+            .Where(rating =>
+                bookingIds.Contains(rating.BookingId) &&
+                rating.RaterId == raterId)
+            .ToDictionaryAsync(
+                rating => rating.BookingId,
+                rating => rating.CreatedAt,
+                cancellationToken);
+    }
+
     public async Task<RatingSummaryData> GetSummaryAsync(
         Guid ratedUserId,
         CancellationToken cancellationToken = default)

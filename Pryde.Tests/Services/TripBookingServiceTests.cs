@@ -11,6 +11,9 @@ namespace Pryde.Tests.Services;
 
 public class TripBookingServiceTests
 {
+    private static readonly DateTimeOffset RatingNow =
+        new(2026, 8, 13, 12, 0, 0, TimeSpan.Zero);
+
     [Fact]
     public async Task PassengerCanRequestAnOpenTrip()
     {
@@ -464,6 +467,143 @@ public class TripBookingServiceTests
     }
 
     [Fact]
+    public async Task PassengerCompletedBookingIsRateableUntilRequesterRates()
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        var passengerId = Guid.NewGuid();
+        var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        trip.Status = TripStatus.Completed;
+        trip.CompletedAt = RatingNow.UtcDateTime.AddHours(-1);
+        var booking = AddBooking(
+            unitOfWork,
+            trip,
+            passengerId,
+            BookingStatus.Completed);
+        var bookingService = BookingService(unitOfWork);
+
+        var before = Assert.Single(
+            await bookingService.GetMineAsync(passengerId));
+
+        Assert.False(before.HasRated);
+        Assert.True(before.CanRate);
+        Assert.Null(before.RatedAt);
+
+        var ratingService = new TripRatingService(
+            unitOfWork,
+            new NotificationService(unitOfWork),
+            new FixedTimeProvider(RatingNow));
+        var created = await ratingService.CreateAsync(
+            booking.Id,
+            passengerId,
+            new TripRatingRequestDto { Value = 5 });
+        var after = Assert.Single(
+            await bookingService.GetMineAsync(passengerId));
+
+        Assert.Equal(booking.Id, created.BookingId);
+        Assert.True(after.HasRated);
+        Assert.False(after.CanRate);
+        Assert.Equal(created.CreatedAt, after.RatedAt);
+    }
+
+    [Fact]
+    public async Task DriverRatingStateIsIndependentFromPassengerRating()
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        var passengerId = Guid.NewGuid();
+        var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        trip.Status = TripStatus.Completed;
+        trip.CompletedAt = RatingNow.UtcDateTime.AddHours(-1);
+        var booking = AddBooking(
+            unitOfWork,
+            trip,
+            passengerId,
+            BookingStatus.Completed);
+        unitOfWork.TripRatingRepository.Items.Add(new Pryde.Domain.Entities.TripRating
+        {
+            BookingId = booking.Id,
+            RaterId = passengerId,
+            RatedUserId = driverId,
+            CreatedAt = RatingNow.UtcDateTime.AddMinutes(-10)
+        });
+
+        var response = Assert.Single(await BookingService(unitOfWork)
+            .GetConfirmedPassengersAsync(trip.Id, driverId));
+
+        Assert.False(response.HasRated);
+        Assert.True(response.CanRate);
+        Assert.Null(response.RatedAt);
+
+        var driverRatedAt = RatingNow.UtcDateTime.AddMinutes(-5);
+        unitOfWork.TripRatingRepository.Items.Add(new Pryde.Domain.Entities.TripRating
+        {
+            BookingId = booking.Id,
+            RaterId = driverId,
+            RatedUserId = passengerId,
+            CreatedAt = driverRatedAt
+        });
+
+        var after = Assert.Single(await BookingService(unitOfWork)
+            .GetConfirmedPassengersAsync(trip.Id, driverId));
+
+        Assert.True(after.HasRated);
+        Assert.False(after.CanRate);
+        Assert.Equal(driverRatedAt, after.RatedAt);
+    }
+
+    [Fact]
+    public async Task ExpiredCompletedBookingCannotBeRated()
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        var passengerId = Guid.NewGuid();
+        var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        trip.Status = TripStatus.Completed;
+        trip.CompletedAt = RatingNow.UtcDateTime.AddHours(-24).AddTicks(-1);
+        AddBooking(
+            unitOfWork,
+            trip,
+            passengerId,
+            BookingStatus.Completed);
+
+        var response = Assert.Single(await BookingService(unitOfWork)
+            .GetMineAsync(passengerId));
+
+        Assert.False(response.HasRated);
+        Assert.False(response.CanRate);
+    }
+
+    [Fact]
+    public async Task BookingListLoadsRequesterRatingStateOnce()
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        var passengerId = Guid.NewGuid();
+        var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        AddBooking(unitOfWork, trip, passengerId);
+        AddBooking(unitOfWork, trip, passengerId);
+
+        await BookingService(unitOfWork).GetMineAsync(passengerId);
+
+        Assert.Equal(
+            1,
+            unitOfWork.TripRatingRepository.RatingStateQueryCount);
+    }
+
+    [Fact]
+    public async Task UnrelatedDriverCannotReadBookingRatingState()
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        AddBooking(
+            unitOfWork,
+            trip,
+            status: BookingStatus.Completed);
+
+        await Assert.ThrowsAsync<ForbiddenException>(() =>
+            BookingService(unitOfWork).GetConfirmedPassengersAsync(
+                trip.Id,
+                Guid.NewGuid()));
+    }
+
+    [Fact]
     public async Task DriverCanViewAllPendingBookingRequestsNewestFirst()
     {
         var (unitOfWork, driverId, vehicle) =
@@ -552,6 +692,23 @@ public class TripBookingServiceTests
         var booking = TestData.Booking(trip, passengerId ?? Guid.NewGuid(), status);
         unitOfWork.TripBookingRepository.Items.Add(booking);
         return booking;
+    }
+
+    private static TripBookingService BookingService(
+        TestUnitOfWork unitOfWork)
+    {
+        return new TripBookingService(
+            unitOfWork,
+            new FinancialService(unitOfWork),
+            Options.Create(new BookingPaymentSettings()),
+            new NotificationService(unitOfWork),
+            new FixedTimeProvider(RatingNow));
+    }
+
+    private sealed class FixedTimeProvider(
+        DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 
     private sealed class ThrowingRealtimeSender
