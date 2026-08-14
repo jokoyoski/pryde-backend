@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Pryde.Domain.Common.Exceptions;
@@ -51,11 +52,6 @@ public class SmileIdKycProviderTests
             request.IdentityOptions,
             option =>
             {
-                Assert.Equal("NIN_SLIP", option.IdType);
-                Assert.Equal("biometric_kyc", option.VerificationMethod);
-            },
-            option =>
-            {
                 Assert.Equal("VOTER_ID", option.IdType);
                 Assert.Equal("biometric_kyc", option.VerificationMethod);
             },
@@ -81,10 +77,65 @@ public class SmileIdKycProviderTests
         var options = Assert.Single(context.ApiClient.LinkRequests)
             .IdentityOptions;
         Assert.Equal(
-            ["NIN_SLIP", "VOTER_ID", "PASSPORT"],
+            ["VOTER_ID", "PASSPORT"],
             options.Select(option => option.IdType).ToArray());
         Assert.DoesNotContain(options, option => option.IdType == "BVN");
         Assert.DoesNotContain(options, option => option.IdType == "DRIVERS_LICENSE");
+    }
+
+    [Fact]
+    public async Task ExternalLinkCallRunsAfterPendingAttemptTransactionCommits()
+    {
+        var context = Context(RoleNames.Passenger);
+        context.ApiClient.BeforeCreateLink = () =>
+        {
+            Assert.False(context.UnitOfWork.IsTransactionActive);
+            var pending = Assert.Single(context.UnitOfWork.KycVerificationAttemptRepository.Items);
+            Assert.Equal("CreatingLink", pending.RawStatus);
+            Assert.Null(pending.VerificationUrl);
+        };
+
+        await context.Provider.CreateSessionAsync(new KycProviderRequest(context.UserId));
+
+        Assert.Equal(2, context.UnitOfWork.TransactionCount);
+        Assert.False(context.UnitOfWork.IsTransactionActive);
+    }
+
+    [Fact]
+    public async Task RepeatedSessionRequestReturnsExistingLinkWithoutSecondHttpCall()
+    {
+        var context = Context(RoleNames.Passenger);
+        var first = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId))).Sessions);
+
+        var second = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId))).Sessions);
+
+        Assert.Equal(first.JobId, second.JobId);
+        Assert.Equal(first.VerificationUrl, second.VerificationUrl);
+        Assert.Single(context.ApiClient.LinkRequests);
+    }
+
+    [Fact]
+    public async Task FailedLinkCreationLeavesRetryableAttemptAndClosedTransaction()
+    {
+        var context = Context(RoleNames.Passenger);
+        context.ApiClient.LinkFailure = new ServiceUnavailableException("Provider rejected request.");
+
+        await Assert.ThrowsAsync<ServiceUnavailableException>(() =>
+            context.Provider.CreateSessionAsync(new KycProviderRequest(context.UserId)));
+
+        var failed = Assert.Single(context.UnitOfWork.KycVerificationAttemptRepository.Items);
+        Assert.Equal(KycProviderStatus.Rejected, failed.Status);
+        Assert.Equal("LinkCreationFailed", failed.RawStatus);
+        Assert.Equal(KycStatus.Rejected, CurrentKyc(context).Status);
+        Assert.False(context.UnitOfWork.IsTransactionActive);
+
+        context.ApiClient.LinkFailure = null;
+        var retried = Assert.Single((await context.Provider.RetryAsync(
+            new KycProviderRequest(context.UserId))).Sessions);
+        Assert.NotEqual(failed.CorrelationReference, retried.JobId);
+        Assert.Equal(2, context.UnitOfWork.KycVerificationAttemptRepository.Items.Count);
     }
 
     [Fact]
@@ -489,7 +540,7 @@ public class SmileIdKycProviderTests
         MaximumCallbackAgeMinutes = 5,
         PassengerIdentityOptions =
         [
-            new() { IdType = "NIN_SLIP", VerificationMethod = "biometric_kyc" },
+            new() { IdType = "NIN_SLIP", VerificationMethod = "biometric_kyc", Enabled = false },
             new() { IdType = "VOTER_ID", VerificationMethod = "biometric_kyc" },
             new() { IdType = "BVN", VerificationMethod = "biometric_kyc", Enabled = false },
             new() { IdType = "PASSPORT", VerificationMethod = "doc_verification" }
@@ -539,7 +590,7 @@ public class SmileIdKycProviderTests
             [pascalCase ? "SmileJobID" : "smile_job_id"] = "smile-internal",
             [pascalCase ? "Country" : "country"] = "NG",
             [pascalCase ? "IDType" : "id_type"] = idType ?? (session.Flow == SmileIdKycProvider.BiometricFlow
-                ? "NIN_SLIP"
+                ? "VOTER_ID"
                 : "DRIVERS_LICENSE"),
             [pascalCase ? "PartnerParams" : "partner_params"] = partnerParams
         };
@@ -564,7 +615,7 @@ public class SmileIdKycProviderTests
             ResultText = text,
             SmileJobId = "smile-internal",
             Country = "NG",
-            IdType = session.Flow == SmileIdKycProvider.BiometricFlow ? "NIN_SLIP" : "DRIVERS_LICENSE",
+            IdType = session.Flow == SmileIdKycProvider.BiometricFlow ? "VOTER_ID" : "DRIVERS_LICENSE",
             PartnerParams = new SmileIdPartnerParams
             {
                 JobId = session.JobId,
@@ -590,6 +641,8 @@ public class SmileIdKycProviderTests
     private sealed class StubSmileIdApiClient : ISmileIdApiClient
     {
         public List<SmileIdLinkRequest> LinkRequests { get; } = [];
+        public Action? BeforeCreateLink { get; set; }
+        public Exception? LinkFailure { get; set; }
         public SmileIdJobStatusResponse JobStatus { get; set; } = new()
         {
             Code = "2304"
@@ -599,7 +652,12 @@ public class SmileIdKycProviderTests
             SmileIdLinkRequest request,
             CancellationToken cancellationToken = default)
         {
+            BeforeCreateLink?.Invoke();
             LinkRequests.Add(request);
+            if (LinkFailure is not null)
+            {
+                return Task.FromException<SmileIdLinkResponse>(LinkFailure);
+            }
             CallbackUsers[request.JobId] = request.UserId;
             return Task.FromResult(new SmileIdLinkResponse
             {
@@ -659,6 +717,8 @@ public class SmileIdApiClientTests
                 PartnerId = partnerId,
                 ApiKey = apiKey
             }),
+            NullLogger<SmileIdApiClient>.Instance,
+            new TestHostEnvironment { EnvironmentName = Environments.Development },
             new FixedTimeProvider(new DateTimeOffset(2026, 8, 13, 12, 0, 0, TimeSpan.Zero)));
 
         await api.GetJobStatusAsync("pryde-user", "job-1");
@@ -698,6 +758,8 @@ public class SmileIdApiClientTests
                 RedirectUrl = "https://app.example.test/onboarding/kyc",
                 DataPrivacyPolicyUrl = "https://example.test/privacy"
             }),
+            NullLogger<SmileIdApiClient>.Instance,
+            new TestHostEnvironment { EnvironmentName = Environments.Development },
             new FixedTimeProvider(new DateTimeOffset(2026, 8, 13, 12, 0, 0, TimeSpan.Zero)));
 
         var result = await api.CreateSingleUseLinkAsync(new SmileIdLinkRequest(
@@ -707,7 +769,7 @@ public class SmileIdApiClientTests
             RoleNames.Passenger,
             SmileIdKycProvider.BiometricFlow,
             [
-                new("NG", "NIN_SLIP", "biometric_kyc"),
+                new("NG", "VOTER_ID", "biometric_kyc"),
                 new("NG", "PASSPORT", "doc_verification")
             ]));
 
@@ -723,11 +785,103 @@ public class SmileIdApiClientTests
         Assert.Equal(RoleNames.Passenger, root.GetProperty("partner_params").GetProperty("role").GetString());
         var idTypes = root.GetProperty("id_types").EnumerateArray().ToList();
         Assert.Equal(2, idTypes.Count);
-        Assert.Equal("NIN_SLIP", idTypes[0].GetProperty("id_type").GetString());
+        Assert.Equal("VOTER_ID", idTypes[0].GetProperty("id_type").GetString());
         Assert.Equal("biometric_kyc", idTypes[0].GetProperty("verification_method").GetString());
         Assert.Equal("PASSPORT", idTypes[1].GetProperty("id_type").GetString());
         Assert.Equal("doc_verification", idTypes[1].GetProperty("verification_method").GetString());
     }
+
+    [Theory]
+    [InlineData("{\"code\":\"2213\",\"error\":\"A required parameter is missing\",\"field\":\"callback_url\"}", "[2213] A required parameter is missing")]
+    [InlineData("Bad Request", "[400] Bad Request")]
+    [InlineData("", "[400] Provider returned an empty error response.")]
+    [InlineData("{malformed", "[400] Provider returned an unreadable error response.")]
+    public async Task LinkErrorsReturnSanitizedDevelopmentMessage(
+        string body,
+        string expected)
+    {
+        var logger = new CapturingLogger<SmileIdApiClient>();
+        var api = ErrorApi(body, Environments.Development, logger);
+
+        var exception = await Assert.ThrowsAsync<ServiceUnavailableException>(() =>
+            api.CreateSingleUseLinkAsync(LinkRequest()));
+
+        Assert.Equal($"Smile ID rejected link creation: {expected}", exception.Message);
+        Assert.DoesNotContain("api-key", string.Join(' ', logger.Messages));
+        Assert.DoesNotContain("signature", string.Join(' ', logger.Messages), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ProductionLinkErrorIsGenericAndLogIsRedacted()
+    {
+        var logger = new CapturingLogger<SmileIdApiClient>();
+        var api = ErrorApi(
+            "{\"code\":\"2213\",\"error\":\"Invalid https://secret.example/u user@example.com\",\"field\":\"redirect_url\"}",
+            Environments.Production,
+            logger);
+
+        var exception = await Assert.ThrowsAsync<ServiceUnavailableException>(() =>
+            api.CreateSingleUseLinkAsync(LinkRequest()));
+
+        Assert.Equal("Smile ID link creation is temporarily unavailable.", exception.Message);
+        var logs = string.Join(' ', logger.Messages);
+        Assert.Contains("2213", logs);
+        Assert.Contains("redirect_url", logs);
+        Assert.DoesNotContain("secret.example", logs);
+        Assert.DoesNotContain("user@example.com", logs);
+    }
+
+    [Fact]
+    public async Task AccountCapabilityErrorIdentifiesIdTypesWithoutLoggingRequest()
+    {
+        var logger = new CapturingLogger<SmileIdApiClient>();
+        var api = ErrorApi(
+            "{\"code\":\"2413\",\"error\":\"NIN_SLIP is not enabled on your account for the country NG and verification method biometric_kyc\"}",
+            Environments.Development,
+            logger);
+
+        await Assert.ThrowsAsync<ServiceUnavailableException>(() =>
+            api.CreateSingleUseLinkAsync(LinkRequest()));
+
+        var logs = string.Join(' ', logger.Messages);
+        Assert.Contains("2413", logs);
+        Assert.Contains("Field: id_types", logs);
+        Assert.DoesNotContain("partner-test", logs);
+        Assert.DoesNotContain("pryde-user", logs);
+    }
+
+    private static SmileIdApiClient ErrorApi(
+        string body,
+        string environment,
+        ILogger<SmileIdApiClient> logger)
+    {
+        var handler = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "text/plain")
+        });
+        return new SmileIdApiClient(
+            new HttpClient(handler) { BaseAddress = new Uri("https://testapi.smileidentity.com/") },
+            Options.Create(new SmileIdSettings
+            {
+                PartnerId = "partner-test",
+                ApiKey = "api-key",
+                CompanyName = "Pryde",
+                CallbackUrl = "https://api.example.test/callback",
+                RedirectUrl = "https://app.example.test/onboarding/kyc",
+                DataPrivacyPolicyUrl = "https://example.test/privacy"
+            }),
+            logger,
+            new TestHostEnvironment { EnvironmentName = environment },
+            new FixedTimeProvider(new DateTimeOffset(2026, 8, 13, 12, 0, 0, TimeSpan.Zero)));
+    }
+
+    private static SmileIdLinkRequest LinkRequest() => new(
+        "Pryde identity job-1",
+        "pryde-user",
+        "job-1",
+        RoleNames.Passenger,
+        SmileIdKycProvider.BiometricFlow,
+        [new("NG", "VOTER_ID", "biometric_kyc")]);
 
     private static string Signature(string timestamp, string partnerId, string apiKey)
     {
@@ -756,5 +910,19 @@ public class SmileIdApiClientTests
                 : await request.Content.ReadAsStringAsync(cancellationToken);
             return response;
         }
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
     }
 }

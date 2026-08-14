@@ -78,6 +78,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         (TestTripSubscriptionRepository)TripSubscriptions;
     public int SaveChangesCount { get; private set; }
     public int TransactionCount { get; private set; }
+    public bool IsTransactionActive { get; private set; }
     public Queue<int> SaveChangesResults { get; } = [];
 
     public IUserRepository Users { get; }
@@ -122,6 +123,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     {
         await _transactionLock.WaitAsync(cancellationToken);
         TransactionCount++;
+        IsTransactionActive = true;
         var users = UserRepository.Items.ToList();
 
         try
@@ -136,6 +138,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         }
         finally
         {
+            IsTransactionActive = false;
             _transactionLock.Release();
         }
     }
@@ -1012,6 +1015,12 @@ internal sealed class TestKycVerificationAttemptRepository
         Task.FromResult(Items.FirstOrDefault(x =>
             x.ProviderName.Equals(providerName, StringComparison.OrdinalIgnoreCase) &&
             x.CorrelationReference.Equals(correlationReference, StringComparison.OrdinalIgnoreCase)));
+
+    public Task<KycVerificationAttempt?> GetByCorrelationReferenceForUpdateAsync(
+        string providerName,
+        string correlationReference,
+        CancellationToken cancellationToken = default) =>
+        GetByCorrelationReferenceAsync(providerName, correlationReference, cancellationToken);
 
     public Task<KycVerificationAttempt?> GetByProviderReferenceAsync(
         string providerName,

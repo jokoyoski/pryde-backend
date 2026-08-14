@@ -24,6 +24,11 @@ public sealed class SmileIdLinkResponse
     public string? ReferenceId { get; set; }
 }
 
+public sealed record SmileIdProviderError(
+    string Code,
+    string Message,
+    string? RejectedField);
+
 public sealed class SmileIdJobStatusResponse
 {
     [JsonPropertyName("timestamp")]

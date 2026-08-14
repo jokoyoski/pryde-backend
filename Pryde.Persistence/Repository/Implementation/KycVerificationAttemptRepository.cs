@@ -10,6 +10,20 @@ public class KycVerificationAttemptRepository(PrydeDbContext context) : IKycVeri
     public Task<KycVerificationAttempt?> GetByCorrelationReferenceAsync(string providerName, string correlationReference, CancellationToken cancellationToken = default) =>
         context.KycVerificationAttempts.FirstOrDefaultAsync(x => x.ProviderName == providerName && x.CorrelationReference == correlationReference, cancellationToken);
 
+    public Task<KycVerificationAttempt?> GetByCorrelationReferenceForUpdateAsync(
+        string providerName,
+        string correlationReference,
+        CancellationToken cancellationToken = default) =>
+        context.KycVerificationAttempts
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM "KycVerificationAttempts"
+                WHERE "ProviderName" = {providerName}
+                  AND "CorrelationReference" = {correlationReference}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+
     public Task<KycVerificationAttempt?> GetByProviderReferenceAsync(string providerName, string providerReference, CancellationToken cancellationToken = default) =>
         context.KycVerificationAttempts.FirstOrDefaultAsync(x => x.ProviderName == providerName && x.ProviderReference == providerReference, cancellationToken);
 

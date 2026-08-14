@@ -113,7 +113,7 @@ public sealed class SmileIdKycProvider(
             await RecoverPendingAttemptsAsync(userId, cancellationToken);
         }
 
-        return await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
+        var prepared = await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
         {
             var kyc = await unitOfWork.KycVerifications.GetByUserIdForUpdateAsync(
                 userId,
@@ -168,7 +168,11 @@ public sealed class SmileIdKycProvider(
             }
             else
             {
-                return CreateResult(kyc, existing, isDriver);
+                return new PreparedLinkAttempt(
+                    null,
+                    kyc.Id,
+                    isDriver,
+                    CreateResult(kyc, existing, isDriver));
             }
 
             var groupReference = string.IsNullOrWhiteSpace(kyc.ProviderReference) ||
@@ -176,6 +180,7 @@ public sealed class SmileIdKycProvider(
                 ? $"SMILE-GROUP-{Guid.NewGuid():N}"
                 : kyc.ProviderReference;
             var smileUserId = CreateSmileUserId(userId);
+            var identityOptions = GetIdentityOptions(isDriver);
             var attempt = new KycVerificationAttempt
             {
                 KycVerificationId = kyc.Id,
@@ -186,7 +191,9 @@ public sealed class SmileIdKycProvider(
                 FlowType = flowToCreate,
                 AttemptGroupReference = groupReference,
                 ExternalUserReference = smileUserId,
-                StartedAt = _timeProvider.GetUtcNow().UtcDateTime
+                StartedAt = _timeProvider.GetUtcNow().UtcDateTime,
+                IdentityOptions = string.Join(',', identityOptions.Select(option =>
+                    $"{option.IdType}:{option.VerificationMethod}"))
             };
             await unitOfWork.KycVerificationAttempts.CreateAsync(attempt, transactionToken);
 
@@ -200,12 +207,7 @@ public sealed class SmileIdKycProvider(
             unitOfWork.KycVerifications.Update(kyc);
 
             await unitOfWork.SaveChangesAsync(transactionToken);
-            var identityOptions = GetIdentityOptions(isDriver);
-            attempt.IdentityOptions = string.Join(',', identityOptions.Select(option =>
-                $"{option.IdType}:{option.VerificationMethod}"));
-            unitOfWork.KycVerificationAttempts.Update(attempt);
-            await unitOfWork.SaveChangesAsync(transactionToken);
-            var link = await apiClient.CreateSingleUseLinkAsync(
+            return new PreparedLinkAttempt(
                 new SmileIdLinkRequest(
                     $"Pryde {flowToCreate} {attempt.CorrelationReference}",
                     smileUserId,
@@ -216,14 +218,104 @@ public sealed class SmileIdKycProvider(
                         Country,
                         option.IdType,
                         option.VerificationMethod)).ToList()),
-                transactionToken);
-            attempt.ProviderReference = link.ReferenceId;
-            attempt.VerificationUrl = link.Link;
-            attempt.RawStatus = "LinkCreated";
+                kyc.Id,
+                isDriver,
+                null);
+        }, cancellationToken);
+
+        if (prepared.ExistingResult is not null)
+        {
+            return prepared.ExistingResult;
+        }
+
+        unitOfWork.ClearTracking();
+        SmileIdLinkResponse link;
+        try
+        {
+            link = await apiClient.CreateSingleUseLinkAsync(
+                prepared.Request!,
+                cancellationToken);
+        }
+        catch
+        {
+            await MarkLinkCreationFailedAsync(
+                prepared.Request!.JobId,
+                CancellationToken.None);
+            throw;
+        }
+
+        unitOfWork.ClearTracking();
+        return await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
+        {
+            var attempt = await unitOfWork.KycVerificationAttempts
+                .GetByCorrelationReferenceForUpdateAsync(
+                    ProviderName,
+                    prepared.Request!.JobId,
+                    transactionToken)
+                ?? throw new NotFoundException("Smile ID verification attempt was not found.");
+            var kyc = await unitOfWork.KycVerifications.GetByIdForUpdateAsync(
+                prepared.KycVerificationId,
+                transactionToken)
+                ?? throw new NotFoundException("KYC verification was not found.");
+
+            if (string.IsNullOrWhiteSpace(attempt.VerificationUrl))
+            {
+                attempt.ProviderReference = link.ReferenceId;
+                attempt.VerificationUrl = link.Link;
+                attempt.RawStatus = "LinkCreated";
+                attempt.ProviderUpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+                unitOfWork.KycVerificationAttempts.Update(attempt);
+                kyc.ProviderStatus = "LinkCreated";
+                unitOfWork.KycVerifications.Update(kyc);
+                await unitOfWork.SaveChangesAsync(transactionToken);
+            }
+
+            var attempts = (await GetCurrentAttemptsAsync(kyc, transactionToken)).ToList();
+            return CreateResult(kyc, attempts, prepared.IsDriver);
+        }, cancellationToken);
+    }
+
+    private async Task MarkLinkCreationFailedAsync(
+        string correlationReference,
+        CancellationToken cancellationToken)
+    {
+        unitOfWork.ClearTracking();
+        await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
+        {
+            var attempt = await unitOfWork.KycVerificationAttempts
+                .GetByCorrelationReferenceForUpdateAsync(
+                    ProviderName,
+                    correlationReference,
+                    transactionToken);
+            if (attempt is null ||
+                attempt.Status == KycProviderStatus.Rejected ||
+                !string.IsNullOrWhiteSpace(attempt.VerificationUrl))
+            {
+                return true;
+            }
+
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
+            attempt.Status = KycProviderStatus.Rejected;
+            attempt.RawStatus = "LinkCreationFailed";
+            attempt.FailureReason = "Smile ID link creation failed.";
+            attempt.ProviderUpdatedAt = now;
+            attempt.CompletedAt = now;
             unitOfWork.KycVerificationAttempts.Update(attempt);
+
+            var kyc = await unitOfWork.KycVerifications.GetByIdForUpdateAsync(
+                attempt.KycVerificationId,
+                transactionToken);
+            if (kyc is not null && kyc.Status != KycStatus.Approved)
+            {
+                kyc.Status = KycStatus.Rejected;
+                kyc.ProviderStatus = "LinkCreationFailed";
+                kyc.RejectionReason = "Smile ID link creation failed.";
+                kyc.LastProviderUpdatedAt = now;
+                unitOfWork.KycVerifications.Update(kyc);
+            }
+
             await unitOfWork.SaveChangesAsync(transactionToken);
-            existing.Add(attempt);
-            return CreateResult(kyc, existing, isDriver);
+            return true;
         }, cancellationToken);
     }
 
@@ -685,6 +777,12 @@ public sealed class SmileIdKycProvider(
 
     private static bool TryGetJobType(object? value, out int jobType) =>
         int.TryParse(value?.ToString()?.Trim('"'), out jobType);
+
+    private sealed record PreparedLinkAttempt(
+        SmileIdLinkRequest? Request,
+        Guid KycVerificationId,
+        bool IsDriver,
+        KycProviderResult? ExistingResult);
 
     private static KycProviderStatus ToProviderStatus(KycStatus status) => status switch
     {
