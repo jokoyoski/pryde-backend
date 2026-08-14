@@ -50,6 +50,25 @@ public class KycProviderAbstractionTests
     }
 
     [Fact]
+    public async Task ActiveProviderIsTheOnlySwitchNeededToUseDojah()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var settings = DojahSettings();
+        settings.Enabled = false;
+        var provider = new DojahKycProvider(
+            unitOfWork,
+            Options.Create(settings),
+            NullLogger<DojahKycProvider>.Instance,
+            new NotificationService(unitOfWork),
+            Options.Create(new KycSettings { ActiveProvider = "Dojah" }));
+
+        var result = await provider.CreateSessionAsync(
+            new KycProviderRequest(Guid.NewGuid()));
+
+        Assert.Equal("Dojah", result.Provider);
+    }
+
+    [Fact]
     public async Task ExistingDojahRecordKeepsReferencesAndGainsAttemptHistory()
     {
         var unitOfWork = new TestUnitOfWork();

@@ -21,4 +21,7 @@ public class TripBookingResponseDto : WorkflowResponseDto
     public DateTime? PaidAt { get; set; }
     public bool IsPaid { get; set; }
     public DateTime? PaymentExpiresAt { get; set; }
+    public bool HasRated { get; set; }
+    public bool CanRate { get; set; }
+    public DateTime? RatedAt { get; set; }
 }

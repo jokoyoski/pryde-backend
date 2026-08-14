@@ -78,6 +78,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         (TestTripSubscriptionRepository)TripSubscriptions;
     public int SaveChangesCount { get; private set; }
     public int TransactionCount { get; private set; }
+    public bool IsTransactionActive { get; private set; }
     public Queue<int> SaveChangesResults { get; } = [];
 
     public IUserRepository Users { get; }
@@ -122,6 +123,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     {
         await _transactionLock.WaitAsync(cancellationToken);
         TransactionCount++;
+        IsTransactionActive = true;
         var users = UserRepository.Items.ToList();
 
         try
@@ -136,6 +138,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         }
         finally
         {
+            IsTransactionActive = false;
             _transactionLock.Release();
         }
     }
@@ -283,6 +286,7 @@ internal sealed class TestTripRatingRepository
     : ITripRatingRepository
 {
     public List<TripRating> Items { get; } = [];
+    public int RatingStateQueryCount { get; private set; }
 
     public Task<bool> ExistsAsync(
         Guid bookingId,
@@ -292,6 +296,23 @@ internal sealed class TestTripRatingRepository
         return Task.FromResult(Items.Any(rating =>
             rating.BookingId == bookingId &&
             rating.RaterId == raterId));
+    }
+
+    public Task<IReadOnlyDictionary<Guid, DateTime>>
+        GetCreatedAtByBookingIdsAndRaterAsync(
+            IReadOnlyCollection<Guid> bookingIds,
+            Guid raterId,
+            CancellationToken cancellationToken = default)
+    {
+        RatingStateQueryCount++;
+        IReadOnlyDictionary<Guid, DateTime> result = Items
+            .Where(rating =>
+                bookingIds.Contains(rating.BookingId) &&
+                rating.RaterId == raterId)
+            .ToDictionary(
+                rating => rating.BookingId,
+                rating => rating.CreatedAt);
+        return Task.FromResult(result);
     }
 
     public Task<RatingSummaryData> GetSummaryAsync(
@@ -995,6 +1016,12 @@ internal sealed class TestKycVerificationAttemptRepository
             x.ProviderName.Equals(providerName, StringComparison.OrdinalIgnoreCase) &&
             x.CorrelationReference.Equals(correlationReference, StringComparison.OrdinalIgnoreCase)));
 
+    public Task<KycVerificationAttempt?> GetByCorrelationReferenceForUpdateAsync(
+        string providerName,
+        string correlationReference,
+        CancellationToken cancellationToken = default) =>
+        GetByCorrelationReferenceAsync(providerName, correlationReference, cancellationToken);
+
     public Task<KycVerificationAttempt?> GetByProviderReferenceAsync(
         string providerName,
         string providerReference,
@@ -1386,7 +1413,10 @@ internal sealed class TestTripBookingRepository(TestTripRepository trips) : ITri
     }
 
     public Task<IReadOnlyList<TripBooking>> GetApprovedByTripIdAsync(Guid tripId, CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<TripBooking>>(Items.Where(b => b.TripId == tripId && b.Status == BookingStatus.Approved).ToList());
+        Task.FromResult<IReadOnlyList<TripBooking>>(Items.Where(b =>
+            b.TripId == tripId &&
+            (b.Status == BookingStatus.Approved ||
+             b.Status == BookingStatus.Completed)).ToList());
 
     public Task<IReadOnlyList<TripBooking>> GetByPassengerIdAsync(Guid passengerId, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<TripBooking>>(Items.Where(b => b.PassengerId == passengerId).ToList());

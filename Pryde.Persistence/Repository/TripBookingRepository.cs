@@ -68,7 +68,10 @@ public class TripBookingRepository(PrydeDbContext context) : ITripBookingReposit
             .Include(b => b.Passenger)
                 .ThenInclude(p => p.Profile)
             .Include(b => b.Trip)
-            .Where(b => b.TripId == tripId && b.Status == Pryde.Domain.Enums.BookingStatus.Approved)
+            .Where(b =>
+                b.TripId == tripId &&
+                (b.Status == Pryde.Domain.Enums.BookingStatus.Approved ||
+                 b.Status == Pryde.Domain.Enums.BookingStatus.Completed))
             .OrderBy(b => b.ApprovedAt)
             .ToListAsync(cancellationToken);
     }

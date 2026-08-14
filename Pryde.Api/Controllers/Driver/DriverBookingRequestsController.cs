@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Pryde.Api.Controllers.Driver.Authorization;
 using Pryde.Contracts.RequestModels;
+using Pryde.Contracts.ResponseModels;
 using Pryde.Services.Service.Interface;
 
 namespace Pryde.Api.Controllers.V1;
@@ -17,6 +18,7 @@ public class DriverBookingRequestsController(
 {
     [HttpGet("trips/{tripId:guid}/booking-requests")]
     [Authorize(Roles = "Driver")]
+    [ProducesResponseType(typeof(IReadOnlyList<TripBookingResponseDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetPending(Guid tripId, CancellationToken cancellationToken)
     {
         return Ok(await tripBookingService.GetPendingForTripAsync(tripId, GetUserId(), cancellationToken));
@@ -36,6 +38,7 @@ public class DriverBookingRequestsController(
 
     [HttpGet("trips/{tripId:guid}/passengers")]
     [Authorize(Roles = "Driver")]
+    [ProducesResponseType(typeof(IReadOnlyList<TripBookingResponseDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetPassengers(Guid tripId, CancellationToken cancellationToken)
     {
         return Ok(await tripBookingService.GetConfirmedPassengersAsync(tripId, GetUserId(), cancellationToken));
@@ -44,6 +47,7 @@ public class DriverBookingRequestsController(
     [HttpPatch("trip-bookings/{bookingId:guid}/approve")]
     [Authorize(Roles = "Driver")]
     [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
+    [ProducesResponseType(typeof(TripBookingResponseDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Approve(Guid bookingId, CancellationToken cancellationToken)
     {
         return Ok(await tripBookingService.ApproveAsync(bookingId, GetUserId(), cancellationToken));
@@ -52,6 +56,7 @@ public class DriverBookingRequestsController(
     [HttpPatch("trip-bookings/{bookingId:guid}/decline")]
     [Authorize(Roles = "Driver")]
     [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
+    [ProducesResponseType(typeof(TripBookingResponseDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Decline(Guid bookingId, CancellationToken cancellationToken)
     {
         return Ok(await tripBookingService.DeclineAsync(bookingId, GetUserId(), cancellationToken));
