@@ -20,6 +20,9 @@ public class KycVerificationAttemptConfiguration : IEntityTypeConfiguration<KycV
         builder.Property(x => x.ExternalUserReference).HasMaxLength(100);
         builder.Property(x => x.CallbackPayloadHash).HasMaxLength(64);
         builder.Property(x => x.VerificationUrl).HasMaxLength(2048);
+        builder.Property(x => x.IdentityType).HasMaxLength(50);
+        builder.Property(x => x.VerificationMethod).HasMaxLength(50);
+        builder.Property(x => x.IdentityOptions).HasMaxLength(500);
 
         builder.HasIndex(x => new { x.ProviderName, x.CorrelationReference }).IsUnique();
         builder.HasIndex(x => new { x.ProviderName, x.ProviderReference })

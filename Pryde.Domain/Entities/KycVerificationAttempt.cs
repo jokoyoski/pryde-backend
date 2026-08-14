@@ -22,6 +22,9 @@ public class KycVerificationAttempt : BaseEntity
     public DateTime? ProviderEventTimestamp { get; set; }
     public string? CallbackPayloadHash { get; set; }
     public string? VerificationUrl { get; set; }
+    public string? IdentityType { get; set; }
+    public string? VerificationMethod { get; set; }
+    public string? IdentityOptions { get; set; }
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ProviderUpdatedAt { get; set; }
     public DateTime? CompletedAt { get; set; }

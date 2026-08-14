@@ -664,6 +664,15 @@ public class ApiConfigurationTests
             document.Components.Schemas[
                     nameof(OnboardingStatusResponseDto)]
                 .Properties.Keys);
+        var bookingProperties = document.Components.Schemas[
+                nameof(TripBookingResponseDto)]
+            .Properties;
+        Assert.Contains("hasRated", bookingProperties.Keys);
+        Assert.Contains("canRate", bookingProperties.Keys);
+        Assert.Contains("ratedAt", bookingProperties.Keys);
+        Assert.Equal("boolean", bookingProperties["hasRated"].Type);
+        Assert.Equal("boolean", bookingProperties["canRate"].Type);
+        Assert.Equal("date-time", bookingProperties["ratedAt"].Format);
     }
 
     [Fact]

@@ -35,15 +35,12 @@ public sealed class SmileIdApiClient(
                 timestamp = authentication.Timestamp,
                 name = request.Name,
                 company_name = _settings.CompanyName,
-                id_types = new[]
+                id_types = request.IdentityOptions.Select(option => new
                 {
-                    new
-                    {
-                        country = request.Country,
-                        id_type = request.IdType,
-                        verification_method = request.VerificationMethod
-                    }
-                },
+                    country = option.Country,
+                    id_type = option.IdType,
+                    verification_method = option.VerificationMethod
+                }),
                 callback_url = _settings.CallbackUrl,
                 data_privacy_policy_url = _settings.DataPrivacyPolicyUrl,
                 redirect_url = _settings.RedirectUrl,
@@ -53,8 +50,8 @@ public sealed class SmileIdApiClient(
                 {
                     ["user_id"] = request.UserId,
                     ["job_id"] = request.JobId,
-                    ["job_type"] = request.JobType.ToString(CultureInfo.InvariantCulture),
-                    ["flow"] = request.Flow
+                    ["flow"] = request.Flow,
+                    ["role"] = request.Role
                 }
             },
             JsonOptions,

@@ -162,14 +162,9 @@ public sealed class SmileIdKycProvider(
             }
             else if (latestByFlow.Count == 0)
             {
-                flowToCreate = BiometricFlow;
-            }
-            else if (isDriver &&
-                     latestByFlow.TryGetValue(BiometricFlow, out var biometric) &&
-                     biometric.Status == KycProviderStatus.Approved &&
-                     !latestByFlow.ContainsKey(DriverLicenceFlow))
-            {
-                flowToCreate = DriverLicenceFlow;
+                flowToCreate = isDriver
+                    ? DriverLicenceFlow
+                    : BiometricFlow;
             }
             else
             {
@@ -205,17 +200,22 @@ public sealed class SmileIdKycProvider(
             unitOfWork.KycVerifications.Update(kyc);
 
             await unitOfWork.SaveChangesAsync(transactionToken);
-            var isBiometric = flowToCreate == BiometricFlow;
+            var identityOptions = GetIdentityOptions(isDriver);
+            attempt.IdentityOptions = string.Join(',', identityOptions.Select(option =>
+                $"{option.IdType}:{option.VerificationMethod}"));
+            unitOfWork.KycVerificationAttempts.Update(attempt);
+            await unitOfWork.SaveChangesAsync(transactionToken);
             var link = await apiClient.CreateSingleUseLinkAsync(
                 new SmileIdLinkRequest(
                     $"Pryde {flowToCreate} {attempt.CorrelationReference}",
                     smileUserId,
                     attempt.CorrelationReference,
-                    isBiometric ? BiometricJobType : DocumentVerificationJobType,
+                    isDriver ? RoleNames.Driver : RoleNames.Passenger,
                     flowToCreate,
-                    Country,
-                    isBiometric ? _settings.IdentityType : DriverLicenceIdType,
-                    isBiometric ? "biometric_kyc" : "doc_verification"),
+                    identityOptions.Select(option => new SmileIdLinkIdentityOption(
+                        Country,
+                        option.IdType,
+                        option.VerificationMethod)).ToList()),
                 transactionToken);
             attempt.ProviderReference = link.ReferenceId;
             attempt.VerificationUrl = link.Link;
@@ -316,30 +316,34 @@ public sealed class SmileIdKycProvider(
                 throw new ValidationException("Smile ID callback user_id does not match the job.");
             }
 
-            var expectedJobType = attempt.FlowType == BiometricFlow
-                ? BiometricJobType
-                : attempt.FlowType == DriverLicenceFlow
-                    ? DocumentVerificationJobType
+            var expectedRole = attempt.FlowType == DriverLicenceFlow
+                ? RoleNames.Driver
+                : attempt.FlowType == BiometricFlow
+                    ? RoleNames.Passenger
                     : throw new ValidationException("Smile ID attempt has an unsupported flow.");
-            if (!TryGetJobType(partnerParams.JobType, out var jobType) || jobType != expectedJobType)
+            var isLegacyAttempt = string.IsNullOrWhiteSpace(attempt.IdentityOptions);
+            if (isLegacyAttempt)
             {
-                throw new ValidationException("Smile ID callback job_type does not match the job.");
-            }
-
-            var requiresIdentityMetadata =
-                attempt.FlowType == BiometricFlow && BiometricIdentitySuccessCodes.Contains(code) ||
-                attempt.FlowType == DriverLicenceFlow && code is "0810" or "0817";
-            if (requiresIdentityMetadata)
-            {
-                var expectedIdType = attempt.FlowType == BiometricFlow
-                    ? _settings.IdentityType
-                    : DriverLicenceIdType;
-                if (!string.Equals(country?.Trim(), Country, StringComparison.OrdinalIgnoreCase) ||
-                    !string.Equals(idType?.Trim(), expectedIdType, StringComparison.OrdinalIgnoreCase))
+                var expectedJobType = attempt.FlowType == BiometricFlow
+                    ? BiometricJobType
+                    : DocumentVerificationJobType;
+                if (!TryGetJobType(partnerParams.JobType, out var jobType) ||
+                    jobType != expectedJobType)
                 {
-                    throw new ValidationException(
-                        "Smile ID result country or ID type does not match the required Pryde flow.");
+                    throw new ValidationException("Smile ID callback job_type does not match the legacy job.");
                 }
+            }
+            else if (!string.Equals(partnerParams.Flow, attempt.FlowType, StringComparison.Ordinal) ||
+                     !string.Equals(partnerParams.Role, expectedRole, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ValidationException("Smile ID callback role or flow does not match the job.");
+            }
+            var configuredOption = GetConfiguredOption(attempt, idType);
+
+            if (!string.Equals(country?.Trim(), Country, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ValidationException(
+                    "Smile ID result country does not match the required Pryde flow.");
             }
 
             var kyc = await unitOfWork.KycVerifications.GetByIdForUpdateAsync(
@@ -384,7 +388,9 @@ public sealed class SmileIdKycProvider(
             var previousIdentity = attempt.SmileIdentitySucceeded;
             var previousKycStatus = kyc.Status;
 
-            ApplyResult(attempt, code);
+            attempt.IdentityType = configuredOption.IdType;
+            attempt.VerificationMethod = configuredOption.VerificationMethod;
+            ApplyResult(attempt, code, configuredOption.VerificationMethod);
             if (attempt.Status == previousStatus &&
                 attempt.SmileActionSucceeded == previousAction &&
                 attempt.SmileIdentitySucceeded == previousIdentity &&
@@ -448,9 +454,12 @@ public sealed class SmileIdKycProvider(
         }, cancellationToken);
     }
 
-    private void ApplyResult(KycVerificationAttempt attempt, string code)
+    private void ApplyResult(
+        KycVerificationAttempt attempt,
+        string code,
+        string verificationMethod)
     {
-        if (attempt.FlowType == BiometricFlow)
+        if (verificationMethod == "biometric_kyc")
         {
             attempt.SmileActionSucceeded |= BiometricActionSuccessCodes.Contains(code);
             attempt.SmileIdentitySucceeded |= BiometricIdentitySuccessCodes.Contains(code);
@@ -501,9 +510,11 @@ public sealed class SmileIdKycProvider(
             string.Equals(x.Role.Name, RoleNames.Driver, StringComparison.OrdinalIgnoreCase));
         var nextStatus = latestAttempts.Count > 0 &&
                          latestAttempts.All(x => x.Status == KycProviderStatus.Approved) &&
-                         (!requiresLicence || latestAttempts.Any(x =>
-                             x.FlowType == DriverLicenceFlow &&
-                             x.Status == KycProviderStatus.Approved))
+                         latestAttempts.Any(x =>
+                             x.FlowType == (requiresLicence
+                                 ? DriverLicenceFlow
+                                 : BiometricFlow) &&
+                             x.Status == KycProviderStatus.Approved)
             ? KycStatus.Approved
             : latestAttempts.Any(x => x.Status == KycProviderStatus.Rejected)
                 ? KycStatus.Rejected
@@ -542,21 +553,16 @@ public sealed class SmileIdKycProvider(
                     .ThenByDescending(x => x.CreatedAt)
                     .First());
         var sessions = new List<KycProviderSession>();
-        if (latestByFlow.TryGetValue(BiometricFlow, out var biometric))
+        if (!isDriver && latestByFlow.TryGetValue(BiometricFlow, out var biometric))
         {
             sessions.Add(MapSession(biometric));
         }
         if (isDriver)
         {
-            sessions.Add(latestByFlow.TryGetValue(DriverLicenceFlow, out var licence)
-                ? MapSession(licence)
-                : new KycProviderSession
-                {
-                    Flow = DriverLicenceFlow,
-                    JobId = string.Empty,
-                    Required = true,
-                    Status = "Blocked"
-                });
+            if (latestByFlow.TryGetValue(DriverLicenceFlow, out var licence))
+            {
+                sessions.Add(MapSession(licence));
+            }
         }
 
         return new KycProviderResult
@@ -613,6 +619,64 @@ public sealed class SmileIdKycProvider(
 
     private static string CreateSmileUserId(Guid userId) =>
         $"pryde-{userId:N}";
+
+    private IReadOnlyList<SmileIdIdentityOption> GetIdentityOptions(bool isDriver) =>
+        (isDriver
+                ? _settings.DriverIdentityOptions
+                : _settings.PassengerIdentityOptions)
+            .Where(option => option.Enabled)
+            .ToList();
+
+    private SmileIdIdentityOption GetConfiguredOption(
+        KycVerificationAttempt attempt,
+        string? idType)
+    {
+        var requiredIdType = Required(idType, "IDType/id_type");
+        if (string.IsNullOrWhiteSpace(attempt.IdentityOptions))
+        {
+            // Compatibility for hosted jobs issued before option snapshots were persisted.
+            var legacyOption = attempt.FlowType == BiometricFlow
+                ? new SmileIdIdentityOption
+                {
+                    IdType = "NIN_V2",
+                    VerificationMethod = "biometric_kyc"
+                }
+                : attempt.FlowType == DriverLicenceFlow
+                    ? new SmileIdIdentityOption
+                    {
+                        IdType = DriverLicenceIdType,
+                        VerificationMethod = "doc_verification"
+                    }
+                    : null;
+            if (legacyOption is not null && string.Equals(
+                    legacyOption.IdType,
+                    requiredIdType,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return legacyOption;
+            }
+        }
+
+        var configured = (attempt.IdentityOptions ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(value => value.Split(':', 2, StringSplitOptions.TrimEntries))
+            .Where(parts => parts.Length == 2)
+            .Select(parts => new SmileIdIdentityOption
+            {
+                IdType = parts[0],
+                VerificationMethod = parts[1]
+            })
+            .SingleOrDefault(option => string.Equals(
+                option.IdType,
+                requiredIdType,
+                StringComparison.OrdinalIgnoreCase));
+        if (configured is null)
+        {
+            throw new ValidationException(
+                "Smile ID result ID type does not match the configured Pryde flow.");
+        }
+        return configured;
+    }
 
     private static string Required(string? value, string name) =>
         string.IsNullOrWhiteSpace(value)

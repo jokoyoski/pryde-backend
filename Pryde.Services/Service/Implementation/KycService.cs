@@ -52,7 +52,7 @@ public class KycService(
             .ToDictionary(x => x.FlowType!);
         var roles = await unitOfWork.UserRoles.GetByUserIdAsync(userId, cancellationToken);
         var requiredFlows = roles.Any(x => x.Role.Name == RoleNames.Driver)
-            ? new[] { "BiometricKyc", "DriverLicenceDocumentVerification" }
+            ? new[] { "DriverLicenceDocumentVerification" }
             : new[] { "BiometricKyc" };
         response.Flows = requiredFlows.Select(flow =>
         {
@@ -64,9 +64,22 @@ public class KycService(
                 Status = attempt?.Status ?? KycProviderStatus.Pending,
                 RawStatus = attempt?.RawStatus ?? "Blocked",
                 ResultCode = attempt?.ResultCode,
-                FailureReason = attempt?.FailureReason
+                FailureReason = attempt?.FailureReason,
+                IdType = attempt?.IdentityType,
+                VerificationMethod = attempt?.VerificationMethod,
+                CallbackConfirmed = attempt?.ProviderEventTimestamp.HasValue == true,
+                CanRetry = attempt?.Status == KycProviderStatus.Rejected
             };
         }).ToList();
+        var latestAttempt = latest.Values
+            .OrderByDescending(attempt => attempt.StartedAt)
+            .ThenByDescending(attempt => attempt.CreatedAt)
+            .FirstOrDefault();
+        response.SelectedIdType = latestAttempt?.IdentityType;
+        response.VerificationMethod = latestAttempt?.VerificationMethod;
+        response.CallbackConfirmed = response.Flows.Count > 0 &&
+                                     response.Flows.All(flow => flow.CallbackConfirmed);
+        response.CanRetry = response.Flows.Any(flow => flow.CanRetry);
         return response;
     }
 

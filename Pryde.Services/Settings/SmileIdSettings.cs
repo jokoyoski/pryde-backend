@@ -16,5 +16,13 @@ public sealed class SmileIdSettings
     public string CompanyName { get; set; } = string.Empty;
     public string DataPrivacyPolicyUrl { get; set; } = string.Empty;
     public int MaximumCallbackAgeMinutes { get; set; } = 5;
-    public string IdentityType { get; set; } = "NIN_V2";
+    public List<SmileIdIdentityOption> PassengerIdentityOptions { get; set; } = [];
+    public List<SmileIdIdentityOption> DriverIdentityOptions { get; set; } = [];
+}
+
+public sealed class SmileIdIdentityOption
+{
+    public string IdType { get; set; } = string.Empty;
+    public string VerificationMethod { get; set; } = string.Empty;
+    public bool Enabled { get; set; } = true;
 }

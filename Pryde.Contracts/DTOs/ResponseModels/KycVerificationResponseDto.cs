@@ -17,6 +17,10 @@ public class KycVerificationResponseDto : WorkflowResponseDto
     public string? ProviderStatus { get; set; }
     public string? RejectionReason { get; set; }
     public DateTime? LastProviderUpdatedAt { get; set; }
+    public string? SelectedIdType { get; set; }
+    public string? VerificationMethod { get; set; }
+    public bool CallbackConfirmed { get; set; }
+    public bool CanRetry { get; set; }
     public IReadOnlyList<KycFlowStatusResponseDto> Flows { get; set; } = [];
 }
 
@@ -28,4 +32,8 @@ public sealed class KycFlowStatusResponseDto
     public string? RawStatus { get; set; }
     public string? ResultCode { get; set; }
     public string? FailureReason { get; set; }
+    public string? IdType { get; set; }
+    public string? VerificationMethod { get; set; }
+    public bool CallbackConfirmed { get; set; }
+    public bool CanRetry { get; set; }
 }

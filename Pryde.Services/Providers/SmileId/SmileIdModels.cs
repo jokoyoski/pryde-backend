@@ -6,8 +6,11 @@ public sealed record SmileIdLinkRequest(
     string Name,
     string UserId,
     string JobId,
-    int JobType,
+    string Role,
     string Flow,
+    IReadOnlyList<SmileIdLinkIdentityOption> IdentityOptions);
+
+public sealed record SmileIdLinkIdentityOption(
     string Country,
     string IdType,
     string VerificationMethod);
@@ -91,6 +94,12 @@ public sealed class SmileIdPartnerParams
 
     [JsonPropertyName("job_type")]
     public object? JobType { get; set; }
+
+    [JsonPropertyName("flow")]
+    public string? Flow { get; set; }
+
+    [JsonPropertyName("role")]
+    public string? Role { get; set; }
 }
 
 public sealed class SmileIdCallbackPayload

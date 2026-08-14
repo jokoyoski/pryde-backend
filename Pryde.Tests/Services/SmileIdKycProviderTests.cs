@@ -46,11 +46,45 @@ public class SmileIdKycProviderTests
         Assert.Equal("Pending", session.Status);
         var request = Assert.Single(context.ApiClient.LinkRequests);
         Assert.Equal($"pryde-{context.UserId:N}", request.UserId);
-        Assert.Equal("biometric_kyc", request.VerificationMethod);
+        Assert.Equal(RoleNames.Passenger, request.Role);
+        Assert.Collection(
+            request.IdentityOptions,
+            option =>
+            {
+                Assert.Equal("NIN_SLIP", option.IdType);
+                Assert.Equal("biometric_kyc", option.VerificationMethod);
+            },
+            option =>
+            {
+                Assert.Equal("VOTER_ID", option.IdType);
+                Assert.Equal("biometric_kyc", option.VerificationMethod);
+            },
+            option =>
+            {
+                Assert.Equal("PASSPORT", option.IdType);
+                Assert.Equal("doc_verification", option.VerificationMethod);
+            });
         Assert.DoesNotContain("api-key", JsonSerializer.Serialize(result));
         Assert.Single(context.UnitOfWork.KycVerificationAttemptRepository.Items);
         Assert.True(context.UnitOfWork.SaveChangesCount > 0);
         Assert.Equal(KycStatus.Pending, CurrentKyc(context).Status);
+    }
+
+    [Fact]
+    public async Task PassengerLinkContainsOnlyEnabledPassengerOptions()
+    {
+        var context = Context(RoleNames.Passenger);
+
+        await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId));
+
+        var options = Assert.Single(context.ApiClient.LinkRequests)
+            .IdentityOptions;
+        Assert.Equal(
+            ["NIN_SLIP", "VOTER_ID", "PASSPORT"],
+            options.Select(option => option.IdType).ToArray());
+        Assert.DoesNotContain(options, option => option.IdType == "BVN");
+        Assert.DoesNotContain(options, option => option.IdType == "DRIVERS_LICENSE");
     }
 
     [Fact]
@@ -65,35 +99,28 @@ public class SmileIdKycProviderTests
         var mine = await new KycService(context.UnitOfWork)
             .GetMineAsync(context.UserId);
         Assert.Equal(KycStatus.Pending, mine.Status);
-        Assert.Collection(
-            mine.Flows,
-            biometric =>
-            {
-                Assert.Equal(SmileIdKycProvider.BiometricFlow, biometric.Flow);
-                Assert.True(biometric.Required);
-                Assert.Equal(KycProviderStatus.Pending, biometric.Status);
-            },
-            licence =>
-            {
-                Assert.Equal(SmileIdKycProvider.DriverLicenceFlow, licence.Flow);
-                Assert.True(licence.Required);
-                Assert.Equal("Blocked", licence.RawStatus);
-            });
+        var licence = Assert.Single(mine.Flows);
+        Assert.Equal(SmileIdKycProvider.DriverLicenceFlow, licence.Flow);
+        Assert.True(licence.Required);
+        Assert.Equal(KycProviderStatus.Pending, licence.Status);
+        Assert.False(licence.CallbackConfirmed);
     }
 
     [Fact]
-    public async Task DriverSessionStartsBiometricAndBlocksLicenceUntilItSucceeds()
+    public async Task DriverSessionContainsOnlyDriversLicenceDocumentVerification()
     {
         var context = Context(RoleNames.Driver);
 
         var result = await context.Provider.CreateSessionAsync(
             new KycProviderRequest(context.UserId));
 
-        Assert.Equal(2, result.Sessions.Count);
-        Assert.NotNull(result.Sessions.Single(x => x.Flow == SmileIdKycProvider.BiometricFlow).VerificationUrl);
-        var licence = result.Sessions.Single(x => x.Flow == SmileIdKycProvider.DriverLicenceFlow);
-        Assert.Equal("Blocked", licence.Status);
-        Assert.Null(licence.VerificationUrl);
+        var licence = Assert.Single(result.Sessions);
+        Assert.Equal(SmileIdKycProvider.DriverLicenceFlow, licence.Flow);
+        Assert.Equal("Pending", licence.Status);
+        Assert.NotNull(licence.VerificationUrl);
+        var option = Assert.Single(context.ApiClient.LinkRequests.Single().IdentityOptions);
+        Assert.Equal("DRIVERS_LICENSE", option.IdType);
+        Assert.Equal("doc_verification", option.VerificationMethod);
         Assert.Single(context.UnitOfWork.KycVerificationAttemptRepository.Items);
     }
 
@@ -126,23 +153,8 @@ public class SmileIdKycProviderTests
     public async Task DriverIsNotApprovedUntilIdentityAndLicenceJobsSucceed()
     {
         var context = Context(RoleNames.Driver);
-        var sessions = (await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions;
-        var biometric = sessions.Single(x => x.Flow == SmileIdKycProvider.BiometricFlow);
-
-        await context.Provider.ProcessCallbackAsync(Callback(biometric, "0810", "Passed"));
-        await context.Provider.ProcessCallbackAsync(Callback(
-            biometric,
-            "1012",
-            "ID returned",
-            timestamp: Now.AddSeconds(1).ToString("O")));
-
-        Assert.Equal(KycStatus.Submitted, CurrentKyc(context).Status);
-
-        var licence = (await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions.Single(
-                x => x.Flow == SmileIdKycProvider.DriverLicenceFlow);
-        Assert.NotNull(licence.VerificationUrl);
+        var licence = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId))).Sessions);
 
         await context.Provider.ProcessCallbackAsync(Callback(licence, "0810", "Document verified"));
 
@@ -153,15 +165,8 @@ public class SmileIdKycProviderTests
     public async Task DocumentApprovedWithAttentionUsesDocumentedFinalMapping()
     {
         var context = Context(RoleNames.Driver);
-        var biometric = (await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions.Single(
-                x => x.Flow == SmileIdKycProvider.BiometricFlow);
-        await context.Provider.ProcessCallbackAsync(Callback(biometric, "0810", "Passed"));
-        await context.Provider.ProcessCallbackAsync(Callback(
-            biometric, "1012", "ID returned", timestamp: Now.AddSeconds(1).ToString("O")));
-        var licence = (await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions.Single(
-                x => x.Flow == SmileIdKycProvider.DriverLicenceFlow);
+        var licence = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId))).Sessions);
 
         await context.Provider.ProcessCallbackAsync(Callback(
             licence,
@@ -211,7 +216,7 @@ public class SmileIdKycProviderTests
                 session, "0810", "Passed", userId: "pryde-wrong-user")));
         await Assert.ThrowsAsync<ValidationException>(() =>
             context.Provider.ProcessCallbackAsync(Callback(
-                session, "0810", "Passed", jobType: 6)));
+                session, "0810", "Passed", role: RoleNames.Driver)));
         await context.Provider.ProcessCallbackAsync(Callback(
             session,
             "0810",
@@ -262,6 +267,27 @@ public class SmileIdKycProviderTests
             context.Provider.ProcessCallbackAsync(Callback(unknown, "0810", "Passed")));
 
         Assert.Equal(KycStatus.Pending, CurrentKyc(context).Status);
+    }
+
+    [Fact]
+    public async Task LegacyNinV2AttemptWithoutOptionSnapshotRemainsCallbackCompatible()
+    {
+        var context = Context(RoleNames.Passenger);
+        var session = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId))).Sessions);
+        CurrentAttempt(context, session).IdentityOptions = null;
+
+        await context.Provider.ProcessCallbackAsync(Callback(
+            session,
+            "0810",
+            "Machine comparison passed",
+            idType: "NIN_V2",
+            legacyPartnerParams: true));
+
+        var attempt = CurrentAttempt(context, session);
+        Assert.Equal("NIN_V2", attempt.IdentityType);
+        Assert.Equal("biometric_kyc", attempt.VerificationMethod);
+        Assert.Equal(KycProviderStatus.Submitted, attempt.Status);
     }
 
     [Fact]
@@ -345,7 +371,10 @@ public class SmileIdKycProviderTests
             ["SmileId:RedirectUrl"] = "https://app.example.test/onboarding/kyc",
             ["SmileId:CompanyName"] = "Pryde",
             ["SmileId:DataPrivacyPolicyUrl"] = "https://example.test/privacy",
-            ["SmileId:IdentityType"] = "NIN_V2"
+            ["SmileId:PassengerIdentityOptions:0:IdType"] = "NIN_SLIP",
+            ["SmileId:PassengerIdentityOptions:0:VerificationMethod"] = "biometric_kyc",
+            ["SmileId:DriverIdentityOptions:0:IdType"] = "DRIVERS_LICENSE",
+            ["SmileId:DriverIdentityOptions:0:VerificationMethod"] = "doc_verification"
         };
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<IUnitOfWork>(new TestUnitOfWork());
@@ -378,6 +407,51 @@ public class SmileIdKycProviderTests
         Assert.Contains("PartnerId", invalidSmile.FailureMessage);
         Assert.True(invalidProvider.Failed);
         Assert.Contains("Dojah or SmileId", invalidProvider.FailureMessage);
+    }
+
+    [Fact]
+    public void InvalidConfiguredIdentityProductCombinationFailsClearly()
+    {
+        var settings = Settings();
+        settings.PassengerIdentityOptions =
+        [
+            new()
+            {
+                IdType = "PASSPORT",
+                VerificationMethod = "biometric_kyc"
+            }
+        ];
+
+        var result = new SmileIdSettingsValidator(Options.Create(
+            new KycSettings { ActiveProvider = "SmileId" }))
+            .Validate(null, settings);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            "PASSPORT|biometric_kyc",
+            result.FailureMessage);
+    }
+
+    [Fact]
+    public void DisabledBvnDoesNotSatisfyRequiredPassengerOptions()
+    {
+        var settings = Settings();
+        settings.PassengerIdentityOptions =
+        [
+            new()
+            {
+                IdType = "BVN",
+                VerificationMethod = "biometric_kyc",
+                Enabled = false
+            }
+        ];
+
+        var result = new SmileIdSettingsValidator(Options.Create(
+            new KycSettings { ActiveProvider = "SmileId" }))
+            .Validate(null, settings);
+
+        Assert.True(result.Failed);
+        Assert.Contains("at least one enabled option", result.FailureMessage);
     }
 
     private static TestContext Context(string role, string environment = "Sandbox")
@@ -413,7 +487,17 @@ public class SmileIdKycProviderTests
         CompanyName = "Pryde",
         DataPrivacyPolicyUrl = "https://example.test/privacy",
         MaximumCallbackAgeMinutes = 5,
-        IdentityType = "NIN_V2"
+        PassengerIdentityOptions =
+        [
+            new() { IdType = "NIN_SLIP", VerificationMethod = "biometric_kyc" },
+            new() { IdType = "VOTER_ID", VerificationMethod = "biometric_kyc" },
+            new() { IdType = "BVN", VerificationMethod = "biometric_kyc", Enabled = false },
+            new() { IdType = "PASSPORT", VerificationMethod = "doc_verification" }
+        ],
+        DriverIdentityOptions =
+        [
+            new() { IdType = "DRIVERS_LICENSE", VerificationMethod = "doc_verification" }
+        ]
     };
 
     private static readonly ConcurrentDictionary<string, string> CallbackUsers = new();
@@ -426,15 +510,26 @@ public class SmileIdKycProviderTests
         string signature = "valid",
         string? timestamp = null,
         string? userId = null,
-        int? jobType = null,
-        string? idType = null)
+        string? role = null,
+        string? idType = null,
+        bool legacyPartnerParams = false)
     {
         var partnerParams = new Dictionary<string, object?>
         {
             ["job_id"] = session.JobId,
-            ["user_id"] = userId ?? CallbackUsers[session.JobId],
-            ["job_type"] = jobType ?? (session.Flow == SmileIdKycProvider.BiometricFlow ? 1 : 6)
+            ["user_id"] = userId ?? CallbackUsers[session.JobId]
         };
+        if (legacyPartnerParams)
+        {
+            partnerParams["job_type"] = session.Flow == SmileIdKycProvider.DriverLicenceFlow ? "6" : "1";
+        }
+        else
+        {
+            partnerParams["flow"] = session.Flow;
+            partnerParams["role"] = role ?? (session.Flow == SmileIdKycProvider.DriverLicenceFlow
+                ? RoleNames.Driver
+                : RoleNames.Passenger);
+        }
         var payload = new Dictionary<string, object?>
         {
             ["signature"] = signature,
@@ -444,7 +539,7 @@ public class SmileIdKycProviderTests
             [pascalCase ? "SmileJobID" : "smile_job_id"] = "smile-internal",
             [pascalCase ? "Country" : "country"] = "NG",
             [pascalCase ? "IDType" : "id_type"] = idType ?? (session.Flow == SmileIdKycProvider.BiometricFlow
-                ? "NIN_V2"
+                ? "NIN_SLIP"
                 : "DRIVERS_LICENSE"),
             [pascalCase ? "PartnerParams" : "partner_params"] = partnerParams
         };
@@ -469,12 +564,15 @@ public class SmileIdKycProviderTests
             ResultText = text,
             SmileJobId = "smile-internal",
             Country = "NG",
-            IdType = session.Flow == SmileIdKycProvider.BiometricFlow ? "NIN_V2" : "DRIVERS_LICENSE",
+            IdType = session.Flow == SmileIdKycProvider.BiometricFlow ? "NIN_SLIP" : "DRIVERS_LICENSE",
             PartnerParams = new SmileIdPartnerParams
             {
                 JobId = session.JobId,
                 UserId = CallbackUsers[session.JobId],
-                JobType = session.Flow == SmileIdKycProvider.BiometricFlow ? 1 : 6
+                Flow = session.Flow,
+                Role = session.Flow == SmileIdKycProvider.DriverLicenceFlow
+                    ? RoleNames.Driver
+                    : RoleNames.Passenger
             }
         };
 
@@ -606,11 +704,12 @@ public class SmileIdApiClientTests
             "Pryde identity job-1",
             "pryde-user",
             "job-1",
-            1,
+            RoleNames.Passenger,
             SmileIdKycProvider.BiometricFlow,
-            "NG",
-            "NIN_V2",
-            "biometric_kyc"));
+            [
+                new("NG", "NIN_SLIP", "biometric_kyc"),
+                new("NG", "PASSPORT", "doc_verification")
+            ]));
 
         Assert.Equal("https://links.usesmileid.com/abc", result.Link);
         Assert.Equal(new Uri(new Uri(baseUrl), "v1/smile_links"), handler.RequestUri);
@@ -621,11 +720,13 @@ public class SmileIdApiClientTests
         Assert.Equal("https://api.example.test/callback", root.GetProperty("callback_url").GetString());
         Assert.Equal("https://app.example.test/onboarding/kyc", root.GetProperty("redirect_url").GetString());
         Assert.Equal("job-1", root.GetProperty("partner_params").GetProperty("job_id").GetString());
-        Assert.Equal("1", root.GetProperty("partner_params").GetProperty("job_type").GetString());
-        var idType = Assert.Single(root.GetProperty("id_types").EnumerateArray());
-        Assert.Equal("NG", idType.GetProperty("country").GetString());
-        Assert.Equal("NIN_V2", idType.GetProperty("id_type").GetString());
-        Assert.Equal("biometric_kyc", idType.GetProperty("verification_method").GetString());
+        Assert.Equal(RoleNames.Passenger, root.GetProperty("partner_params").GetProperty("role").GetString());
+        var idTypes = root.GetProperty("id_types").EnumerateArray().ToList();
+        Assert.Equal(2, idTypes.Count);
+        Assert.Equal("NIN_SLIP", idTypes[0].GetProperty("id_type").GetString());
+        Assert.Equal("biometric_kyc", idTypes[0].GetProperty("verification_method").GetString());
+        Assert.Equal("PASSPORT", idTypes[1].GetProperty("id_type").GetString());
+        Assert.Equal("doc_verification", idTypes[1].GetProperty("verification_method").GetString());
     }
 
     private static string Signature(string timestamp, string partnerId, string apiKey)

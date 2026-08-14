@@ -30,9 +30,22 @@ public sealed class SmileIdSettingsValidator(IOptions<KycSettings> kycOptions)
             return ValidateOptionsResult.Fail("SmileId Environment must be Sandbox or Production.");
         }
 
-        if (!settings.IdentityType.Equals("NIN_V2", StringComparison.Ordinal))
+        var passengerValidation = ValidateOptions(
+            settings.PassengerIdentityOptions,
+            PassengerCombinations,
+            nameof(settings.PassengerIdentityOptions));
+        if (passengerValidation is not null)
         {
-            return ValidateOptionsResult.Fail("SmileId IdentityType must be the supported Nigerian value NIN_V2.");
+            return ValidateOptionsResult.Fail(passengerValidation);
+        }
+
+        var driverValidation = ValidateOptions(
+            settings.DriverIdentityOptions,
+            DriverCombinations,
+            nameof(settings.DriverIdentityOptions));
+        if (driverValidation is not null)
+        {
+            return ValidateOptionsResult.Fail(driverValidation);
         }
 
         if (settings.MaximumCallbackAgeMinutes <= 0)
@@ -64,5 +77,57 @@ public sealed class SmileIdSettingsValidator(IOptions<KycSettings> kycOptions)
         {
             missing.Add(name);
         }
+    }
+
+    private static readonly HashSet<string> PassengerCombinations =
+        new(StringComparer.Ordinal)
+        {
+            "NIN_SLIP|biometric_kyc",
+            "VOTER_ID|biometric_kyc",
+            "BVN|biometric_kyc",
+            "PASSPORT|doc_verification"
+        };
+
+    private static readonly HashSet<string> DriverCombinations =
+        new(StringComparer.Ordinal)
+        {
+            "DRIVERS_LICENSE|doc_verification"
+        };
+
+    private static string? ValidateOptions(
+        IReadOnlyCollection<SmileIdIdentityOption>? options,
+        HashSet<string> allowedCombinations,
+        string propertyName)
+    {
+        if (options is null || !options.Any(option => option.Enabled))
+        {
+            return $"SmileId {propertyName} must contain at least one enabled option.";
+        }
+
+        var duplicates = options
+            .GroupBy(
+                option => $"{option.IdType?.Trim().ToUpperInvariant()}|{option.VerificationMethod?.Trim().ToLowerInvariant()}",
+                StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicates is not null)
+        {
+            return $"SmileId {propertyName} contains duplicate option {duplicates.Key}.";
+        }
+
+        foreach (var option in options)
+        {
+            var idType = option.IdType?.Trim().ToUpperInvariant() ?? string.Empty;
+            var method = option.VerificationMethod?.Trim().ToLowerInvariant() ?? string.Empty;
+            var combination = $"{idType}|{method}";
+            if (!allowedCombinations.Contains(combination))
+            {
+                return $"SmileId {propertyName} contains unsupported ID/product combination {combination}.";
+            }
+
+            option.IdType = idType;
+            option.VerificationMethod = method;
+        }
+
+        return null;
     }
 }

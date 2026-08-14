@@ -17,7 +17,7 @@ public sealed class KycEndpointDocumentationFilter : IOperationFilter
         if (path.EndsWith("/kyc/session", StringComparison.OrdinalIgnoreCase))
         {
             operation.Summary = "Start or continue KYC (frontend-facing)";
-            operation.Description = "Provider-neutral endpoint for new clients. Returns Dojah compatibility data or Smile ID hosted redirect sessions according to Kyc:ActiveProvider.";
+            operation.Description = "Provider-neutral endpoint for new clients. Returns Dojah compatibility data or a Smile ID single-user hosted redirect according to Kyc:ActiveProvider. Smile redirects are untrusted until callback confirmation. Example Dojah response: { provider: 'Dojah', integrationType: 'Widget' }. Example Smile response: { provider: 'SmileId', integrationType: 'HostedRedirect', sessions: [{ flow, verificationUrl, jobId, required, status }] }.";
         }
         else if (path.EndsWith("/kyc/retry", StringComparison.OrdinalIgnoreCase))
         {
