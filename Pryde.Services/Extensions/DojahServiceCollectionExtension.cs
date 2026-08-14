@@ -60,6 +60,7 @@ public static class DojahServiceCollectionExtension
             serviceProvider.GetRequiredService<SmileIdKycProvider>());
         services.AddScoped<IKycProviderResolver, KycProviderResolver>();
         services.AddScoped<IKycProviderService, KycProviderService>();
+        services.AddHostedService<KycProviderStartupLogger>();
         return services;
     }
 }

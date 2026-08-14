@@ -24,6 +24,10 @@ public class DojahKycProvider(
     IOptions<KycSettings>? kycOptions = null) : IDojahKycService, IKycProvider
 {
     private const string ProviderName = "Dojah";
+    private static readonly JsonSerializerOptions WebhookSerializerOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
 
     public string Name => ProviderName;
 
@@ -79,6 +83,22 @@ public class DojahKycProvider(
 
             requiresSave = true;
         }
+        else if (!string.IsNullOrWhiteSpace(kyc.ProviderName) &&
+                 !string.Equals(
+                     kyc.ProviderName,
+                     ProviderName,
+                     StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ConflictException(
+                "The pending KYC verification belongs to another provider.");
+        }
+        else if (kyc.ProviderReference?.StartsWith(
+                     "SMILE-GROUP-",
+                     StringComparison.OrdinalIgnoreCase) == true)
+        {
+            throw new ConflictException(
+                "The pending KYC verification belongs to another provider.");
+        }
         else if (string.IsNullOrWhiteSpace(kyc.ProviderReference))
         {
             kyc.ProviderName = ProviderName;
@@ -86,6 +106,12 @@ public class DojahKycProvider(
 
             unitOfWork.KycVerifications.Update(kyc);
 
+            requiresSave = true;
+        }
+        else if (string.IsNullOrWhiteSpace(kyc.ProviderName))
+        {
+            kyc.ProviderName = ProviderName;
+            unitOfWork.KycVerifications.Update(kyc);
             requiresSave = true;
         }
 
@@ -125,7 +151,16 @@ public class DojahKycProvider(
                         "Only rejected KYC verification can be retried.");
                 }
 
-                await EnsureAttemptExistsAsync(kyc, transactionToken);
+                if (string.Equals(
+                        kyc.ProviderName,
+                        ProviderName,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    kyc.ProviderReference?.StartsWith(
+                        "SMILE-GROUP-",
+                        StringComparison.OrdinalIgnoreCase) != true)
+                {
+                    await EnsureAttemptExistsAsync(kyc, transactionToken);
+                }
 
                 kyc.Status = KycStatus.Pending;
                 kyc.VerifiedAt = null;
@@ -511,15 +546,18 @@ public class DojahKycProvider(
     private static DojahWebhookData ParseWebhook(
         ReadOnlySpan<byte> payload)
     {
-        var parsed = JsonSerializer.Deserialize<DojahWebhookPayload>(payload)
+        var parsed = JsonSerializer.Deserialize<DojahWebhookPayload>(
+                payload,
+                WebhookSerializerOptions)
             ?? throw new JsonException(
                 "Missing webhook payload.");
 
         var referenceId = ValidateRequiredReference(
             parsed.ReferenceId ??
             parsed.ReferenceIdSnakeCase ??
+            parsed.Reference ??
             parsed.Metadata?.KycReference,
-            "referenceId/reference_id/metadata.kyc_reference");
+            "referenceId/reference_id/reference/metadata.kyc_reference");
 
         var status = ValidateRequiredReference(
             parsed.VerificationStatus ??
@@ -870,6 +908,9 @@ public class DojahKycProvider(
         [JsonPropertyName("reference_id")]
         public string? ReferenceIdSnakeCase { get; init; }
 
+        [JsonPropertyName("reference")]
+        public string? Reference { get; init; }
+
         [JsonPropertyName("verificationStatus")]
         public string? VerificationStatus { get; init; }
 
@@ -928,6 +969,7 @@ public class DojahKycProvider(
         DojahKycConfigResponseDto config) => new()
     {
         Provider = ProviderName,
+        IntegrationType = "Widget",
         Reference = config.ProviderReference,
         Status = ToProviderStatus(config.Status),
         SessionUrl = config.ShareableLink,

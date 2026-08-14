@@ -606,6 +606,29 @@ public class DojahKycServiceTests
         Assert.Equal("Completed", kyc.ProviderStatus);
     }
 
+    [Theory]
+    [InlineData("reference")]
+    [InlineData("Reference")]
+    public async Task WebhookReferenceCasingVariantsRemainCompatible(
+        string referenceProperty)
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var service = Service(unitOfWork);
+        var config = await service.GetConfigAsync(Guid.NewGuid());
+        var payload = Encoding.UTF8.GetBytes(
+            $"{{\"{referenceProperty}\":\"{config.ProviderReference}\",\"VerificationStatus\":\"Completed\"}}");
+
+        await service.ProcessWebhookAsync(
+            payload,
+            SignV1(payload),
+            null);
+
+        var kyc = Assert.Single(
+            unitOfWork.KycVerificationRepository.Items);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
+        Assert.Equal(config.ProviderReference, kyc.ProviderReference);
+    }
+
     [Fact]
     public async Task RealisticCompletedWebhookPersistsSuccessfulDecision()
     {

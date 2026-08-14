@@ -596,6 +596,15 @@ public class ApiConfigurationTests
         Assert.Contains("/api/v1/kyc/dojah/retry", paths);
         Assert.Contains("/api/v1/kyc/dojah/webhook", paths);
         Assert.Contains("/api/v1/kyc/providers/smile-id/callback", paths);
+        var kycSessionDescription = document.Paths["/api/v1/kyc/session"]
+            .Operations[OperationType.Post]
+            .Description;
+        Assert.Contains("flow=IdentityVerification", kycSessionDescription);
+        Assert.Contains("flow=DriverLicenseVerification", kycSessionDescription);
+        Assert.Contains(
+            "authenticated provider callback",
+            kycSessionDescription,
+            StringComparison.OrdinalIgnoreCase);
         Assert.Contains("/api/v1/auth/email-verification/resend", paths);
         Assert.Contains("/api/v1/auth/email-verification/verify", paths);
         Assert.Contains("/api/v1/auth/verification-status", paths);
