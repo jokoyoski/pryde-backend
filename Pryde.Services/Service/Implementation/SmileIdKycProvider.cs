@@ -24,11 +24,18 @@ public sealed class SmileIdKycProvider(
     TimeProvider? timeProvider = null) : IKycProvider, ISmileIdKycService
 {
     public const string ProviderName = "SmileId";
-    public const string BiometricFlow = "BiometricKyc";
-    public const string DriverLicenceFlow = "DriverLicenceDocumentVerification";
+    public const string IdentityFlow = "IdentityVerification";
+    public const string DriverLicenseFlow = "DriverLicenseVerification";
+    internal const string LegacyIdentityDataMissingStatus =
+        "LegacyIdentityDataMissing";
+    public const string LegacyBiometricFlow = "BiometricKyc";
+    public const string LegacyDriverLicenceFlow = "DriverLicenceDocumentVerification";
     private const int BiometricJobType = 1;
     private const int DocumentVerificationJobType = 6;
     private const string Country = "NG";
+    // Smile Links default to 90 days when expires_at is not supplied.
+    private static readonly TimeSpan DefaultHostedLinkLifetime =
+        TimeSpan.FromDays(90);
     private const string DriverLicenceIdType = "DRIVERS_LICENSE";
 
     private static readonly HashSet<string> BiometricActionSuccessCodes =
@@ -124,15 +131,6 @@ public sealed class SmileIdKycProvider(
                 kyc = new KycVerification { UserId = userId };
                 await unitOfWork.KycVerifications.CreateAsync(kyc, transactionToken);
             }
-            else if (retry && kyc.Status != KycStatus.Rejected)
-            {
-                throw new ConflictException("Only rejected KYC verification can be retried.");
-            }
-            else if (!retry && kyc.Status == KycStatus.Rejected)
-            {
-                throw new ConflictException("Rejected KYC verification must be retried through the retry endpoint.");
-            }
-
             var existing = string.Equals(
                     kyc.ProviderName,
                     ProviderName,
@@ -141,19 +139,35 @@ public sealed class SmileIdKycProvider(
                 ? (await GetCurrentAttemptsAsync(kyc, transactionToken)).ToList()
                 : [];
             var latestByFlow = existing
-                .GroupBy(x => x.FlowType)
+                .GroupBy(x => CanonicalFlow(x.FlowType))
                 .ToDictionary(
                     group => group.Key!,
                     group => group.OrderByDescending(x => x.StartedAt)
                         .ThenByDescending(x => x.CreatedAt)
                         .First());
+            if (retry && kyc.Status == KycStatus.Approved)
+            {
+                throw new ConflictException("Approved KYC verification cannot be retried.");
+            }
+            if (retry &&
+                kyc.Status != KycStatus.Rejected &&
+                !latestByFlow.Values.Any(attempt =>
+                    attempt.Status == KycProviderStatus.Rejected))
+            {
+                throw new ConflictException("Only rejected KYC verification can be retried.");
+            }
+            if (!retry && kyc.Status == KycStatus.Rejected)
+            {
+                throw new ConflictException("Rejected KYC verification must be retried through the retry endpoint.");
+            }
+
             string? flowToCreate;
             if (retry)
             {
                 flowToCreate = latestByFlow.Values
                     .Where(x => x.Status == KycProviderStatus.Rejected)
-                    .OrderBy(x => x.FlowType == BiometricFlow ? 0 : 1)
-                    .Select(x => x.FlowType)
+                    .OrderBy(x => IsIdentityFlow(x.FlowType) ? 0 : 1)
+                    .Select(x => CanonicalFlow(x.FlowType))
                     .FirstOrDefault();
                 if (flowToCreate is null)
                 {
@@ -163,8 +177,8 @@ public sealed class SmileIdKycProvider(
             else if (latestByFlow.Count == 0)
             {
                 flowToCreate = isDriver
-                    ? DriverLicenceFlow
-                    : BiometricFlow;
+                    ? DriverLicenseFlow
+                    : IdentityFlow;
             }
             else
             {
@@ -175,7 +189,8 @@ public sealed class SmileIdKycProvider(
                     CreateResult(kyc, existing, isDriver));
             }
 
-            var groupReference = string.IsNullOrWhiteSpace(kyc.ProviderReference) ||
+            var groupReference = retry ||
+                                 string.IsNullOrWhiteSpace(kyc.ProviderReference) ||
                                  !string.Equals(kyc.ProviderName, ProviderName, StringComparison.OrdinalIgnoreCase)
                 ? $"SMILE-GROUP-{Guid.NewGuid():N}"
                 : kyc.ProviderReference;
@@ -337,12 +352,77 @@ public sealed class SmileIdKycProvider(
                 continue;
             }
 
-            var status = await apiClient.GetJobStatusAsync(
-                attempt.ExternalUserReference!,
-                attempt.CorrelationReference,
-                cancellationToken);
+            // Hosted-link attempts created by an older/incomplete write may not
+            // have enough correlation data for Smile's job-status endpoint.
+            // Let the generic retry path terminalize them instead of sending an
+            // invalid provider request.
+            if (string.IsNullOrWhiteSpace(attempt.ExternalUserReference) ||
+                string.IsNullOrWhiteSpace(attempt.CorrelationReference))
+            {
+                continue;
+            }
+
+            if (IsIdentityFlow(attempt.FlowType) &&
+                !HasUsableIdentityOptions(attempt.IdentityOptions) &&
+                string.IsNullOrWhiteSpace(attempt.IdentityType) &&
+                string.IsNullOrWhiteSpace(attempt.VerificationMethod))
+            {
+                await MarkRecoveryAttemptUnusableAsync(
+                    attempt.CorrelationReference,
+                    "The legacy Smile ID attempt is missing identity metadata.",
+                    LegacyIdentityDataMissingStatus,
+                    cancellationToken);
+                return;
+            }
+
+            var unavailableHostedLink = IsCurrentHostedFlow(attempt.FlowType) &&
+                                        attempt.Status == KycProviderStatus.Pending &&
+                                        string.Equals(
+                                            attempt.RawStatus,
+                                            "LinkCreated",
+                                            StringComparison.OrdinalIgnoreCase) &&
+                                        !HasActiveHostedLink(attempt);
+            if (IsCurrentHostedFlow(attempt.FlowType) &&
+                attempt.Status == KycProviderStatus.Pending &&
+                string.Equals(
+                    attempt.RawStatus,
+                    "LinkCreated",
+                    StringComparison.OrdinalIgnoreCase) &&
+                !unavailableHostedLink)
+            {
+                continue;
+            }
+
+            SmileIdJobStatusResponse status;
+            try
+            {
+                status = await apiClient.GetJobStatusAsync(
+                    attempt.ExternalUserReference,
+                    attempt.CorrelationReference,
+                    cancellationToken);
+            }
+            catch (Exception exception) when (
+                unavailableHostedLink &&
+                exception is not OperationCanceledException)
+            {
+                await MarkRecoveryAttemptUnusableAsync(
+                    attempt.CorrelationReference,
+                    "The stored Smile ID hosted link is expired or unusable.",
+                    "HostedLinkUnavailable",
+                    cancellationToken);
+                return;
+            }
             if (status.Code != "2302")
             {
+                if (unavailableHostedLink)
+                {
+                    await MarkRecoveryAttemptUnusableAsync(
+                        attempt.CorrelationReference,
+                        "The stored Smile ID hosted link is expired or unusable.",
+                        "HostedLinkUnavailable",
+                        cancellationToken);
+                    return;
+                }
                 continue;
             }
 
@@ -357,6 +437,7 @@ public sealed class SmileIdKycProvider(
                 results.Add(status.Result);
             }
 
+            var recoveredResult = false;
             foreach (var result in results)
             {
                 var partnerParams = result.PartnerParams ?? result.PartnerParamsSnakeCase;
@@ -366,19 +447,106 @@ public sealed class SmileIdKycProvider(
                     continue;
                 }
 
+                var recoveredIdType = result.IdType ??
+                                      result.IdTypeSnakeCase;
+                if (string.IsNullOrWhiteSpace(recoveredIdType))
+                {
+                    await MarkRecoveryAttemptUnusableAsync(
+                        attempt.CorrelationReference,
+                        "The Smile ID recovery result did not identify the selected ID type.",
+                        LegacyIdentityDataMissingStatus,
+                        cancellationToken);
+                    return;
+                }
+
                 await ProcessResultAsync(
                     partnerParams,
                     resultCode,
                     result.ResultText ?? result.ResultTextSnakeCase,
                     result.SmileJobId ?? result.SmileJobIdSnakeCase,
                     result.Country,
-                    result.IdType ?? result.IdTypeSnakeCase,
+                    recoveredIdType,
                     null,
                     null,
                     cancellationToken);
+                recoveredResult = true;
+            }
+
+            if (unavailableHostedLink && !recoveredResult)
+            {
+                await MarkRecoveryAttemptUnusableAsync(
+                    attempt.CorrelationReference,
+                    "The stored Smile ID hosted link is expired or unusable.",
+                    "HostedLinkUnavailable",
+                    cancellationToken);
+                return;
             }
         }
     }
+
+    private async Task MarkRecoveryAttemptUnusableAsync(
+        string correlationReference,
+        string failureReason,
+        string resultCode,
+        CancellationToken cancellationToken)
+    {
+        unitOfWork.ClearTracking();
+        await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
+        {
+            var attempt = await unitOfWork.KycVerificationAttempts
+                .GetByCorrelationReferenceForUpdateAsync(
+                    ProviderName,
+                    correlationReference,
+                    transactionToken);
+            if (attempt is null ||
+                attempt.Status is KycProviderStatus.Approved or
+                    KycProviderStatus.Rejected)
+            {
+                return true;
+            }
+
+            var kyc = await unitOfWork.KycVerifications
+                .GetByIdForUpdateAsync(
+                    attempt.KycVerificationId,
+                    transactionToken)
+                ?? throw new NotFoundException(
+                    nameof(KycVerification),
+                    attempt.KycVerificationId);
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
+            attempt.Status = KycProviderStatus.Rejected;
+            attempt.ResultCode = resultCode;
+            attempt.FailureReason = failureReason;
+            attempt.ProviderUpdatedAt = now;
+            attempt.CompletedAt = now;
+            unitOfWork.KycVerificationAttempts.Update(attempt);
+
+            if (kyc.Status != KycStatus.Approved)
+            {
+                kyc.Status = KycStatus.Rejected;
+                kyc.ProviderStatus = resultCode;
+                kyc.RejectionReason = failureReason;
+                kyc.LastProviderUpdatedAt = now;
+                unitOfWork.KycVerifications.Update(kyc);
+            }
+
+            await unitOfWork.SaveChangesAsync(transactionToken);
+            return true;
+        }, cancellationToken);
+    }
+
+    private bool HasActiveHostedLink(KycVerificationAttempt attempt) =>
+        IsUsableHostedUrl(attempt.VerificationUrl) &&
+        attempt.StartedAt >
+        _timeProvider.GetUtcNow().UtcDateTime - DefaultHostedLinkLifetime;
+
+    private static bool IsUsableHostedUrl(string? verificationUrl) =>
+        Uri.TryCreate(verificationUrl, UriKind.Absolute, out var uri) &&
+        string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrWhiteSpace(uri.Host);
+
+    private static bool IsCurrentHostedFlow(string? flow) =>
+        string.Equals(flow, IdentityFlow, StringComparison.Ordinal) ||
+        string.Equals(flow, DriverLicenseFlow, StringComparison.Ordinal);
 
     private async Task ProcessResultAsync(
         SmileIdPartnerParams partnerParams,
@@ -408,15 +576,15 @@ public sealed class SmileIdKycProvider(
                 throw new ValidationException("Smile ID callback user_id does not match the job.");
             }
 
-            var expectedRole = attempt.FlowType == DriverLicenceFlow
+            var expectedRole = IsDriverLicenseFlow(attempt.FlowType)
                 ? RoleNames.Driver
-                : attempt.FlowType == BiometricFlow
+                : IsIdentityFlow(attempt.FlowType)
                     ? RoleNames.Passenger
                     : throw new ValidationException("Smile ID attempt has an unsupported flow.");
             var isLegacyAttempt = string.IsNullOrWhiteSpace(attempt.IdentityOptions);
             if (isLegacyAttempt)
             {
-                var expectedJobType = attempt.FlowType == BiometricFlow
+                var expectedJobType = IsIdentityFlow(attempt.FlowType)
                     ? BiometricJobType
                     : DocumentVerificationJobType;
                 if (!TryGetJobType(partnerParams.JobType, out var jobType) ||
@@ -590,7 +758,7 @@ public sealed class SmileIdKycProvider(
                         x.AttemptGroupReference == kyc.ProviderReference)
             .ToList();
         var latestAttempts = attempts
-            .GroupBy(x => x.FlowType)
+            .GroupBy(x => CanonicalFlow(x.FlowType))
             .Select(group => group.OrderByDescending(x => x.StartedAt)
                 .ThenByDescending(x => x.CreatedAt)
                 .First())
@@ -603,9 +771,9 @@ public sealed class SmileIdKycProvider(
         var nextStatus = latestAttempts.Count > 0 &&
                          latestAttempts.All(x => x.Status == KycProviderStatus.Approved) &&
                          latestAttempts.Any(x =>
-                             x.FlowType == (requiresLicence
-                                 ? DriverLicenceFlow
-                                 : BiometricFlow) &&
+                            CanonicalFlow(x.FlowType) == (requiresLicence
+                                 ? DriverLicenseFlow
+                                 : IdentityFlow) &&
                              x.Status == KycProviderStatus.Approved)
             ? KycStatus.Approved
             : latestAttempts.Any(x => x.Status == KycProviderStatus.Rejected)
@@ -638,22 +806,22 @@ public sealed class SmileIdKycProvider(
         bool isDriver)
     {
         var latestByFlow = attempts
-            .GroupBy(x => x.FlowType)
+            .GroupBy(x => CanonicalFlow(x.FlowType))
             .ToDictionary(
                 group => group.Key!,
                 group => group.OrderByDescending(x => x.StartedAt)
                     .ThenByDescending(x => x.CreatedAt)
                     .First());
         var sessions = new List<KycProviderSession>();
-        if (!isDriver && latestByFlow.TryGetValue(BiometricFlow, out var biometric))
+        if (!isDriver && latestByFlow.TryGetValue(IdentityFlow, out var identity))
         {
-            sessions.Add(MapSession(biometric));
+            sessions.Add(MapSession(identity, IdentityFlow));
         }
         if (isDriver)
         {
-            if (latestByFlow.TryGetValue(DriverLicenceFlow, out var licence))
+            if (latestByFlow.TryGetValue(DriverLicenseFlow, out var licence))
             {
-                sessions.Add(MapSession(licence));
+                sessions.Add(MapSession(licence, DriverLicenseFlow));
             }
         }
 
@@ -666,10 +834,12 @@ public sealed class SmileIdKycProvider(
             Sessions = sessions
         };
 
-        static KycProviderSession MapSession(KycVerificationAttempt attempt) =>
+        static KycProviderSession MapSession(
+            KycVerificationAttempt attempt,
+            string flow) =>
             new()
             {
-                Flow = attempt.FlowType!,
+                Flow = flow,
                 JobId = attempt.CorrelationReference,
                 VerificationUrl = attempt.VerificationUrl,
                 Required = true,
@@ -727,13 +897,13 @@ public sealed class SmileIdKycProvider(
         if (string.IsNullOrWhiteSpace(attempt.IdentityOptions))
         {
             // Compatibility for hosted jobs issued before option snapshots were persisted.
-            var legacyOption = attempt.FlowType == BiometricFlow
+            var legacyOption = IsIdentityFlow(attempt.FlowType)
                 ? new SmileIdIdentityOption
                 {
                     IdType = "NIN_V2",
                     VerificationMethod = "biometric_kyc"
                 }
-                : attempt.FlowType == DriverLicenceFlow
+                : IsDriverLicenseFlow(attempt.FlowType)
                     ? new SmileIdIdentityOption
                     {
                         IdType = DriverLicenceIdType,
@@ -777,6 +947,39 @@ public sealed class SmileIdKycProvider(
 
     private static bool TryGetJobType(object? value, out int jobType) =>
         int.TryParse(value?.ToString()?.Trim('"'), out jobType);
+
+    internal static string CanonicalFlow(string? flow) => flow switch
+    {
+        IdentityFlow or LegacyBiometricFlow => IdentityFlow,
+        DriverLicenseFlow or LegacyDriverLicenceFlow => DriverLicenseFlow,
+        _ => flow ?? string.Empty
+    };
+
+    internal static bool HasUsableIdentityOptions(string? identityOptions)
+    {
+        if (string.IsNullOrWhiteSpace(identityOptions))
+        {
+            return false;
+        }
+
+        var normalized = identityOptions.Trim();
+        if (normalized is "[]" or "{}" or "\"\"")
+        {
+            return false;
+        }
+
+        return normalized.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(option => option.Split(':', 2))
+            .Any(parts => parts.Length == 2 &&
+                          !string.IsNullOrWhiteSpace(parts[0]) &&
+                          !string.IsNullOrWhiteSpace(parts[1]));
+    }
+
+    private static bool IsIdentityFlow(string? flow) =>
+        CanonicalFlow(flow) == IdentityFlow;
+
+    private static bool IsDriverLicenseFlow(string? flow) =>
+        CanonicalFlow(flow) == DriverLicenseFlow;
 
     private sealed record PreparedLinkAttempt(
         SmileIdLinkRequest? Request,

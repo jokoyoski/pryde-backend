@@ -29,6 +29,9 @@ internal sealed class DojahVerificationEnvelope
     [JsonPropertyName("reference_id")]
     public string? ReferenceId { get; set; }
 
+    [JsonPropertyName("reference")]
+    public string? Reference { get; set; }
+
     [JsonPropertyName("verification_mode")]
     public string? VerificationMode { get; set; }
 
@@ -42,10 +45,12 @@ internal sealed class DojahVerificationEnvelope
     {
         if (Entity is not null)
         {
+            Entity.ReferenceId ??= Entity.Reference;
             return Entity;
         }
 
-        if (string.IsNullOrWhiteSpace(ReferenceId))
+        var referenceId = ReferenceId ?? Reference;
+        if (string.IsNullOrWhiteSpace(referenceId))
         {
             return null;
         }
@@ -58,7 +63,7 @@ internal sealed class DojahVerificationEnvelope
             IdType = IdType,
             BackUrl = BackUrl,
             SelfieUrl = SelfieUrl,
-            ReferenceId = ReferenceId,
+            ReferenceId = referenceId,
             VerificationMode = VerificationMode,
             VerificationType = VerificationType,
             VerificationStatus = VerificationStatus
@@ -88,6 +93,9 @@ internal sealed class DojahVerificationApiResponse
 
     [JsonPropertyName("reference_id")]
     public string? ReferenceId { get; set; }
+
+    [JsonPropertyName("reference")]
+    public string? Reference { get; set; }
 
     [JsonPropertyName("verification_mode")]
     public string? VerificationMode { get; set; }

@@ -96,6 +96,29 @@ public class DojahApiClientTests
         Assert.Equal("******7890", result.MaskedDocumentNumber);
     }
 
+    [Theory]
+    [InlineData("reference")]
+    [InlineData("Reference")]
+    public async Task VerificationReferenceCasingVariantsRemainSupported(
+        string referenceProperty)
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    $"{{\"{referenceProperty}\":\"verification-reference\",\"verification_status\":\"Completed\"}}",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        var client = CreateClient(handler);
+
+        var result = await client.GetVerificationAsync(
+            "verification-reference");
+
+        Assert.Equal("verification-reference", result.Reference);
+        Assert.Equal("Completed", result.Status);
+    }
+
     [Fact]
     public async Task GetVerificationMasksShortDocumentNumberAndRejectsUnsafeImageUrls()
     {

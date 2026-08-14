@@ -42,45 +42,90 @@ public class KycService(
             return response;
         }
 
-        var attempts = await unitOfWork.KycVerificationAttempts
-            .GetByKycVerificationIdAsync(kyc.Id, cancellationToken);
-        var latest = attempts
-            .Where(x => x.ProviderName == "SmileId" &&
-                        x.AttemptGroupReference == kyc.ProviderReference)
-            .GroupBy(x => x.FlowType)
-            .Select(group => group.OrderByDescending(x => x.StartedAt).ThenByDescending(x => x.CreatedAt).First())
-            .ToDictionary(x => x.FlowType!);
-        var roles = await unitOfWork.UserRoles.GetByUserIdAsync(userId, cancellationToken);
-        var requiredFlows = roles.Any(x => x.Role.Name == RoleNames.Driver)
-            ? new[] { "DriverLicenceDocumentVerification" }
-            : new[] { "BiometricKyc" };
-        response.Flows = requiredFlows.Select(flow =>
+        unitOfWork.ClearTracking();
+        return await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
         {
-            latest.TryGetValue(flow, out var attempt);
-            return new KycFlowStatusResponseDto
+            var lockedKyc = await unitOfWork.KycVerifications
+                .GetByIdForUpdateAsync(kyc.Id, transactionToken)
+                ?? throw new NotFoundException(nameof(KycVerification), kyc.Id);
+            var lockedResponse = lockedKyc.Adapt<KycVerificationResponseDto>();
+            if (!string.Equals(
+                    lockedKyc.ProviderName,
+                    "SmileId",
+                    StringComparison.OrdinalIgnoreCase))
             {
-                Flow = flow,
-                Required = true,
-                Status = attempt?.Status ?? KycProviderStatus.Pending,
-                RawStatus = attempt?.RawStatus ?? "Blocked",
-                ResultCode = attempt?.ResultCode,
-                FailureReason = attempt?.FailureReason,
-                IdType = attempt?.IdentityType,
-                VerificationMethod = attempt?.VerificationMethod,
-                CallbackConfirmed = attempt?.ProviderEventTimestamp.HasValue == true,
-                CanRetry = attempt?.Status == KycProviderStatus.Rejected
-            };
-        }).ToList();
-        var latestAttempt = latest.Values
-            .OrderByDescending(attempt => attempt.StartedAt)
-            .ThenByDescending(attempt => attempt.CreatedAt)
-            .FirstOrDefault();
-        response.SelectedIdType = latestAttempt?.IdentityType;
-        response.VerificationMethod = latestAttempt?.VerificationMethod;
-        response.CallbackConfirmed = response.Flows.Count > 0 &&
-                                     response.Flows.All(flow => flow.CallbackConfirmed);
-        response.CanRetry = response.Flows.Any(flow => flow.CanRetry);
-        return response;
+                return lockedResponse;
+            }
+
+            var attempts = await unitOfWork.KycVerificationAttempts
+                .GetByKycVerificationIdAsync(lockedKyc.Id, transactionToken);
+            var latest = attempts
+                .Where(x => x.ProviderName == "SmileId" &&
+                            x.AttemptGroupReference == lockedKyc.ProviderReference)
+                .GroupBy(x => SmileIdKycProvider.CanonicalFlow(x.FlowType))
+                .Select(group => group.OrderByDescending(x => x.StartedAt)
+                    .ThenByDescending(x => x.CreatedAt)
+                    .First())
+                .ToDictionary(x => SmileIdKycProvider.CanonicalFlow(x.FlowType));
+            var roles = await unitOfWork.UserRoles.GetByUserIdAsync(
+                userId,
+                transactionToken);
+            var requiredFlows = roles.Any(x => x.Role.Name == RoleNames.Driver)
+                ? new[] { SmileIdKycProvider.DriverLicenseFlow }
+                : new[] { SmileIdKycProvider.IdentityFlow };
+            lockedResponse.Flows = requiredFlows.Select(flow =>
+            {
+                latest.TryGetValue(flow, out var attempt);
+                return new KycFlowStatusResponseDto
+                {
+                    Flow = flow,
+                    Required = true,
+                    Status = attempt?.Status ?? KycProviderStatus.Pending,
+                    RawStatus = attempt?.RawStatus ?? "Blocked",
+                    ResultCode = attempt?.ResultCode,
+                    FailureReason = attempt?.FailureReason,
+                    IdType = attempt?.IdentityType,
+                    VerificationMethod = attempt?.VerificationMethod,
+                    CallbackConfirmed = attempt?.ProviderEventTimestamp.HasValue == true,
+                    CanRetry = lockedKyc.Status != KycStatus.Approved &&
+                               attempt?.Status == KycProviderStatus.Rejected
+                };
+            }).ToList();
+            var latestAttempt = latest.Values
+                .OrderByDescending(attempt => attempt.StartedAt)
+                .ThenByDescending(attempt => attempt.CreatedAt)
+                .FirstOrDefault();
+            lockedResponse.SelectedIdType = latestAttempt?.IdentityType;
+            lockedResponse.VerificationMethod = latestAttempt?.VerificationMethod;
+            lockedResponse.CallbackConfirmed = lockedResponse.Flows.Count > 0 &&
+                                                lockedResponse.Flows.All(flow =>
+                                                    flow.CallbackConfirmed);
+            lockedResponse.CanRetry = lockedResponse.Flows.Any(flow => flow.CanRetry);
+
+            if (lockedResponse.CanRetry && lockedKyc.Status != KycStatus.Rejected)
+            {
+                var rejectedAttempt = latest.Values
+                    .Where(attempt => attempt.Status == KycProviderStatus.Rejected)
+                    .OrderByDescending(attempt => attempt.StartedAt)
+                    .ThenByDescending(attempt => attempt.CreatedAt)
+                    .First();
+                lockedKyc.Status = KycStatus.Rejected;
+                lockedKyc.ProviderStatus = rejectedAttempt.ResultCode ??
+                                           rejectedAttempt.RawStatus ??
+                                           "Rejected";
+                lockedKyc.RejectionReason = rejectedAttempt.FailureReason;
+                lockedKyc.VerifiedAt = null;
+                lockedKyc.LastProviderUpdatedAt =
+                    rejectedAttempt.ProviderUpdatedAt ?? DateTime.UtcNow;
+                unitOfWork.KycVerifications.Update(lockedKyc);
+                await unitOfWork.SaveChangesAsync(transactionToken);
+                lockedResponse.Status = KycStatus.Rejected;
+                lockedResponse.ProviderStatus = lockedKyc.ProviderStatus;
+                lockedResponse.RejectionReason = lockedKyc.RejectionReason;
+            }
+
+            return lockedResponse;
+        }, cancellationToken);
     }
 
     public async Task<KycVerificationResponseDto> ApproveAsync(
