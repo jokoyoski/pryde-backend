@@ -2,7 +2,9 @@ using Pryde.Contracts.RequestModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
+using Microsoft.Extensions.Options;
 using Pryde.Services.Service.Implementation;
+using Pryde.Services.Settings;
 using Pryde.Tests.TestInfrastructure;
 
 namespace Pryde.Tests.Services;
@@ -44,7 +46,9 @@ public class AdminReviewServiceTests
         };
         ((TestVehicleDocumentRepository)unitOfWork.VehicleDocuments).Items.Add(document);
         var reviewer = Guid.NewGuid();
-        var service = new VehicleDocumentService(unitOfWork);
+        var service = new VehicleDocumentService(
+            unitOfWork,
+            Options.Create(new VehicleDocumentSettings()));
 
         var result = await service.ApproveAsync(document.Id, reviewer);
 

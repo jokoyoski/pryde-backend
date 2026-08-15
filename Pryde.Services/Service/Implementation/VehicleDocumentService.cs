@@ -1,12 +1,17 @@
 ﻿using Mapster;
+using Microsoft.Extensions.Options;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Service.Interface;
+using Pryde.Services.Settings;
 namespace Pryde.Services.Service.Implementation;
-public class VehicleDocumentService(IUnitOfWork unitOfWork) : IVehicleDocumentService
+public class VehicleDocumentService(
+    IUnitOfWork unitOfWork,
+    IOptions<VehicleDocumentSettings> vehicleDocumentSettings) :
+    IVehicleDocumentService
 {
     public async Task<VehicleDocumentResponseDto> UploadAsync(Guid vehicleId, Guid requestingUserId, VehicleDocumentType documentType, DateTime? expiryDate, string documentUrl, CancellationToken cancellationToken = default)
     {
@@ -29,6 +34,13 @@ public class VehicleDocumentService(IUnitOfWork unitOfWork) : IVehicleDocumentSe
         if (expiryDate.HasValue &&
             expiryDate.Value <= DateTime.UtcNow)
             throw new ValidationException("Expiry date must be in the future.");
+        if (IsRequiredVehicleDocument(documentType) &&
+            expiryDate!.Value.Date < DateTime.UtcNow.Date.AddMonths(
+                vehicleDocumentSettings.Value.MinimumValidityMonths))
+        {
+            throw new ValidationException(
+                $"{documentType} must have at least {vehicleDocumentSettings.Value.MinimumValidityMonths} months remaining validity.");
+        }
 
         var documents = await unitOfWork.VehicleDocuments
             .GetByVehicleIdAsync(vehicleId, cancellationToken);
@@ -157,7 +169,15 @@ public class VehicleDocumentService(IUnitOfWork unitOfWork) : IVehicleDocumentSe
     private static bool RequiresExpiry(
         VehicleDocumentType documentType) =>
         documentType is
+            VehicleDocumentType.VehicleRegistration or
             VehicleDocumentType.Insurance or
             VehicleDocumentType.RoadworthinessCertificate or
             VehicleDocumentType.DriversLicense;
+
+    private static bool IsRequiredVehicleDocument(
+        VehicleDocumentType documentType) =>
+        documentType is
+            VehicleDocumentType.VehicleRegistration or
+            VehicleDocumentType.Insurance or
+            VehicleDocumentType.RoadworthinessCertificate;
 }

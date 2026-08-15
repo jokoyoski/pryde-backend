@@ -213,6 +213,23 @@ public class VehicleMediaUploadPerformanceTests
                 UserId = context.OwnerId,
                 Status = KycStatus.Approved
             });
+        foreach (var documentType in new[]
+                 {
+                     VehicleDocumentType.VehicleRegistration,
+                     VehicleDocumentType.Insurance,
+                     VehicleDocumentType.RoadworthinessCertificate
+                 })
+        {
+            context.UnitOfWork.VehicleDocumentRepository.Items.Add(
+                new VehicleDocument
+                {
+                    VehicleId = context.Vehicle.Id,
+                    DocumentType = documentType,
+                    DocumentUrl = $"https://files.test/{documentType}.pdf",
+                    ExpiryDate = DateTime.UtcNow.AddYears(1),
+                    ReviewStatus = VehicleDocumentReviewStatus.Approved
+                });
+        }
 
         await Service(
             context.UnitOfWork,

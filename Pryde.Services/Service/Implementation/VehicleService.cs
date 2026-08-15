@@ -25,6 +25,12 @@ public class VehicleService(
     INotificationService notificationService) : IVehicleService
 {
     private static readonly HashSet<int> AllowedPassengerSeatCounts = [2, 4, 5, 6, 7];
+    private static readonly VehicleDocumentType[] RequiredDocumentTypes =
+    [
+        VehicleDocumentType.VehicleRegistration,
+        VehicleDocumentType.Insurance,
+        VehicleDocumentType.RoadworthinessCertificate
+    ];
     private static readonly string[] AllowedImageContentTypes =
         ["image/jpeg", "image/png", "image/webp"];
     private static readonly string[] AllowedVideoContentTypes =
@@ -551,6 +557,10 @@ public class VehicleService(
                 "Only a vehicle pending review can be approved.");
         }
 
+        await ValidateRequiredDocumentsApprovedAsync(
+            vehicle.Id,
+            cancellationToken);
+
         var kyc = await unitOfWork.KycVerifications
             .GetByUserIdAsync(vehicle.UserId, cancellationToken);
         if (kyc?.Status != KycStatus.Approved)
@@ -982,11 +992,20 @@ public class VehicleService(
         }
         AddMissingText(missingRequirements, vehicle.Colour, "colour");
 
-        if (!documents.Any(document =>
-                document.DocumentType ==
-                VehicleDocumentType.VehicleRegistration))
+        foreach (var documentType in RequiredDocumentTypes)
         {
-            missingRequirements.Add("vehicle registration document");
+            var document = documents.FirstOrDefault(existing =>
+                existing.DocumentType == documentType);
+            if (document is null)
+            {
+                missingRequirements.Add(
+                    $"{FormatDocumentType(documentType)} document");
+            }
+            else if (!document.ExpiryDate.HasValue)
+            {
+                missingRequirements.Add(
+                    $"{FormatDocumentType(documentType)} document expiry date");
+            }
         }
 
         foreach (var imageType in Enum.GetValues<VehicleImageType>())
@@ -1008,6 +1027,56 @@ public class VehicleService(
                 $"Vehicle onboarding is incomplete. Missing: {string.Join(", ", missingRequirements)}.");
         }
     }
+
+    private async Task ValidateRequiredDocumentsApprovedAsync(
+        Guid vehicleId,
+        CancellationToken cancellationToken)
+    {
+        var documents = await unitOfWork.VehicleDocuments
+            .GetByVehicleIdAsync(vehicleId, cancellationToken);
+        var missingDocumentTypes = RequiredDocumentTypes
+            .Where(documentType => documents.All(document =>
+                document.DocumentType != documentType))
+            .Select(FormatDocumentType)
+            .ToList();
+        var unapprovedDocumentTypes = RequiredDocumentTypes
+            .Where(documentType => documents.Any(document =>
+                document.DocumentType == documentType &&
+                document.ReviewStatus != VehicleDocumentReviewStatus.Approved))
+            .Select(FormatDocumentType)
+            .ToList();
+
+        if (missingDocumentTypes.Count == 0 &&
+            unapprovedDocumentTypes.Count == 0)
+        {
+            return;
+        }
+
+        var validationIssues = new List<string>();
+        if (missingDocumentTypes.Count > 0)
+        {
+            validationIssues.Add(
+                $"missing: {string.Join(", ", missingDocumentTypes)}");
+        }
+        if (unapprovedDocumentTypes.Count > 0)
+        {
+            validationIssues.Add(
+                $"not approved: {string.Join(", ", unapprovedDocumentTypes)}");
+        }
+
+        throw new ValidationException(
+            $"Vehicle activation requires approved VehicleRegistration, Insurance, and RoadworthinessCertificate documents ({string.Join("; ", validationIssues)}).");
+    }
+
+    private static string FormatDocumentType(
+        VehicleDocumentType documentType) =>
+        documentType switch
+        {
+            VehicleDocumentType.VehicleRegistration => "vehicle registration",
+            VehicleDocumentType.RoadworthinessCertificate =>
+                "roadworthiness certificate",
+            _ => documentType.ToString().ToLowerInvariant()
+        };
 
     private static void ValidateVehicleDetails(
         VehicleDetailsRequestDto request)
