@@ -679,6 +679,7 @@ public sealed class SmileIdKycProvider(
                 ? _timeProvider.GetUtcNow().UtcDateTime
                 : null;
             unitOfWork.KycVerificationAttempts.Update(attempt);
+            await unitOfWork.SaveChangesAsync(transactionToken);
 
             await RecalculateKycAsync(kyc, transactionToken);
             await unitOfWork.SaveChangesAsync(transactionToken);

@@ -613,6 +613,50 @@ public class SmileIdKycProviderTests
     }
 
     [Fact]
+    public async Task ApprovedDriverCallbackPersistsAttemptBeforeParentRecalculation()
+    {
+        var context = Context(RoleNames.Driver);
+        var licence = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId))).Sessions);
+        var kyc = CurrentKyc(context);
+        var attempt = CurrentAttempt(context, licence);
+        kyc.Status = KycStatus.Submitted;
+        kyc.VerifiedAt = null;
+        kyc.ProviderStatus =
+            $"{SmileIdKycProvider.DriverLicenseFlow}:LinkCreated";
+        kyc.RejectionReason = "Previous rejection";
+        attempt.Status = KycProviderStatus.Pending;
+        attempt.RawStatus = "LinkCreated";
+        var payload = Callback(
+            licence,
+            "0810",
+            "Document Verified");
+        var saveCount = context.UnitOfWork.SaveChangesCount;
+
+        await context.Provider.ProcessCallbackAsync(payload);
+
+        Assert.Equal(KycProviderStatus.Approved, attempt.Status);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
+        Assert.Equal(Now.UtcDateTime, kyc.VerifiedAt);
+        Assert.Null(kyc.RejectionReason);
+        Assert.Equal(
+            $"{SmileIdKycProvider.DriverLicenseFlow}:Document Verified",
+            kyc.ProviderStatus);
+        Assert.Equal(saveCount + 3, context.UnitOfWork.SaveChangesCount);
+
+        await context.Provider.ProcessCallbackAsync(payload);
+
+        Assert.Equal(saveCount + 3, context.UnitOfWork.SaveChangesCount);
+        Assert.Equal(KycProviderStatus.Approved, attempt.Status);
+        Assert.Equal(KycStatus.Approved, kyc.Status);
+        Assert.Equal(Now.UtcDateTime, kyc.VerifiedAt);
+        Assert.Null(kyc.RejectionReason);
+        Assert.Equal(
+            $"{SmileIdKycProvider.DriverLicenseFlow}:Document Verified",
+            kyc.ProviderStatus);
+    }
+
+    [Fact]
     public async Task DocumentApprovedWithAttentionUsesDocumentedFinalMapping()
     {
         var context = Context(RoleNames.Driver);
