@@ -3,9 +3,13 @@ using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Pryde.Persistence.Context;
 using Pryde.Services.Service.Implementation;
+using Pryde.Services.Settings;
 using Pryde.Tests.TestInfrastructure;
 
 namespace Pryde.Tests.Services;
@@ -168,7 +172,7 @@ public class VehicleOnboardingServiceTests
     }
 
     [Fact]
-    public async Task CompleteVehicleMovesToPendingReview()
+    public async Task SuccessfulVehicleSubmissionWithAllRequiredDocumentsMovesToPendingReview()
     {
         var (unitOfWork, ownerId, vehicle) = Context();
         Complete(unitOfWork, vehicle);
@@ -184,6 +188,28 @@ public class VehicleOnboardingServiceTests
             WorkflowNextAction.AwaitAdminApproval,
             result.NextAction);
         Assert.Equal(WorkflowActor.Admin, result.RequiredActor);
+    }
+
+    [Theory]
+    [InlineData(VehicleDocumentType.VehicleRegistration)]
+    [InlineData(VehicleDocumentType.Insurance)]
+    [InlineData(VehicleDocumentType.RoadworthinessCertificate)]
+    public async Task MissingRequiredVehicleDocumentBlocksSubmission(
+        VehicleDocumentType missingDocumentType)
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        Complete(unitOfWork, vehicle);
+        unitOfWork.VehicleDocumentRepository.Items.RemoveAll(document =>
+            document.VehicleId == vehicle.Id &&
+            document.DocumentType == missingDocumentType);
+
+        var exception = await Assert.ThrowsAsync<ValidationException>(() =>
+            Service(unitOfWork).SubmitAsync(vehicle.Id, ownerId));
+
+        Assert.Contains(
+            "Vehicle onboarding is incomplete",
+            exception.Message);
+        Assert.Equal(VehicleOnboardingStatus.Draft, vehicle.OnboardingStatus);
     }
 
     [Fact]
@@ -299,6 +325,10 @@ public class VehicleOnboardingServiceTests
     {
         var (unitOfWork, ownerId, vehicle) = Context();
         Complete(unitOfWork, vehicle);
+        SetRequiredDocumentReviewStatus(
+            unitOfWork,
+            vehicle.Id,
+            VehicleDocumentReviewStatus.Approved);
         vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
         var service = Service(unitOfWork);
 
@@ -330,6 +360,10 @@ public class VehicleOnboardingServiceTests
     {
         var (unitOfWork, ownerId, vehicle) = Context();
         Complete(unitOfWork, vehicle);
+        SetRequiredDocumentReviewStatus(
+            unitOfWork,
+            vehicle.Id,
+            VehicleDocumentReviewStatus.Approved);
         vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
         unitOfWork.KycVerificationRepository.Items.Add(new KycVerification
         {
@@ -535,6 +569,97 @@ public class VehicleOnboardingServiceTests
     }
 
     [Fact]
+    public async Task VehicleActivationFailsWhenRequiredDocumentIsPending()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        Complete(unitOfWork, vehicle);
+        SetRequiredDocumentReviewStatus(
+            unitOfWork,
+            vehicle.Id,
+            VehicleDocumentReviewStatus.Approved);
+        RequiredDocument(
+            unitOfWork,
+            vehicle.Id,
+            VehicleDocumentType.Insurance).ReviewStatus =
+            VehicleDocumentReviewStatus.Pending;
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+        AddApprovedKyc(unitOfWork, ownerId);
+
+        var exception = await Assert.ThrowsAsync<ValidationException>(() =>
+            Service(unitOfWork).ActivateAsync(vehicle.Id));
+
+        Assert.Contains("not approved: insurance", exception.Message);
+        Assert.False(vehicle.IsActive);
+    }
+
+    [Fact]
+    public async Task VehicleActivationFailsWhenRequiredDocumentIsRejected()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        Complete(unitOfWork, vehicle);
+        SetRequiredDocumentReviewStatus(
+            unitOfWork,
+            vehicle.Id,
+            VehicleDocumentReviewStatus.Approved);
+        RequiredDocument(
+            unitOfWork,
+            vehicle.Id,
+            VehicleDocumentType.RoadworthinessCertificate).ReviewStatus =
+            VehicleDocumentReviewStatus.Rejected;
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+        AddApprovedKyc(unitOfWork, ownerId);
+
+        var exception = await Assert.ThrowsAsync<ValidationException>(() =>
+            Service(unitOfWork).ActivateAsync(vehicle.Id));
+
+        Assert.Contains(
+            "not approved: roadworthiness certificate",
+            exception.Message);
+        Assert.False(vehicle.IsActive);
+    }
+
+    [Fact]
+    public async Task VehicleActivationFailsWhenRequiredDocumentIsMissing()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        Complete(unitOfWork, vehicle);
+        SetRequiredDocumentReviewStatus(
+            unitOfWork,
+            vehicle.Id,
+            VehicleDocumentReviewStatus.Approved);
+        unitOfWork.VehicleDocumentRepository.Items.RemoveAll(document =>
+            document.VehicleId == vehicle.Id &&
+            document.DocumentType ==
+            VehicleDocumentType.VehicleRegistration);
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+        AddApprovedKyc(unitOfWork, ownerId);
+
+        var exception = await Assert.ThrowsAsync<ValidationException>(() =>
+            Service(unitOfWork).ActivateAsync(vehicle.Id));
+
+        Assert.Contains("missing: vehicle registration", exception.Message);
+        Assert.False(vehicle.IsActive);
+    }
+
+    [Fact]
+    public async Task VehicleActivationSucceedsWhenAllRequiredDocumentsAreApproved()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        Complete(unitOfWork, vehicle);
+        SetRequiredDocumentReviewStatus(
+            unitOfWork,
+            vehicle.Id,
+            VehicleDocumentReviewStatus.Approved);
+        vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
+        AddApprovedKyc(unitOfWork, ownerId);
+
+        var result = await Service(unitOfWork).ActivateAsync(vehicle.Id);
+
+        Assert.True(result.IsActive);
+        Assert.Equal(VehicleOnboardingStatus.Approved, result.OnboardingStatus);
+    }
+
+    [Fact]
     public async Task LuggageCapacityIsOptionalForSubmission()
     {
         var (unitOfWork, ownerId, vehicle) = Context();
@@ -552,7 +677,7 @@ public class VehicleOnboardingServiceTests
     public async Task InvalidVehicleDocumentTypeIsRejected()
     {
         var (unitOfWork, ownerId, vehicle) = Context();
-        var service = new VehicleDocumentService(unitOfWork);
+        var service = DocumentService(unitOfWork);
 
         await Assert.ThrowsAsync<ValidationException>(() =>
             service.UploadAsync(
@@ -563,20 +688,130 @@ public class VehicleOnboardingServiceTests
                 "https://files.test/invalid.pdf"));
     }
 
-    [Fact]
-    public async Task VehicleRegistrationDoesNotRequireExpiry()
+    [Theory]
+    [InlineData(VehicleDocumentType.VehicleRegistration)]
+    [InlineData(VehicleDocumentType.Insurance)]
+    [InlineData(VehicleDocumentType.RoadworthinessCertificate)]
+    public async Task RequiredVehicleDocumentRequiresExpiry(
+        VehicleDocumentType documentType)
     {
         var (unitOfWork, ownerId, vehicle) = Context();
 
-        var result = await new VehicleDocumentService(unitOfWork)
+        var exception = await Assert.ThrowsAsync<ValidationException>(() =>
+            DocumentService(unitOfWork).UploadAsync(
+                vehicle.Id,
+                ownerId,
+                documentType,
+                null,
+                "https://files.test/document.pdf"));
+
+        Assert.Equal(
+            $"Expiry date is required for {documentType}.",
+            exception.Message);
+    }
+
+    [Theory]
+    [InlineData(VehicleDocumentType.VehicleRegistration)]
+    [InlineData(VehicleDocumentType.Insurance)]
+    [InlineData(VehicleDocumentType.RoadworthinessCertificate)]
+    public async Task ConfiguredSixMonthMinimumIsEnforced(
+        VehicleDocumentType documentType)
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+
+        var exception = await Assert.ThrowsAsync<ValidationException>(() =>
+            DocumentService(unitOfWork, 6).UploadAsync(
+                vehicle.Id,
+                ownerId,
+                documentType,
+                DateTime.UtcNow.Date.AddMonths(6).AddDays(-1),
+                "https://files.test/document.pdf"));
+
+        Assert.Equal(
+            $"{documentType} must have at least 6 months remaining validity.",
+            exception.Message);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task RequiredVehicleDocumentWithAtLeastSixMonthsValidityIsAccepted(
+        int additionalMonths)
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        var expiryDate = DateTime.UtcNow.Date.AddMonths(
+            6 + additionalMonths);
+
+        var result = await DocumentService(unitOfWork, 6)
             .UploadAsync(
                 vehicle.Id,
                 ownerId,
                 VehicleDocumentType.VehicleRegistration,
-                null,
+                expiryDate,
                 "https://files.test/registration.pdf");
 
-        Assert.Null(result.ExpiryDate);
+        Assert.Equal(expiryDate, result.ExpiryDate);
+    }
+
+    [Fact]
+    public async Task ConfiguredTwoMonthMinimumChangesValidityValidation()
+    {
+        var (unitOfWork, ownerId, vehicle) = Context();
+        var service = DocumentService(unitOfWork, 2);
+
+        var rejected = await Assert.ThrowsAsync<ValidationException>(() =>
+            service.UploadAsync(
+                vehicle.Id,
+                ownerId,
+                VehicleDocumentType.Insurance,
+                DateTime.UtcNow.Date.AddMonths(2).AddDays(-1),
+                "https://files.test/insurance.pdf"));
+        var accepted = await service.UploadAsync(
+            vehicle.Id,
+            ownerId,
+            VehicleDocumentType.Insurance,
+            DateTime.UtcNow.Date.AddMonths(2),
+            "https://files.test/insurance.pdf");
+
+        Assert.Equal(
+            "Insurance must have at least 2 months remaining validity.",
+            rejected.Message);
+        Assert.Equal(
+            DateTime.UtcNow.Date.AddMonths(2),
+            accepted.ExpiryDate);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void InvalidMinimumValidityMonthsFailsOptionsValidation(
+        int minimumValidityMonths)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [$"{VehicleDocumentSettings.SectionName}:MinimumValidityMonths"] =
+                    minimumValidityMonths.ToString()
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services
+            .AddOptions<VehicleDocumentSettings>()
+            .Bind(configuration.GetSection(
+                VehicleDocumentSettings.SectionName))
+            .Validate(
+                VehicleDocumentSettings.IsValid,
+                VehicleDocumentSettings.ValidationError)
+            .ValidateOnStart();
+        using var provider = services.BuildServiceProvider();
+
+        var exception = Assert.Throws<OptionsValidationException>(() =>
+            provider.GetRequiredService<
+                IOptions<VehicleDocumentSettings>>().Value);
+
+        Assert.Contains(
+            VehicleDocumentSettings.ValidationError,
+            exception.Failures);
     }
 
     [Fact]
@@ -597,6 +832,16 @@ public class VehicleOnboardingServiceTests
             null!,
             null!,
             NullLogger<VehicleService>.Instance);
+
+    private static VehicleDocumentService DocumentService(
+        TestUnitOfWork unitOfWork,
+        int minimumValidityMonths = 6) =>
+        new(
+            unitOfWork,
+            Options.Create(new VehicleDocumentSettings
+            {
+                MinimumValidityMonths = minimumValidityMonths
+            }));
 
     private static (TestUnitOfWork UnitOfWork, Guid OwnerId, Vehicle Vehicle) Context()
     {
@@ -657,13 +902,21 @@ public class VehicleOnboardingServiceTests
         vehicle.Colour = "Silver";
         vehicle.PassengerSeatCount = 4;
         vehicle.Capacity = 4;
-        unitOfWork.VehicleDocumentRepository.Items.Add(new VehicleDocument
+        foreach (var documentType in new[]
+                 {
+                     VehicleDocumentType.VehicleRegistration,
+                     VehicleDocumentType.Insurance,
+                     VehicleDocumentType.RoadworthinessCertificate
+                 })
         {
-            VehicleId = vehicle.Id,
-            DocumentType = VehicleDocumentType.VehicleRegistration,
-            DocumentUrl = "https://files.test/registration.pdf",
-            ExpiryDate = DateTime.UtcNow.AddYears(1)
-        });
+            unitOfWork.VehicleDocumentRepository.Items.Add(new VehicleDocument
+            {
+                VehicleId = vehicle.Id,
+                DocumentType = documentType,
+                DocumentUrl = $"https://files.test/{documentType}.pdf",
+                ExpiryDate = DateTime.UtcNow.AddYears(1)
+            });
+        }
         foreach (var imageType in Enum.GetValues<VehicleImageType>())
         {
             unitOfWork.VehicleImageRepository.Items.Add(new VehicleImage
@@ -673,5 +926,36 @@ public class VehicleOnboardingServiceTests
                 ImageUrl = $"https://files.test/{imageType}.jpg"
             });
         }
+    }
+
+    private static void SetRequiredDocumentReviewStatus(
+        TestUnitOfWork unitOfWork,
+        Guid vehicleId,
+        VehicleDocumentReviewStatus reviewStatus)
+    {
+        foreach (var document in unitOfWork.VehicleDocumentRepository.Items
+                     .Where(document => document.VehicleId == vehicleId))
+        {
+            document.ReviewStatus = reviewStatus;
+        }
+    }
+
+    private static VehicleDocument RequiredDocument(
+        TestUnitOfWork unitOfWork,
+        Guid vehicleId,
+        VehicleDocumentType documentType) =>
+        unitOfWork.VehicleDocumentRepository.Items.Single(document =>
+            document.VehicleId == vehicleId &&
+            document.DocumentType == documentType);
+
+    private static void AddApprovedKyc(
+        TestUnitOfWork unitOfWork,
+        Guid ownerId)
+    {
+        unitOfWork.KycVerificationRepository.Items.Add(new KycVerification
+        {
+            UserId = ownerId,
+            Status = KycStatus.Approved
+        });
     }
 }

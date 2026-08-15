@@ -48,6 +48,15 @@ builder.Services
     .ValidateOnStart();
 
 builder.Services
+    .AddOptions<VehicleDocumentSettings>()
+    .Bind(builder.Configuration.GetSection(
+        VehicleDocumentSettings.SectionName))
+    .Validate(
+        VehicleDocumentSettings.IsValid,
+        VehicleDocumentSettings.ValidationError)
+    .ValidateOnStart();
+
+builder.Services
     .AddOptions<EmailSettings>()
     .Bind(builder.Configuration.GetSection(EmailSettings.SectionName))
     .Validate(
