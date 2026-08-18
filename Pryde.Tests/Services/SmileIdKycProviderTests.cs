@@ -795,30 +795,88 @@ public class SmileIdKycProviderTests
     }
 
     [Fact]
-    public async Task SignedCallbackWithoutIdTypeStillFailsValidation()
+    public async Task NinV2CallbackWithoutIdTypeUsesSingleStoredOptionAndApproves()
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
             new KycProviderRequest(context.UserId))).Sessions);
-        var payload = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            signature = "valid",
-            timestamp = Now.ToString("O"),
-            result_code = "0810",
-            result_text = "Machine pass",
-            smile_job_id = "smile-internal",
-            country = "NG",
-            partner_params = new
-            {
-                job_id = session.JobId,
-                user_id = CallbackUsers[session.JobId],
-                flow = session.Flow,
-                role = RoleNames.Passenger
-            }
-        });
+        var attempt = CurrentAttempt(context, session);
+        attempt.IdentityOptions = "NIN_V2:biometric_kyc";
+
+        await context.Provider.ProcessCallbackAsync(Callback(
+            session,
+            "0810",
+            "Machine comparison passed",
+            omitIdType: true));
+        await context.Provider.ProcessCallbackAsync(Callback(
+            session,
+            "1012",
+            "ID authority returned a record",
+            timestamp: Now.AddSeconds(1).ToString("O"),
+            omitIdType: true));
+
+        Assert.Equal("NIN_V2", attempt.IdentityType);
+        Assert.Equal("biometric_kyc", attempt.VerificationMethod);
+        Assert.Equal(KycProviderStatus.Approved, attempt.Status);
+        Assert.Equal(KycStatus.Approved, CurrentKyc(context).Status);
+    }
+
+    [Fact]
+    public async Task NinV2RejectedCallbackWithoutIdTypePersistsRejection()
+    {
+        var context = Context(RoleNames.Passenger);
+        var session = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId))).Sessions);
+        var attempt = CurrentAttempt(context, session);
+        attempt.IdentityOptions = "NIN_V2:biometric_kyc";
+
+        await context.Provider.ProcessCallbackAsync(Callback(
+            session,
+            "0811",
+            "Identity verification failed",
+            omitIdType: true));
+
+        Assert.Equal("NIN_V2", attempt.IdentityType);
+        Assert.Equal("biometric_kyc", attempt.VerificationMethod);
+        Assert.Equal(KycProviderStatus.Rejected, attempt.Status);
+        Assert.Equal(KycStatus.Rejected, CurrentKyc(context).Status);
+    }
+
+    [Fact]
+    public async Task SuppliedWrongIdTypeStillFailsValidation()
+    {
+        var context = Context(RoleNames.Passenger);
+        var session = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId))).Sessions);
+        CurrentAttempt(context, session).IdentityOptions =
+            "NIN_V2:biometric_kyc";
 
         await Assert.ThrowsAsync<ValidationException>(() =>
-            context.Provider.ProcessCallbackAsync(payload));
+            context.Provider.ProcessCallbackAsync(Callback(
+                session,
+                "0810",
+                "Machine comparison passed",
+                idType: "VOTER_ID")));
+
+        Assert.Equal(KycStatus.Pending, CurrentKyc(context).Status);
+        Assert.Equal(
+            KycProviderStatus.Pending,
+            CurrentAttempt(context, session).Status);
+    }
+
+    [Fact]
+    public async Task CallbackWithoutIdTypeAndMultipleStoredOptionsIsRejectedAsAmbiguous()
+    {
+        var context = Context(RoleNames.Passenger);
+        var session = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId))).Sessions);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            context.Provider.ProcessCallbackAsync(Callback(
+                session,
+                "0810",
+                "Machine comparison passed",
+                omitIdType: true)));
 
         Assert.Equal(KycStatus.Pending, CurrentKyc(context).Status);
         Assert.Equal(
@@ -1113,7 +1171,8 @@ public class SmileIdKycProviderTests
         string? userId = null,
         string? role = null,
         string? idType = null,
-        bool legacyPartnerParams = false)
+        bool legacyPartnerParams = false,
+        bool omitIdType = false)
     {
         var partnerParams = new Dictionary<string, object?>
         {
@@ -1139,11 +1198,15 @@ public class SmileIdKycProviderTests
             [pascalCase ? "ResultText" : "result_text"] = resultText,
             [pascalCase ? "SmileJobID" : "smile_job_id"] = "smile-internal",
             [pascalCase ? "Country" : "country"] = "NG",
-            [pascalCase ? "IDType" : "id_type"] = idType ?? (session.Flow == SmileIdKycProvider.IdentityFlow
-                ? "VOTER_ID"
-                : "DRIVERS_LICENSE"),
             [pascalCase ? "PartnerParams" : "partner_params"] = partnerParams
         };
+        if (!omitIdType)
+        {
+            payload[pascalCase ? "IDType" : "id_type"] = idType ??
+                (session.Flow == SmileIdKycProvider.IdentityFlow
+                    ? "VOTER_ID"
+                    : "DRIVERS_LICENSE");
+        }
         return JsonSerializer.SerializeToUtf8Bytes(payload);
     }
 
