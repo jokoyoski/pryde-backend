@@ -16,7 +16,8 @@ public class KycController(
     IKycService kycService,
     IKycProviderService kycProviderService,
     IDojahKycService dojahKycService,
-    ISmileIdKycService smileIdKycService) : ControllerBase
+    ISmileIdKycService smileIdKycService,
+    ILogger<KycController> logger) : ControllerBase
 {
     [HttpGet("mine")]
     [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
@@ -80,6 +81,7 @@ public class KycController(
         CancellationToken cancellationToken)
     {
         const int maximumPayloadBytes = 1_048_576;
+
         if (Request.ContentLength > maximumPayloadBytes)
         {
             throw new Pryde.Domain.Common.Exceptions.ValidationException(
@@ -106,6 +108,7 @@ public class KycController(
         CancellationToken cancellationToken)
     {
         const int maximumPayloadBytes = 1_572_864;
+
         if (Request.ContentLength > maximumPayloadBytes)
         {
             throw new Pryde.Domain.Common.Exceptions.ValidationException(
@@ -116,7 +119,20 @@ public class KycController(
             Request.Body,
             maximumPayloadBytes,
             cancellationToken);
-        await smileIdKycService.ProcessCallbackAsync(payload, cancellationToken);
+
+        logger.LogInformation(
+            "Smile ID callback received. TraceId: {TraceId}; PayloadBytes: {PayloadBytes}.",
+            HttpContext.TraceIdentifier,
+            payload.Length);
+
+        await smileIdKycService.ProcessCallbackAsync(
+            payload,
+            cancellationToken);
+
+        logger.LogInformation(
+            "Smile ID callback processed successfully. TraceId: {TraceId}.",
+            HttpContext.TraceIdentifier);
+
         return Ok();
     }
 
@@ -130,7 +146,10 @@ public class KycController(
 
         while (true)
         {
-            var read = await body.ReadAsync(buffer, cancellationToken);
+            var read = await body.ReadAsync(
+                buffer,
+                cancellationToken);
+
             if (read == 0)
             {
                 return stream.ToArray();
@@ -142,17 +161,21 @@ public class KycController(
                     "Webhook payload is too large.");
             }
 
-            await stream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            await stream.WriteAsync(
+                buffer.AsMemory(0, read),
+                cancellationToken);
         }
     }
 
     [HttpPost("dojah/webhook/debug")]
     [AllowAnonymous]
-    public IActionResult DebugWebhook([FromBody] JsonElement payload)
+    public IActionResult DebugWebhook(
+        [FromBody] JsonElement payload)
     {
         return Ok(payload);
     }
 
     private Guid GetUserId() =>
-        Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        Guid.Parse(
+            User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }
