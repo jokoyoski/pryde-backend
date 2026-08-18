@@ -958,7 +958,7 @@ public class SmileIdKycProviderTests
             ["SmileId:RedirectUrl"] = "https://app.example.test/onboarding/kyc",
             ["SmileId:CompanyName"] = "Pryde",
             ["SmileId:DataPrivacyPolicyUrl"] = "https://example.test/privacy",
-            ["SmileId:PassengerIdentityOptions:0:IdType"] = "NIN_SLIP",
+            ["SmileId:PassengerIdentityOptions:0:IdType"] = "NIN_V2",
             ["SmileId:PassengerIdentityOptions:0:VerificationMethod"] = "biometric_kyc",
             ["SmileId:DriverIdentityOptions:0:IdType"] = "DRIVERS_LICENSE",
             ["SmileId:DriverIdentityOptions:0:VerificationMethod"] = "doc_verification"
@@ -1090,7 +1090,7 @@ public class SmileIdKycProviderTests
         MaximumCallbackAgeMinutes = 5,
         PassengerIdentityOptions =
         [
-            new() { IdType = "NIN_SLIP", VerificationMethod = "biometric_kyc", Enabled = false },
+            new() { IdType = "NIN_V2", VerificationMethod = "biometric_kyc", Enabled = false },
             new() { IdType = "VOTER_ID", VerificationMethod = "biometric_kyc" },
             new() { IdType = "BVN", VerificationMethod = "biometric_kyc", Enabled = false },
             new() { IdType = "PASSPORT", VerificationMethod = "doc_verification" }
