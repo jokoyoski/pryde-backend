@@ -957,7 +957,31 @@ public sealed class SmileIdKycProvider(
         KycVerificationAttempt attempt,
         string? idType)
     {
-        var requiredIdType = Required(idType, "IDType/id_type");
+        var configuredOptions = (attempt.IdentityOptions ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(value => value.Split(':', 2, StringSplitOptions.TrimEntries))
+            .Where(parts => parts.Length == 2 &&
+                            !string.IsNullOrWhiteSpace(parts[0]) &&
+                            !string.IsNullOrWhiteSpace(parts[1]))
+            .Select(parts => new SmileIdIdentityOption
+            {
+                IdType = parts[0],
+                VerificationMethod = parts[1]
+            })
+            .ToList();
+
+        if (string.IsNullOrWhiteSpace(idType))
+        {
+            if (configuredOptions.Count == 1)
+            {
+                return configuredOptions[0];
+            }
+
+            throw new ValidationException(
+                "Smile ID result ID type cannot be determined unambiguously from the configured Pryde flow.");
+        }
+
+        var requiredIdType = idType.Trim();
         if (string.IsNullOrWhiteSpace(attempt.IdentityOptions))
         {
             // Compatibility for hosted jobs issued before option snapshots were persisted.
@@ -983,15 +1007,7 @@ public sealed class SmileIdKycProvider(
             }
         }
 
-        var configured = (attempt.IdentityOptions ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(value => value.Split(':', 2, StringSplitOptions.TrimEntries))
-            .Where(parts => parts.Length == 2)
-            .Select(parts => new SmileIdIdentityOption
-            {
-                IdType = parts[0],
-                VerificationMethod = parts[1]
-            })
+        var configured = configuredOptions
             .SingleOrDefault(option => string.Equals(
                 option.IdType,
                 requiredIdType,
