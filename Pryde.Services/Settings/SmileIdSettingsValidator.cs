@@ -82,7 +82,7 @@ public sealed class SmileIdSettingsValidator(IOptions<KycSettings> kycOptions)
     private static readonly HashSet<string> PassengerCombinations =
         new(StringComparer.Ordinal)
         {
-            "NIN_SLIP|biometric_kyc",
+            "NIN_V2|biometric_kyc",
             "VOTER_ID|biometric_kyc",
             "BVN|biometric_kyc",
             "PASSPORT|doc_verification"

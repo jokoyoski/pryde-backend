@@ -6,6 +6,7 @@ using Pryde.Domain.Constants;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
+using Pryde.Services.Notifications;
 using Pryde.Services.Notifications.Interface;
 using Pryde.Services.Providers.Dojah;
 using Pryde.Services.Security.Interface;
@@ -278,7 +279,7 @@ public class AdminPortalService(
         Guid driverId,
         CancellationToken cancellationToken = default)
     {
-        var response = await SetDriverStatusAsync(
+        var result = await SetDriverStatusAsync(
             driverId,
             UserStatus.Active,
             cancellationToken);
@@ -286,14 +287,23 @@ public class AdminPortalService(
             driverId,
             true,
             cancellationToken);
-        return response;
+        if (result.StatusChanged)
+        {
+            await emailService.SendAsync(
+                result.Response.Email,
+                "Your Pryde driver onboarding is approved",
+                PrydeEmailTemplates.DriverOnboardingApproved(
+                    result.Response.FirstName),
+                cancellationToken);
+        }
+        return result.Response;
     }
 
     public async Task<AdminDriverDetailResponseDto> DeactivateDriverAsync(
         Guid driverId,
         CancellationToken cancellationToken = default)
     {
-        var response = await SetDriverStatusAsync(
+        var result = await SetDriverStatusAsync(
             driverId,
             UserStatus.Deactivated,
             cancellationToken);
@@ -301,7 +311,16 @@ public class AdminPortalService(
             driverId,
             false,
             cancellationToken);
-        return response;
+        if (result.StatusChanged)
+        {
+            await emailService.SendAsync(
+                result.Response.Email,
+                "Your Pryde driver account was deactivated",
+                PrydeEmailTemplates.DriverAccountDeactivated(
+                    result.Response.FirstName),
+                cancellationToken);
+        }
+        return result.Response;
     }
 
     private Task NotifyDriverReviewAsync(
@@ -455,11 +474,22 @@ public class AdminPortalService(
         return MapUserDetail(user);
     }
 
-    private async Task<AdminDriverDetailResponseDto> SetDriverStatusAsync(
+    private async Task<(
+        AdminDriverDetailResponseDto Response,
+        bool StatusChanged)> SetDriverStatusAsync(
         Guid driverId, UserStatus status, CancellationToken cancellationToken)
     {
-        await SetCustomerStatusAsync(driverId, status, true, cancellationToken);
-        return await GetDriverAsync(driverId, cancellationToken);
+        var user = await GetCustomerAsync(driverId, true, cancellationToken);
+        var target = await unitOfWork.Users.GetByIdAsync(driverId, cancellationToken)
+            ?? throw new NotFoundException(nameof(User), driverId);
+        var statusChanged = target.Status != status;
+        target.Status = status;
+        unitOfWork.Users.Update(target);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        user.Status = status;
+        return (
+            await GetDriverAsync(driverId, cancellationToken),
+            statusChanged);
     }
 
     private async Task<User> GetStaffEntityAsync(Guid staffId, CancellationToken cancellationToken)

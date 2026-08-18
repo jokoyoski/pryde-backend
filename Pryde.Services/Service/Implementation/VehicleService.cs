@@ -9,6 +9,8 @@ using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
+using Pryde.Services.Notifications;
+using Pryde.Services.Notifications.Interface;
 using Pryde.Services.Service.Interface;
 using Pryde.Services.Settings;
 using Pryde.Services.Storage.Enums;
@@ -22,7 +24,8 @@ public class VehicleService(
     IFileStorageService fileStorageService,
     IOptions<VehicleUploadSettings> vehicleUploadSettings,
     ILogger<VehicleService> logger,
-    INotificationService notificationService) : IVehicleService
+    INotificationService notificationService,
+    IEmailService emailService) : IVehicleService
 {
     private static readonly HashSet<int> AllowedPassengerSeatCounts = [2, 4, 5, 6, 7];
     private static readonly VehicleDocumentType[] RequiredDocumentTypes =
@@ -46,8 +49,19 @@ public class VehicleService(
             fileStorageService,
             vehicleUploadSettings,
             logger,
-            new NotificationService(unitOfWork))
+            new NotificationService(unitOfWork),
+            new NoopEmailService())
     {
+    }
+
+    private sealed class NoopEmailService : IEmailService
+    {
+        public Task SendAsync(
+            string toEmail,
+            string subject,
+            string htmlBody,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
     public async Task<VehicleResponseDto> CreateAsync(
@@ -672,10 +686,25 @@ public class VehicleService(
                 "Only a driver application pending review can be rejected.");
         }
 
-        return await RejectAsync(
+        var response = await RejectAsync(
             pendingVehicle.Id,
             reason,
             cancellationToken);
+        var user = await unitOfWork.Users.GetByIdAsync(
+            driverId,
+            cancellationToken)
+            ?? throw new NotFoundException(nameof(User), driverId);
+        var profile = await unitOfWork.Profiles.GetByUserIdAsync(
+            driverId,
+            cancellationToken);
+        await emailService.SendAsync(
+            user.Email,
+            "Your Pryde driver onboarding requires attention",
+            PrydeEmailTemplates.DriverOnboardingRejected(
+                profile?.FirstName,
+                response.RejectionReason!),
+            cancellationToken);
+        return response;
     }
 
     private async Task EnsureDriverAsync(
