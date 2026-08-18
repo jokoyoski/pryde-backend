@@ -7,6 +7,7 @@ using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
+using Pryde.Services.Notifications;
 using Pryde.Services.Notifications.Interface;
 using Pryde.Services.Security.Implementation;
 using Pryde.Services.Security.Interface;
@@ -549,7 +550,8 @@ public class AuthService(
                 return (
                     Succeeded: false,
                     UserId: Guid.Empty,
-                    Status: UserStatus.Pending);
+                    Status: UserStatus.Pending,
+                    EmailVerifiedNow: false);
             }
 
             if (user.IsEmailVerified)
@@ -557,7 +559,8 @@ public class AuthService(
                 return (
                     Succeeded: true,
                     UserId: user.Id,
-                    Status: user.Status);
+                    Status: user.Status,
+                    EmailVerifiedNow: false);
             }
 
             var verificationCode = await unitOfWork.VerificationCodes.GetLatestActiveAsync(
@@ -575,7 +578,8 @@ public class AuthService(
                 return (
                     Succeeded: false,
                     UserId: user.Id,
-                    Status: user.Status);
+                    Status: user.Status,
+                    EmailVerifiedNow: false);
             }
 
             if (!VerificationCodeSecurity.Matches(
@@ -593,7 +597,8 @@ public class AuthService(
                 return (
                     Succeeded: false,
                     UserId: user.Id,
-                    Status: user.Status);
+                    Status: user.Status,
+                    EmailVerifiedNow: false);
             }
 
             verificationCode.ConsumedAt = now;
@@ -604,11 +609,21 @@ public class AuthService(
             return (
                 Succeeded: true,
                 UserId: user.Id,
-                Status: user.Status);
+                Status: user.Status,
+                EmailVerifiedNow: true);
         }, cancellationToken);
 
         if (!result.Succeeded)
             throw new ValidationException("Invalid or expired verification code.");
+
+        if (result.EmailVerifiedNow)
+        {
+            await emailService.SendAsync(
+                normalizedEmail,
+                "Your Pryde email is verified",
+                PrydeEmailTemplates.EmailVerificationSucceeded(null),
+                cancellationToken);
+        }
 
         var response = await GetVerificationStatusAsync(
             result.UserId,

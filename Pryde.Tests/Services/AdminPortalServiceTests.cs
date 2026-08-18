@@ -306,11 +306,12 @@ public class AdminPortalServiceTests
             Role = role
         });
         unitOfWork.UserRepository.Items.Add(driver);
-        var service = CreateService(
-            unitOfWork,
-            new FakeEmailService());
+        var email = new FakeEmailService();
+        var service = CreateService(unitOfWork, email);
 
         await service.ActivateDriverAsync(driver.Id);
+        await service.ActivateDriverAsync(driver.Id);
+        await service.DeactivateDriverAsync(driver.Id);
         await service.DeactivateDriverAsync(driver.Id);
 
         Assert.Contains(
@@ -327,6 +328,22 @@ public class AdminPortalServiceTests
                 notification.Message == "Your driver account was deactivated." &&
                 notification.DeduplicationKey ==
                     $"driver-deactivated:{driver.Id}");
+        Assert.Single(
+            email.Messages,
+            message => message.Subject ==
+                "Your Pryde driver onboarding is approved");
+        Assert.Single(
+            email.Messages,
+            message => message.Subject ==
+                "Your Pryde driver account was deactivated");
+        Assert.Single(
+            unitOfWork.NotificationRepository.Items,
+            notification => notification.Type ==
+                NotificationType.DriverApproved);
+        Assert.Single(
+            unitOfWork.NotificationRepository.Items,
+            notification => notification.Type ==
+                NotificationType.DriverDeactivated);
     }
 
     private static AdminPortalService CreateService(

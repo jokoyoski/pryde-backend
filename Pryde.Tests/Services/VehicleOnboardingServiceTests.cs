@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Pryde.Persistence.Context;
+using Pryde.Services.Notifications.Interface;
 using Pryde.Services.Service.Implementation;
 using Pryde.Services.Settings;
 using Pryde.Tests.TestInfrastructure;
@@ -523,7 +524,8 @@ public class VehicleOnboardingServiceTests
     {
         var (unitOfWork, ownerId, vehicle) = Context();
         vehicle.OnboardingStatus = VehicleOnboardingStatus.PendingReview;
-        var service = Service(unitOfWork);
+        var email = new CapturingEmailService();
+        var service = Service(unitOfWork, email);
 
         var first = await service.RejectDriverApplicationAsync(
             ownerId,
@@ -539,6 +541,11 @@ public class VehicleOnboardingServiceTests
             service.RejectDriverApplicationAsync(
                 ownerId,
                 "  Incorrect registration  "));
+        var rejectionEmail = Assert.Single(email.Messages);
+        Assert.Equal(
+            "Your Pryde driver onboarding requires attention",
+            rejectionEmail.Subject);
+        Assert.Contains("Incorrect registration", rejectionEmail.Body);
     }
 
     [Fact]
@@ -826,12 +833,31 @@ public class VehicleOnboardingServiceTests
         Assert.Equal(4, result.PassengerSeatCount);
     }
 
-    private static VehicleService Service(TestUnitOfWork unitOfWork) =>
+    private static VehicleService Service(
+        TestUnitOfWork unitOfWork,
+        IEmailService? emailService = null) =>
         new(
             unitOfWork,
             null!,
             null!,
-            NullLogger<VehicleService>.Instance);
+            NullLogger<VehicleService>.Instance,
+            new NotificationService(unitOfWork),
+            emailService ?? new CapturingEmailService());
+
+    private sealed class CapturingEmailService : IEmailService
+    {
+        public List<(string Subject, string Body)> Messages { get; } = [];
+
+        public Task SendAsync(
+            string toEmail,
+            string subject,
+            string htmlBody,
+            CancellationToken cancellationToken = default)
+        {
+            Messages.Add((subject, htmlBody));
+            return Task.CompletedTask;
+        }
+    }
 
     private static VehicleDocumentService DocumentService(
         TestUnitOfWork unitOfWork,

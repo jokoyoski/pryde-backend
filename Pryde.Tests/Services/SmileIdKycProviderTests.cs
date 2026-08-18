@@ -15,6 +15,7 @@ using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.DependencyInjection;
+using Pryde.Services.Notifications.Interface;
 using Pryde.Services.Providers.Kyc;
 using Pryde.Services.Providers.SmileId;
 using Pryde.Services.Service.Implementation;
@@ -654,6 +655,35 @@ public class SmileIdKycProviderTests
         Assert.Equal(
             $"{SmileIdKycProvider.DriverLicenseFlow}:Document Verified",
             kyc.ProviderStatus);
+        Assert.Single(
+            context.Email.Messages,
+            message => message.Subject ==
+                "Your Pryde identity verification is approved");
+    }
+
+    [Fact]
+    public async Task RejectedCallbackSendsReasonEmailOnceAndKeepsNotification()
+    {
+        var context = Context(RoleNames.Driver);
+        var licence = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId))).Sessions);
+        var payload = Callback(
+            licence,
+            "0811",
+            "Driver licence could not be verified");
+
+        await context.Provider.ProcessCallbackAsync(payload);
+        await context.Provider.ProcessCallbackAsync(payload);
+
+        Assert.Equal(KycStatus.Rejected, CurrentKyc(context).Status);
+        var email = Assert.Single(context.Email.Messages);
+        Assert.Equal(
+            "Your Pryde identity verification was unsuccessful",
+            email.Subject);
+        Assert.Contains("Driver licence could not be verified", email.Body);
+        Assert.Equal(
+            NotificationType.KycRejected,
+            Assert.Single(context.UnitOfWork.NotificationRepository.Items).Type);
     }
 
     [Fact]
@@ -937,6 +967,7 @@ public class SmileIdKycProviderTests
         builder.Services.AddSingleton<IUnitOfWork>(new TestUnitOfWork());
         builder.Services.AddSingleton<INotificationService>(serviceProvider =>
             new NotificationService(serviceProvider.GetRequiredService<IUnitOfWork>()));
+        builder.Services.AddSingleton<IEmailService, CapturingEmailService>();
         builder.Services.AddDojahIntegration(new ConfigurationBuilder()
             .AddInMemoryCollection(values)
             .Build());
@@ -1015,12 +1046,19 @@ public class SmileIdKycProviderTests
     {
         var unitOfWork = new TestUnitOfWork();
         var userId = Guid.NewGuid();
+        unitOfWork.UserRepository.Items.Add(new User
+        {
+            Id = userId,
+            Email = "smile-user@test.local",
+            PhoneNumber = "08000000000"
+        });
         unitOfWork.UserRoleRepository.Items.Add(new UserRole
         {
             UserId = userId,
             Role = new Role { Name = role }
         });
         var apiClient = new StubSmileIdApiClient();
+        var email = new CapturingEmailService();
         var settings = Settings(environment);
         var provider = new SmileIdKycProvider(
             unitOfWork,
@@ -1028,8 +1066,14 @@ public class SmileIdKycProviderTests
             Options.Create(settings),
             NullLogger<SmileIdKycProvider>.Instance,
             new NotificationService(unitOfWork),
+            email,
             new FixedTimeProvider(Now));
-        return new TestContext(unitOfWork, provider, apiClient, userId);
+        return new TestContext(
+            unitOfWork,
+            provider,
+            apiClient,
+            email,
+            userId);
     }
 
     private static SmileIdSettings Settings(string environment = "Sandbox") => new()
@@ -1137,7 +1181,23 @@ public class SmileIdKycProviderTests
         TestUnitOfWork UnitOfWork,
         SmileIdKycProvider Provider,
         StubSmileIdApiClient ApiClient,
+        CapturingEmailService Email,
         Guid UserId);
+
+    private sealed class CapturingEmailService : IEmailService
+    {
+        public List<(string ToEmail, string Subject, string Body)> Messages { get; } = [];
+
+        public Task SendAsync(
+            string toEmail,
+            string subject,
+            string htmlBody,
+            CancellationToken cancellationToken = default)
+        {
+            Messages.Add((toEmail, subject, htmlBody));
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

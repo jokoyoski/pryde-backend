@@ -8,6 +8,8 @@ using Pryde.Domain.Constants;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
+using Pryde.Services.Notifications;
+using Pryde.Services.Notifications.Interface;
 using Pryde.Services.Providers.Kyc;
 using Pryde.Services.Providers.SmileId;
 using Pryde.Services.Service.Interface;
@@ -21,6 +23,7 @@ public sealed class SmileIdKycProvider(
     IOptions<SmileIdSettings> options,
     ILogger<SmileIdKycProvider> logger,
     INotificationService notificationService,
+    IEmailService emailService,
     TimeProvider? timeProvider = null) : IKycProvider, ISmileIdKycService
 {
     public const string ProviderName = "SmileId";
@@ -55,6 +58,24 @@ public sealed class SmileIdKycProvider(
 
     private readonly SmileIdSettings _settings = options.Value;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
+    public SmileIdKycProvider(
+        IUnitOfWork unitOfWork,
+        ISmileIdApiClient apiClient,
+        IOptions<SmileIdSettings> options,
+        ILogger<SmileIdKycProvider> logger,
+        INotificationService notificationService,
+        TimeProvider? timeProvider = null)
+        : this(
+            unitOfWork,
+            apiClient,
+            options,
+            logger,
+            notificationService,
+            new NoopEmailService(),
+            timeProvider)
+    {
+    }
 
     public string Name => ProviderName;
 
@@ -563,7 +584,7 @@ public sealed class SmileIdKycProvider(
         var smileUserId = Required(partnerParams.UserId, "user_id");
         var code = Required(resultCode, "ResultCode/result_code");
 
-        await unitOfWork.ExecuteInTransactionOnceAsync(async transactionToken =>
+        var emailEvent = await unitOfWork.ExecuteInTransactionOnceAsync(async transactionToken =>
         {
             var attempt = await unitOfWork.KycVerificationAttempts.GetByCorrelationReferenceAsync(
                 ProviderName,
@@ -622,7 +643,7 @@ public sealed class SmileIdKycProvider(
                     logger.LogInformation(
                         "Older Smile ID callback ignored for job {JobId}.",
                         jobId);
-                    return true;
+                    return null;
                 }
 
                 if (eventTimestamp.Value == storedTimestamp)
@@ -635,7 +656,7 @@ public sealed class SmileIdKycProvider(
                         logger.LogInformation(
                             "Duplicate Smile ID callback ignored for job {JobId}.",
                             jobId);
-                        return true;
+                        return null;
                     }
 
                     throw new UnauthorizedException(
@@ -659,7 +680,7 @@ public sealed class SmileIdKycProvider(
                 (string.IsNullOrWhiteSpace(smileJobId) || attempt.ProviderReference == smileJobId))
             {
                 logger.LogInformation("Duplicate Smile ID callback ignored for job {JobId}.", jobId);
-                return true;
+                return null;
             }
 
             attempt.RawStatus = resultText ?? code;
@@ -684,6 +705,7 @@ public sealed class SmileIdKycProvider(
             await RecalculateKycAsync(kyc, transactionToken);
             await unitOfWork.SaveChangesAsync(transactionToken);
 
+            KycEmailEvent? transitionEmail = null;
             if (previousKycStatus != kyc.Status &&
                 kyc.Status is KycStatus.Approved or KycStatus.Rejected)
             {
@@ -710,9 +732,50 @@ public sealed class SmileIdKycProvider(
                             : $"kyc-rejected:{kyc.Id}"
                     },
                     transactionToken);
+                transitionEmail = new KycEmailEvent(
+                    kyc.UserId,
+                    isApproved,
+                    kyc.RejectionReason);
             }
-            return true;
+            return transitionEmail;
         }, cancellationToken);
+
+        if (emailEvent is null)
+            return;
+
+        var user = await unitOfWork.Users.GetByIdAsync(
+            emailEvent.UserId,
+            cancellationToken)
+            ?? throw new NotFoundException(nameof(User), emailEvent.UserId);
+        var profile = await unitOfWork.Profiles.GetByUserIdAsync(
+            emailEvent.UserId,
+            cancellationToken);
+        await emailService.SendAsync(
+            user.Email,
+            emailEvent.Approved
+                ? "Your Pryde identity verification is approved"
+                : "Your Pryde identity verification was unsuccessful",
+            emailEvent.Approved
+                ? PrydeEmailTemplates.KycApproved(profile?.FirstName)
+                : PrydeEmailTemplates.KycRejected(
+                    profile?.FirstName,
+                    emailEvent.RejectionReason),
+            cancellationToken);
+    }
+
+    private sealed record KycEmailEvent(
+        Guid UserId,
+        bool Approved,
+        string? RejectionReason);
+
+    private sealed class NoopEmailService : IEmailService
+    {
+        public Task SendAsync(
+            string toEmail,
+            string subject,
+            string htmlBody,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
     private void ApplyResult(

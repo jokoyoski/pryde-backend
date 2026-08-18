@@ -66,6 +66,26 @@ public class EmailVerificationServiceTests
     }
 
     [Fact]
+    public async Task SuccessfulVerificationSendsWelcomeEmailOnce()
+    {
+        var context = TestContextWithUser();
+        await context.Service.ResendEmailVerificationAsync(
+            Resend(context.User.Email));
+        var code = context.Email.Messages.Single().Code;
+
+        await context.Service.VerifyEmailAsync(
+            Verify(context.User.Email, code));
+        await context.Service.VerifyEmailAsync(
+            Verify(context.User.Email, code));
+
+        Assert.Equal(2, context.Email.Messages.Count);
+        var welcome = context.Email.Messages.Single(message =>
+            message.Subject == "Your Pryde email is verified");
+        Assert.Equal(context.User.Email, welcome.ToEmail);
+        Assert.Contains("Your email is verified", welcome.HtmlBody);
+    }
+
+    [Fact]
     public async Task UnverifiedLoginIsForbiddenAndDoesNotIssueTokens()
     {
         var context = TestContextWithUser();
