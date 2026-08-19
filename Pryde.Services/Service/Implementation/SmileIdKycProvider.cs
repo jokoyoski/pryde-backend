@@ -355,20 +355,31 @@ public sealed class SmileIdKycProvider(
         }, cancellationToken);
     }
 
-    private async Task RecoverPendingAttemptsAsync(Guid userId, CancellationToken cancellationToken)
+    private async Task RecoverPendingAttemptsAsync(
+     Guid userId,
+     CancellationToken cancellationToken)
     {
-        var kyc = await unitOfWork.KycVerifications.GetByUserIdAsync(userId, cancellationToken);
+        var kyc = await unitOfWork.KycVerifications.GetByUserIdAsync(
+            userId,
+            cancellationToken);
+
         if (kyc is null ||
-            !string.Equals(kyc.ProviderName, ProviderName, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(
+                kyc.ProviderName,
+                ProviderName,
+                StringComparison.OrdinalIgnoreCase) ||
             string.IsNullOrWhiteSpace(kyc.ProviderReference) ||
             kyc.Status is KycStatus.Approved or KycStatus.Rejected)
         {
             return;
         }
 
-        foreach (var attempt in await GetCurrentAttemptsAsync(kyc, cancellationToken))
+        foreach (var attempt in await GetCurrentAttemptsAsync(
+                     kyc,
+                     cancellationToken))
         {
-            if (attempt.Status is KycProviderStatus.Approved or KycProviderStatus.Rejected)
+            if (attempt.Status is KycProviderStatus.Approved or
+                KycProviderStatus.Rejected)
             {
                 continue;
             }
@@ -393,16 +404,19 @@ public sealed class SmileIdKycProvider(
                     "The legacy Smile ID attempt is missing identity metadata.",
                     LegacyIdentityDataMissingStatus,
                     cancellationToken);
+
                 return;
             }
 
-            var unavailableHostedLink = IsCurrentHostedFlow(attempt.FlowType) &&
-                                        attempt.Status == KycProviderStatus.Pending &&
-                                        string.Equals(
-                                            attempt.RawStatus,
-                                            "LinkCreated",
-                                            StringComparison.OrdinalIgnoreCase) &&
-                                        !HasActiveHostedLink(attempt);
+            var unavailableHostedLink =
+                IsCurrentHostedFlow(attempt.FlowType) &&
+                attempt.Status == KycProviderStatus.Pending &&
+                string.Equals(
+                    attempt.RawStatus,
+                    "LinkCreated",
+                    StringComparison.OrdinalIgnoreCase) &&
+                !HasActiveHostedLink(attempt);
+
             if (IsCurrentHostedFlow(attempt.FlowType) &&
                 attempt.Status == KycProviderStatus.Pending &&
                 string.Equals(
@@ -415,6 +429,7 @@ public sealed class SmileIdKycProvider(
             }
 
             SmileIdJobStatusResponse status;
+
             try
             {
                 status = await apiClient.GetJobStatusAsync(
@@ -431,8 +446,10 @@ public sealed class SmileIdKycProvider(
                     "The stored Smile ID hosted link is expired or unusable.",
                     "HostedLinkUnavailable",
                     cancellationToken);
+
                 return;
             }
+
             if (status.Code != "2302")
             {
                 if (unavailableHostedLink)
@@ -442,64 +459,75 @@ public sealed class SmileIdKycProvider(
                         "The stored Smile ID hosted link is expired or unusable.",
                         "HostedLinkUnavailable",
                         cancellationToken);
+
                     return;
                 }
+
                 continue;
             }
 
             var results = (status.History ?? [])
-                .Where(x => string.Equals(
-                    (x.PartnerParams ?? x.PartnerParamsSnakeCase)?.JobId,
-                    attempt.CorrelationReference,
-                    StringComparison.Ordinal))
+                .Where(x =>
+                    string.Equals(
+                        (x.PartnerParams ??
+                         x.PartnerParamsSnakeCase)?.JobId,
+                        attempt.CorrelationReference,
+                        StringComparison.Ordinal))
                 .ToList();
-            if (results.Count == 0 && status.Result is not null)
+
+            if (results.Count == 0 &&
+                status.Result is not null)
             {
                 results.Add(status.Result);
             }
 
             var recoveredResult = false;
+
             foreach (var result in results)
             {
-                var partnerParams = result.PartnerParams ?? result.PartnerParamsSnakeCase;
-                var resultCode = result.ResultCode ?? result.ResultCodeSnakeCase;
-                if (partnerParams is null || string.IsNullOrWhiteSpace(resultCode))
+                var partnerParams =
+                    result.PartnerParams ??
+                    result.PartnerParamsSnakeCase;
+
+                var resultCode =
+                    result.ResultCode ??
+                    result.ResultCodeSnakeCase;
+
+                if (partnerParams is null ||
+                    string.IsNullOrWhiteSpace(resultCode))
                 {
                     continue;
                 }
 
-                var recoveredIdType = result.IdType ??
-                                      result.IdTypeSnakeCase;
-                if (string.IsNullOrWhiteSpace(recoveredIdType))
-                {
-                    await MarkRecoveryAttemptUnusableAsync(
-                        attempt.CorrelationReference,
-                        "The Smile ID recovery result did not identify the selected ID type.",
-                        LegacyIdentityDataMissingStatus,
-                        cancellationToken);
-                    return;
-                }
+                var recoveredIdType =
+                    result.IdType ??
+                    result.IdTypeSnakeCase;
 
                 await ProcessResultAsync(
                     partnerParams,
                     resultCode,
-                    result.ResultText ?? result.ResultTextSnakeCase,
-                    result.SmileJobId ?? result.SmileJobIdSnakeCase,
+                    result.ResultText ??
+                    result.ResultTextSnakeCase,
+                    result.SmileJobId ??
+                    result.SmileJobIdSnakeCase,
                     result.Country,
                     recoveredIdType,
                     null,
                     null,
                     cancellationToken);
+
                 recoveredResult = true;
             }
 
-            if (unavailableHostedLink && !recoveredResult)
+            if (unavailableHostedLink &&
+                !recoveredResult)
             {
                 await MarkRecoveryAttemptUnusableAsync(
                     attempt.CorrelationReference,
                     "The stored Smile ID hosted link is expired or unusable.",
                     "HostedLinkUnavailable",
                     cancellationToken);
+
                 return;
             }
         }
@@ -954,15 +982,16 @@ public sealed class SmileIdKycProvider(
             .ToList();
 
     private SmileIdIdentityOption GetConfiguredOption(
-        KycVerificationAttempt attempt,
-        string? idType)
+    KycVerificationAttempt attempt,
+    string? idType)
     {
         var configuredOptions = (attempt.IdentityOptions ?? string.Empty)
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(value => value.Split(':', 2, StringSplitOptions.TrimEntries))
-            .Where(parts => parts.Length == 2 &&
-                            !string.IsNullOrWhiteSpace(parts[0]) &&
-                            !string.IsNullOrWhiteSpace(parts[1]))
+            .Where(parts =>
+                parts.Length == 2 &&
+                !string.IsNullOrWhiteSpace(parts[0]) &&
+                !string.IsNullOrWhiteSpace(parts[1]))
             .Select(parts => new SmileIdIdentityOption
             {
                 IdType = parts[0],
@@ -970,54 +999,77 @@ public sealed class SmileIdKycProvider(
             })
             .ToList();
 
-        if (string.IsNullOrWhiteSpace(idType))
+        if (!string.IsNullOrWhiteSpace(idType))
         {
-            if (configuredOptions.Count == 1)
+            var requiredIdType = idType.Trim();
+
+            var configured = configuredOptions.SingleOrDefault(option =>
+                string.Equals(
+                    option.IdType,
+                    requiredIdType,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (configured is not null)
             {
-                return configuredOptions[0];
+                return configured;
             }
 
-            throw new ValidationException(
-                "Smile ID result ID type cannot be determined unambiguously from the configured Pryde flow.");
-        }
-
-        var requiredIdType = idType.Trim();
-        if (string.IsNullOrWhiteSpace(attempt.IdentityOptions))
-        {
-            // Compatibility for hosted jobs issued before option snapshots were persisted.
-            var legacyOption = IsIdentityFlow(attempt.FlowType)
-                ? new SmileIdIdentityOption
-                {
-                    IdType = "NIN_V2",
-                    VerificationMethod = "biometric_kyc"
-                }
-                : IsDriverLicenseFlow(attempt.FlowType)
+            if (string.IsNullOrWhiteSpace(attempt.IdentityOptions))
+            {
+                var legacyOption = IsIdentityFlow(attempt.FlowType)
                     ? new SmileIdIdentityOption
                     {
-                        IdType = DriverLicenceIdType,
-                        VerificationMethod = "doc_verification"
+                        IdType = "NIN_V2",
+                        VerificationMethod = "biometric_kyc"
                     }
-                    : null;
-            if (legacyOption is not null && string.Equals(
-                    legacyOption.IdType,
-                    requiredIdType,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return legacyOption;
-            }
-        }
+                    : IsDriverLicenseFlow(attempt.FlowType)
+                        ? new SmileIdIdentityOption
+                        {
+                            IdType = DriverLicenceIdType,
+                            VerificationMethod = "doc_verification"
+                        }
+                        : null;
 
-        var configured = configuredOptions
-            .SingleOrDefault(option => string.Equals(
-                option.IdType,
-                requiredIdType,
-                StringComparison.OrdinalIgnoreCase));
-        if (configured is null)
-        {
+                if (legacyOption is not null &&
+                    string.Equals(
+                        legacyOption.IdType,
+                        requiredIdType,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return legacyOption;
+                }
+            }
+
             throw new ValidationException(
                 "Smile ID result ID type does not match the configured Pryde flow.");
         }
-        return configured;
+
+        if (!string.IsNullOrWhiteSpace(attempt.IdentityType) &&
+            !string.IsNullOrWhiteSpace(attempt.VerificationMethod))
+        {
+            var storedOption = configuredOptions.SingleOrDefault(option =>
+                string.Equals(
+                    option.IdType,
+                    attempt.IdentityType,
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(
+                    option.VerificationMethod,
+                    attempt.VerificationMethod,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (storedOption is not null)
+            {
+                return storedOption;
+            }
+        }
+
+        if (configuredOptions.Count == 1)
+        {
+            return configuredOptions[0];
+        }
+
+        throw new ValidationException(
+            "Smile ID result ID type cannot be determined from the stored KYC attempt.");
     }
 
     private static string Required(string? value, string name) =>
