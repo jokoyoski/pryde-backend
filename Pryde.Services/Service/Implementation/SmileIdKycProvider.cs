@@ -112,15 +112,15 @@ public sealed class SmileIdKycProvider(
             ?? throw new ValidationException("Smile ID callback PartnerParams are required.");
 
         await ProcessResultAsync(
-            partnerParams,
-            callback.ResultCode ?? callback.ResultCodeSnakeCase,
-            callback.ResultText ?? callback.ResultTextSnakeCase,
-            callback.SmileJobId ?? callback.SmileJobIdSnakeCase,
-            callback.Country,
-            callback.IdType ?? callback.IdTypeSnakeCase,
-            eventTimestamp,
-            payloadHash,
-            cancellationToken);
+             partnerParams,
+             callback.ResultCode ?? callback.ResultCodeSnakeCase,
+             callback.ResultText ?? callback.ResultTextSnakeCase,
+             callback.SmileJobId ?? callback.SmileJobIdSnakeCase,
+             callback.Country ?? callback.CountrySnakeCase,
+             callback.IdType ?? callback.IdTypeSnakeCase,
+             eventTimestamp,
+             payloadHash,
+             cancellationToken);
     }
 
     private async Task<KycProviderResult> CreateOrReturnSessionAsync(
@@ -531,8 +531,7 @@ public sealed class SmileIdKycProvider(
                     result.ResultTextSnakeCase,
                     result.SmileJobId ??
                     result.SmileJobIdSnakeCase,
-                    result.Country,
-                    recoveredIdType,
+                    result.Country ?? result.CountrySnakeCase, recoveredIdType,
                     null,
                     null,
                     cancellationToken);
@@ -670,7 +669,8 @@ public sealed class SmileIdKycProvider(
             }
             var configuredOption = GetConfiguredOption(attempt, idType);
 
-            if (!string.Equals(country?.Trim(), Country, StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(country) &&
+                !string.Equals(country.Trim(),Country,StringComparison.OrdinalIgnoreCase))
             {
                 throw new ValidationException(
                     "Smile ID result country does not match the required Pryde flow.");
