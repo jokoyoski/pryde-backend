@@ -1,7 +1,9 @@
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Pryde.Api.Controllers.Driver.Authorization;
+using Pryde.Services.Providers.Kyc;
 using Pryde.Services.Service.Interface;
 using System.Security.Claims;
 using System.Text.Json;
@@ -34,10 +36,13 @@ public class KycController(
     [HttpPost("session")]
     [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> CreateSession(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)]
+        KycSessionRequest? request,
         CancellationToken cancellationToken)
     {
         return Ok(await kycProviderService.CreateSessionAsync(
             GetUserId(),
+            request?.SelectedIdType,
             cancellationToken));
     }
 
