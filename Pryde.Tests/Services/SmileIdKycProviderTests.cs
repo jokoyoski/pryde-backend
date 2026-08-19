@@ -36,7 +36,7 @@ public class SmileIdKycProviderTests
         var context = Context(RoleNames.Passenger);
 
         var result = await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId));
+            new KycProviderRequest(context.UserId, "VOTER_ID"));
 
         Assert.Equal("SmileId", result.Provider);
         Assert.Equal("HostedRedirect", result.IntegrationType);
@@ -51,39 +51,65 @@ public class SmileIdKycProviderTests
         var request = Assert.Single(context.ApiClient.LinkRequests);
         Assert.Equal($"pryde-{context.UserId:N}", request.UserId);
         Assert.Equal(RoleNames.Passenger, request.Role);
-        Assert.Collection(
-            request.IdentityOptions,
-            option =>
-            {
-                Assert.Equal("VOTER_ID", option.IdType);
-                Assert.Equal("biometric_kyc", option.VerificationMethod);
-            },
-            option =>
-            {
-                Assert.Equal("PASSPORT", option.IdType);
-                Assert.Equal("doc_verification", option.VerificationMethod);
-            });
+        var requestedOption = Assert.Single(request.IdentityOptions);
+        Assert.Equal("VOTER_ID", requestedOption.IdType);
+        Assert.Equal("biometric_kyc", requestedOption.VerificationMethod);
         Assert.DoesNotContain("api-key", JsonSerializer.Serialize(result));
-        Assert.Single(context.UnitOfWork.KycVerificationAttemptRepository.Items);
+        var attempt = Assert.Single(
+            context.UnitOfWork.KycVerificationAttemptRepository.Items);
+        Assert.Equal("VOTER_ID", attempt.IdentityType);
+        Assert.Equal("biometric_kyc", attempt.VerificationMethod);
+        Assert.Equal("VOTER_ID:biometric_kyc", attempt.IdentityOptions);
         Assert.True(context.UnitOfWork.SaveChangesCount > 0);
         Assert.Equal(KycStatus.Pending, CurrentKyc(context).Status);
     }
 
     [Fact]
-    public async Task PassengerLinkContainsOnlyEnabledPassengerOptions()
+    public async Task PassengerLinkContainsOnlySelectedEnabledPassengerOption()
     {
         var context = Context(RoleNames.Passenger);
 
         await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId));
+            new KycProviderRequest(context.UserId, "PASSPORT"));
 
         var options = Assert.Single(context.ApiClient.LinkRequests)
             .IdentityOptions;
-        Assert.Equal(
-            ["VOTER_ID", "PASSPORT"],
-            options.Select(option => option.IdType).ToArray());
-        Assert.DoesNotContain(options, option => option.IdType == "BVN");
-        Assert.DoesNotContain(options, option => option.IdType == "DRIVERS_LICENSE");
+        var option = Assert.Single(options);
+        Assert.Equal("PASSPORT", option.IdType);
+        Assert.Equal("doc_verification", option.VerificationMethod);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task PassengerSessionRequiresSelectedIdentityType(
+        string? selectedIdType)
+    {
+        var context = Context(RoleNames.Passenger);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            context.Provider.CreateSessionAsync(
+                new KycProviderRequest(context.UserId, selectedIdType)));
+
+        Assert.Empty(context.ApiClient.LinkRequests);
+        Assert.Empty(context.UnitOfWork.KycVerificationAttemptRepository.Items);
+    }
+
+    [Theory]
+    [InlineData("BVN")]
+    [InlineData("UNKNOWN_ID")]
+    public async Task PassengerSessionRejectsDisabledOrUnsupportedIdentityType(
+        string selectedIdType)
+    {
+        var context = Context(RoleNames.Passenger);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            context.Provider.CreateSessionAsync(
+                new KycProviderRequest(context.UserId, selectedIdType)));
+
+        Assert.Empty(context.ApiClient.LinkRequests);
+        Assert.Empty(context.UnitOfWork.KycVerificationAttemptRepository.Items);
     }
 
     [Fact]
@@ -96,9 +122,13 @@ public class SmileIdKycProviderTests
             var pending = Assert.Single(context.UnitOfWork.KycVerificationAttemptRepository.Items);
             Assert.Equal("CreatingLink", pending.RawStatus);
             Assert.Null(pending.VerificationUrl);
+            Assert.Equal("VOTER_ID", pending.IdentityType);
+            Assert.Equal("biometric_kyc", pending.VerificationMethod);
+            Assert.Equal("VOTER_ID:biometric_kyc", pending.IdentityOptions);
         };
 
-        await context.Provider.CreateSessionAsync(new KycProviderRequest(context.UserId));
+        await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId, "VOTER_ID"));
 
         Assert.Equal(2, context.UnitOfWork.TransactionCount);
         Assert.False(context.UnitOfWork.IsTransactionActive);
@@ -117,12 +147,16 @@ public class SmileIdKycProviderTests
                 })),
             context.UnitOfWork,
             NullLogger<KycProviderService>.Instance);
-        var firstResult = await publicService.CreateSessionAsync(context.UserId);
+        var firstResult = await publicService.CreateSessionAsync(
+            context.UserId,
+            "VOTER_ID");
         var first = Assert.Single(firstResult.Sessions);
         context.ApiClient.JobStatusFailure = new ServiceUnavailableException(
             "Transient job-status failure.");
 
-        var secondResult = await publicService.CreateSessionAsync(context.UserId);
+        var secondResult = await publicService.CreateSessionAsync(
+            context.UserId,
+            "VOTER_ID");
         var second = Assert.Single(secondResult.Sessions);
 
         Assert.Equal("SmileId", secondResult.Provider);
@@ -146,7 +180,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId));
+            new KycProviderRequest(context.UserId, "VOTER_ID"));
         var attempt = Assert.Single(
             context.UnitOfWork.KycVerificationAttemptRepository.Items);
         attempt.VerificationUrl = verificationUrl;
@@ -158,7 +192,7 @@ public class SmileIdKycProviderTests
 
         await Assert.ThrowsAsync<ConflictException>(() =>
             context.Provider.CreateSessionAsync(
-                new KycProviderRequest(context.UserId)));
+                new KycProviderRequest(context.UserId, "VOTER_ID")));
 
         Assert.Single(context.ApiClient.JobStatusRequests);
         Assert.Equal(KycProviderStatus.Rejected, attempt.Status);
@@ -173,7 +207,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId));
+            new KycProviderRequest(context.UserId, "VOTER_ID"));
         var attempt = Assert.Single(
             context.UnitOfWork.KycVerificationAttemptRepository.Items);
         attempt.VerificationUrl = null;
@@ -187,7 +221,9 @@ public class SmileIdKycProviderTests
             context.UnitOfWork,
             NullLogger<KycProviderService>.Instance);
 
-        var result = await publicService.CreateSessionAsync(context.UserId);
+        var result = await publicService.CreateSessionAsync(
+            context.UserId,
+            "VOTER_ID");
 
         Assert.Equal(KycProviderStatus.Rejected, result.Status);
         Assert.Equal(KycProviderStatus.Rejected, attempt.Status);
@@ -205,7 +241,8 @@ public class SmileIdKycProviderTests
         context.ApiClient.LinkFailure = new ServiceUnavailableException("Provider rejected request.");
 
         await Assert.ThrowsAsync<ServiceUnavailableException>(() =>
-            context.Provider.CreateSessionAsync(new KycProviderRequest(context.UserId)));
+            context.Provider.CreateSessionAsync(
+                new KycProviderRequest(context.UserId, "VOTER_ID")));
 
         var failed = Assert.Single(context.UnitOfWork.KycVerificationAttemptRepository.Items);
         Assert.Equal(KycProviderStatus.Rejected, failed.Status);
@@ -215,7 +252,7 @@ public class SmileIdKycProviderTests
 
         context.ApiClient.LinkFailure = null;
         var retried = Assert.Single((await context.Provider.RetryAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
         Assert.NotEqual(failed.CorrelationReference, retried.JobId);
         Assert.Equal(2, context.UnitOfWork.KycVerificationAttemptRepository.Items.Count);
     }
@@ -263,7 +300,7 @@ public class SmileIdKycProviderTests
             });
 
         var result = await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId));
+            new KycProviderRequest(context.UserId, "VOTER_ID"));
 
         Assert.Empty(context.ApiClient.JobStatusRequests);
         Assert.Equal("SMILE-GROUP-legacy", result.Reference);
@@ -271,7 +308,7 @@ public class SmileIdKycProviderTests
     }
 
     [Fact]
-    public async Task PublicCreateSessionMakesLinkCreatedLegacyNullIdentityAttemptRetryable()
+    public async Task RecoveredMissingIdTypeDoesNotGuessBetweenLegacyOptions()
     {
         var context = Context(RoleNames.Passenger);
         var kycId = Guid.Parse(
@@ -362,43 +399,16 @@ public class SmileIdKycProviderTests
         };
 
         var exception = await Record.ExceptionAsync(() =>
-            publicService.CreateSessionAsync(context.UserId));
+            publicService.CreateSessionAsync(context.UserId, "VOTER_ID"));
 
-        Assert.IsType<ConflictException>(exception);
-        Assert.IsNotType<ValidationException>(exception);
+        Assert.IsType<ValidationException>(exception);
         Assert.Single(context.ApiClient.JobStatusRequests);
         Assert.False(context.UnitOfWork.IsTransactionActive);
-        Assert.Equal(KycStatus.Rejected, kyc.Status);
-        Assert.Equal(KycProviderStatus.Rejected, legacyAttempt.Status);
+        Assert.Equal(KycStatus.Pending, kyc.Status);
+        Assert.Equal(KycProviderStatus.Pending, legacyAttempt.Status);
         Assert.Equal("LinkCreated", legacyAttempt.RawStatus);
-        Assert.Equal(
-            "LegacyIdentityDataMissing",
-            legacyAttempt.ResultCode);
-
-        // Reproduce the live persisted inconsistency after recovery: the
-        // required flow is rejected while the aggregate is still pending.
-        kyc.Status = KycStatus.Pending;
-        var mine = await new KycService(context.UnitOfWork)
-            .GetMineAsync(context.UserId);
-        var mineFlow = Assert.Single(mine.Flows);
-        Assert.Equal(KycStatus.Rejected, mine.Status);
-        Assert.Equal(KycStatus.Rejected, kyc.Status);
-        Assert.True(mine.CanRetry);
-        Assert.True(mineFlow.CanRetry);
-        Assert.False(mineFlow.CallbackConfirmed);
-        Assert.Null(mineFlow.IdType);
-        Assert.Null(mineFlow.VerificationMethod);
-
-        var retryResult = await publicService.RetryAsync(context.UserId);
-
-        var newSession = Assert.Single(retryResult.Sessions);
-        Assert.Equal("SmileId", retryResult.Provider);
-        Assert.Equal("HostedRedirect", retryResult.IntegrationType);
-        Assert.StartsWith("SMILE-GROUP-", retryResult.Reference);
-        Assert.NotEqual(oldGroupReference, retryResult.Reference);
-        Assert.NotNull(newSession.VerificationUrl);
-        Assert.NotEqual(legacyAttempt.CorrelationReference, newSession.JobId);
-        Assert.Equal(3, context.UnitOfWork.KycVerificationAttemptRepository.Items.Count);
+        Assert.Null(legacyAttempt.ResultCode);
+        Assert.Equal(2, context.UnitOfWork.KycVerificationAttemptRepository.Items.Count);
         Assert.Contains(
             legacyAttempt,
             context.UnitOfWork.KycVerificationAttemptRepository.Items);
@@ -440,7 +450,9 @@ public class SmileIdKycProviderTests
                 ResultCode = "LegacyIdentityDataMissing",
                 VerificationUrl = "https://links.usesmileid.com/legacy",
                 IdentityOptions =
-                    "VOTER_ID:biometric_kyc,PASSPORT:doc_verification"
+                    "VOTER_ID:biometric_kyc,PASSPORT:doc_verification",
+                IdentityType = "VOTER_ID",
+                VerificationMethod = "biometric_kyc"
             });
         var publicService = new KycProviderService(
             new KycProviderResolver(
@@ -529,7 +541,9 @@ public class SmileIdKycProviderTests
             context.UnitOfWork,
             NullLogger<KycProviderService>.Instance);
 
-        var result = await publicService.CreateSessionAsync(context.UserId);
+        var result = await publicService.CreateSessionAsync(
+            context.UserId,
+            "VOTER_ID");
 
         Assert.Equal(KycProviderStatus.Rejected, result.Status);
         Assert.Empty(context.ApiClient.JobStatusRequests);
@@ -560,7 +574,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
 
         await context.Provider.ProcessCallbackAsync(Callback(
             session, "0810", "Machine comparison passed", pascalCase: true));
@@ -585,7 +599,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "PASSPORT"))).Sessions);
         Assert.Equal(SmileIdKycProvider.IdentityFlow, session.Flow);
 
         await context.Provider.ProcessCallbackAsync(Callback(
@@ -710,7 +724,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
         var payload = Callback(session, "0810", "Passed");
 
         await context.Provider.ProcessCallbackAsync(payload);
@@ -728,7 +742,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
 
         await Assert.ThrowsAsync<UnauthorizedException>(() =>
             context.Provider.ProcessCallbackAsync(Callback(
@@ -763,7 +777,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
         await context.Provider.ProcessCallbackAsync(Callback(session, "0810", "Passed"));
 
         await Assert.ThrowsAsync<UnauthorizedException>(() =>
@@ -780,7 +794,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
         var unknown = new KycProviderSession
         {
             JobId = $"PRYDE-SMILE-{Guid.NewGuid():N}",
@@ -799,7 +813,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
         var attempt = CurrentAttempt(context, session);
         attempt.IdentityOptions = "NIN_V2:biometric_kyc";
 
@@ -826,7 +840,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
         var attempt = CurrentAttempt(context, session);
         attempt.IdentityOptions = "NIN_V2:biometric_kyc";
 
@@ -847,7 +861,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
         CurrentAttempt(context, session).IdentityOptions =
             "NIN_V2:biometric_kyc";
 
@@ -869,7 +883,12 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
+        var attempt = CurrentAttempt(context, session);
+        attempt.IdentityOptions =
+            "VOTER_ID:biometric_kyc,PASSPORT:doc_verification";
+        attempt.IdentityType = null;
+        attempt.VerificationMethod = null;
 
         await Assert.ThrowsAsync<ValidationException>(() =>
             context.Provider.ProcessCallbackAsync(Callback(
@@ -889,7 +908,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
         CurrentAttempt(context, session).IdentityOptions = null;
         CurrentAttempt(context, session).FlowType = SmileIdKycProvider.LegacyBiometricFlow;
 
@@ -911,13 +930,13 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
         CurrentAttempt(context, session).FlowType = SmileIdKycProvider.LegacyBiometricFlow;
         CurrentAttempt(context, session).IdentityType = "VOTER_ID";
         CurrentAttempt(context, session).VerificationMethod = "biometric_kyc";
 
         var providerResult = await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId));
+            new KycProviderRequest(context.UserId, "VOTER_ID"));
         var mine = await new KycService(context.UnitOfWork).GetMineAsync(context.UserId);
 
         Assert.Equal(
@@ -935,7 +954,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var first = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
         await context.Provider.ProcessCallbackAsync(Callback(first, "0811", "Face mismatch"));
 
         var second = Assert.Single((await context.Provider.RetryAsync(
@@ -944,7 +963,13 @@ public class SmileIdKycProviderTests
         Assert.NotEqual(first.JobId, second.JobId);
         Assert.Equal(2, context.UnitOfWork.KycVerificationAttemptRepository.Items.Count);
         Assert.Equal(KycProviderStatus.Rejected, CurrentAttempt(context, first).Status);
-        Assert.Equal(KycProviderStatus.Pending, CurrentAttempt(context, second).Status);
+        var retryAttempt = CurrentAttempt(context, second);
+        Assert.Equal(KycProviderStatus.Pending, retryAttempt.Status);
+        Assert.Equal("VOTER_ID", retryAttempt.IdentityType);
+        Assert.Equal("biometric_kyc", retryAttempt.VerificationMethod);
+        var retryOption = Assert.Single(
+            context.ApiClient.LinkRequests.Last().IdentityOptions);
+        Assert.Equal("VOTER_ID", retryOption.IdType);
     }
 
     [Fact]
@@ -952,7 +977,7 @@ public class SmileIdKycProviderTests
     {
         var context = Context(RoleNames.Passenger);
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
         var attempt = CurrentAttempt(context, session);
         attempt.Status = KycProviderStatus.Submitted;
         attempt.RawStatus = "Submitted";
@@ -968,7 +993,7 @@ public class SmileIdKycProviderTests
         };
 
         await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId));
+            new KycProviderRequest(context.UserId, "VOTER_ID"));
 
         Assert.Equal(KycStatus.Approved, CurrentKyc(context).Status);
         Assert.Equal(KycProviderStatus.Approved, attempt.Status);
@@ -984,7 +1009,7 @@ public class SmileIdKycProviderTests
         var context = Context(RoleNames.Passenger, environment);
 
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId))).Sessions);
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
 
         Assert.Equal("https://links.usesmileid.com/test", session.VerificationUrl);
         Assert.Equal(environment, Settings(environment).Environment);

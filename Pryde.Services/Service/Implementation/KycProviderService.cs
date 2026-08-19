@@ -15,6 +15,12 @@ public sealed class KycProviderService(
 {
     public async Task<KycProviderResult> CreateSessionAsync(
         Guid userId,
+        CancellationToken cancellationToken = default) =>
+        await CreateSessionAsync(userId, null, cancellationToken);
+
+    public async Task<KycProviderResult> CreateSessionAsync(
+        Guid userId,
+        string? selectedIdType,
         CancellationToken cancellationToken = default)
     {
         var kyc = await unitOfWork.KycVerifications.GetByUserIdAsync(
@@ -41,7 +47,7 @@ public sealed class KycProviderService(
             ? resolver.ResolveActive()
             : await ResolveOwnerAsync(kyc, cancellationToken);
         var result = await provider.CreateSessionAsync(
-            new KycProviderRequest(userId),
+            new KycProviderRequest(userId, selectedIdType),
             cancellationToken);
         KycProviderResultInvariant.Ensure(provider.Name, result);
         return result;

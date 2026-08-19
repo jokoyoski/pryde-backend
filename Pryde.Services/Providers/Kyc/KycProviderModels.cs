@@ -2,7 +2,11 @@ using Pryde.Domain.Enums;
 
 namespace Pryde.Services.Providers.Kyc;
 
-public sealed record KycProviderRequest(Guid UserId);
+public sealed record KycSessionRequest(string? SelectedIdType);
+
+public sealed record KycProviderRequest(
+    Guid UserId,
+    string? SelectedIdType = null);
 
 public sealed class KycProviderResult
 {

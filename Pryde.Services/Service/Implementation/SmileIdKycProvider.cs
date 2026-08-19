@@ -82,12 +82,12 @@ public sealed class SmileIdKycProvider(
     public Task<KycProviderResult> CreateSessionAsync(
         KycProviderRequest request,
         CancellationToken cancellationToken = default) =>
-        CreateOrReturnSessionAsync(request.UserId, false, cancellationToken);
+        CreateOrReturnSessionAsync(request, false, cancellationToken);
 
     public Task<KycProviderResult> RetryAsync(
         KycProviderRequest request,
         CancellationToken cancellationToken = default) =>
-        CreateOrReturnSessionAsync(request.UserId, true, cancellationToken);
+        CreateOrReturnSessionAsync(request, true, cancellationToken);
 
     public async Task ProcessCallbackAsync(
         ReadOnlyMemory<byte> payload,
@@ -124,10 +124,11 @@ public sealed class SmileIdKycProvider(
     }
 
     private async Task<KycProviderResult> CreateOrReturnSessionAsync(
-        Guid userId,
+        KycProviderRequest request,
         bool retry,
         CancellationToken cancellationToken)
     {
+        var userId = request.UserId;
         var roles = await unitOfWork.UserRoles.GetByUserIdAsync(userId, cancellationToken);
         var roleNames = roles.Select(x => x.Role.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var isDriver = roleNames.Contains(RoleNames.Driver);
@@ -216,7 +217,25 @@ public sealed class SmileIdKycProvider(
                 ? $"SMILE-GROUP-{Guid.NewGuid():N}"
                 : kyc.ProviderReference;
             var smileUserId = CreateSmileUserId(userId);
-            var identityOptions = GetIdentityOptions(isDriver);
+            IReadOnlyList<SmileIdIdentityOption> identityOptions;
+            if (isDriver)
+            {
+                identityOptions = GetIdentityOptions(true);
+            }
+            else if (retry)
+            {
+                var previousAttempt = latestByFlow[IdentityFlow];
+                var storedOption = GetConfiguredOption(previousAttempt, null);
+                identityOptions =
+                    [GetSelectedPassengerIdentityOption(storedOption.IdType)];
+            }
+            else
+            {
+                identityOptions =
+                    [GetSelectedPassengerIdentityOption(request.SelectedIdType)];
+            }
+
+            var selectedOption = identityOptions.Single();
             var attempt = new KycVerificationAttempt
             {
                 KycVerificationId = kyc.Id,
@@ -228,6 +247,8 @@ public sealed class SmileIdKycProvider(
                 AttemptGroupReference = groupReference,
                 ExternalUserReference = smileUserId,
                 StartedAt = _timeProvider.GetUtcNow().UtcDateTime,
+                IdentityType = selectedOption.IdType,
+                VerificationMethod = selectedOption.VerificationMethod,
                 IdentityOptions = string.Join(',', identityOptions.Select(option =>
                     $"{option.IdType}:{option.VerificationMethod}"))
             };
@@ -980,6 +1001,25 @@ public sealed class SmileIdKycProvider(
                 : _settings.PassengerIdentityOptions)
             .Where(option => option.Enabled)
             .ToList();
+
+    private SmileIdIdentityOption GetSelectedPassengerIdentityOption(
+        string? selectedIdType)
+    {
+        if (string.IsNullOrWhiteSpace(selectedIdType))
+        {
+            throw new ValidationException(
+                "A passenger identity type is required for Smile ID KYC.");
+        }
+
+        var selectedOption = GetIdentityOptions(false).SingleOrDefault(option =>
+            string.Equals(
+                option.IdType,
+                selectedIdType.Trim(),
+                StringComparison.OrdinalIgnoreCase));
+
+        return selectedOption ?? throw new ValidationException(
+            "The selected passenger identity type is unsupported or disabled.");
+    }
 
     private SmileIdIdentityOption GetConfiguredOption(
     KycVerificationAttempt attempt,
