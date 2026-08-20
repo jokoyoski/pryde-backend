@@ -113,17 +113,6 @@ public sealed class SmileIdKycProvider(
         var resultText = callback.ResultText ?? callback.ResultTextSnakeCase;
         var idType = callback.IdType ?? callback.IdTypeSnakeCase;
 
-        logger.LogInformation(
-            "Smile ID callback deserialized. TraceId: {TraceId}; JobId: {JobId}; UserId: {UserId}; ResultCode: {ResultCode}; ResultText: {ResultText}; IdType: {IdType}; Flow: {Flow}; Role: {Role}.",
-            traceId,
-            callbackJobId,
-            callbackPartnerParams?.UserId,
-            resultCode,
-            resultText,
-            idType,
-            callbackPartnerParams?.Flow,
-            callbackPartnerParams?.Role);
-
         var eventTimestamp = ValidateCallbackAuthentication(
             callback.Timestamp,
             callback.Signature,
@@ -432,11 +421,6 @@ public sealed class SmileIdKycProvider(
             {
                 continue;
             }
-
-            // Hosted-link attempts created by an older/incomplete write may not
-            // have enough correlation data for Smile's job-status endpoint.
-            // Let the generic retry path terminalize them instead of sending an
-            // invalid provider request.
             if (string.IsNullOrWhiteSpace(attempt.ExternalUserReference) ||
                 string.IsNullOrWhiteSpace(attempt.CorrelationReference))
             {
@@ -836,11 +820,7 @@ public sealed class SmileIdKycProvider(
                 attempt.ResultCode == code &&
                 attempt.ResultText == resultText &&
                 (string.IsNullOrWhiteSpace(smileJobId) || attempt.ProviderReference == smileJobId))
-            {
-                logger.LogInformation("Duplicate Smile ID callback ignored for job {JobId}.", jobId);
-                return null;
-            }
-
+           
             attempt.RawStatus = resultText ?? code;
             attempt.ResultCode = code;
             attempt.ResultText = resultText;
@@ -872,16 +852,7 @@ public sealed class SmileIdKycProvider(
 
             await RecalculateKycAsync(kyc, transactionToken);
             await unitOfWork.SaveChangesAsync(transactionToken);
-
-            logger.LogInformation(
-                "Smile ID callback persisted and KYC recalculated. TraceId: {TraceId}; JobId: {JobId}; FinalAttemptStatus: {FinalAttemptStatus}; FinalKycStatus: {FinalKycStatus}; FinalProviderStatus: {FinalProviderStatus}; CallbackConfirmed: {CallbackConfirmed}.",
-                traceId,
-                jobId,
-                attempt.Status,
-                kyc.Status,
-                kyc.ProviderStatus,
-                attempt.ProviderEventTimestamp.HasValue);
-
+            
             KycEmailEvent? transitionEmail = null;
             if (previousKycStatus != kyc.Status &&
                 kyc.Status is KycStatus.Approved or KycStatus.Rejected)
