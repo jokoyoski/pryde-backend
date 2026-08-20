@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Collections.Concurrent;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -698,6 +699,47 @@ public class SmileIdKycProviderTests
         Assert.Equal(
             NotificationType.KycRejected,
             Assert.Single(context.UnitOfWork.NotificationRepository.Items).Type);
+    }
+
+    [Fact]
+    public async Task LongRejectedCallbackProviderStatusPersistsWithoutTruncation()
+    {
+        const string resultText =
+            "Unable to validate ID - Unsupported ID number format - only test data may be used in the sandbox.";
+        var context = Context(RoleNames.Passenger);
+        var session = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
+        var attempt = CurrentAttempt(context, session);
+        attempt.IdentityType = "NIN_V2";
+        attempt.VerificationMethod = "biometric_kyc";
+        attempt.IdentityOptions = "NIN_V2:biometric_kyc";
+        var expectedProviderStatus =
+            $"{SmileIdKycProvider.IdentityFlow}:{resultText}";
+
+        var exception = await Record.ExceptionAsync(() =>
+            context.Provider.ProcessCallbackAsync(Callback(
+                session,
+                "1014",
+                resultText,
+                idType: "NIN_V2")));
+
+        Assert.Null(exception);
+        Assert.Equal(KycProviderStatus.Rejected, attempt.Status);
+        Assert.Equal(KycStatus.Rejected, CurrentKyc(context).Status);
+        Assert.True(expectedProviderStatus.Length > 50);
+        Assert.Equal(expectedProviderStatus, CurrentKyc(context).ProviderStatus);
+        var mine = await new KycService(context.UnitOfWork).GetMineAsync(context.UserId);
+        Assert.True(Assert.Single(mine.Flows).CallbackConfirmed);
+
+        var modelBuilder = new ModelBuilder();
+        new KycVerificationConfiguration().Configure(
+            modelBuilder.Entity<KycVerification>());
+        Assert.Equal(
+            500,
+            modelBuilder.Entity<KycVerification>()
+                .Property(x => x.ProviderStatus)
+                .Metadata
+                .GetMaxLength());
     }
 
     [Fact]
