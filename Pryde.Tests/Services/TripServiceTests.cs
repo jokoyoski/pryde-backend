@@ -1,4 +1,5 @@
 using Pryde.Contracts.RequestModels;
+using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
@@ -9,6 +10,59 @@ namespace Pryde.Tests.Services;
 
 public class TripServiceTests
 {
+    [Fact]
+    public async Task CustomerTripDetailsIncludeSafeDriverAndVehicleSummaries()
+    {
+        var (unitOfWork, driverId, vehicle) = TestData.CreateDriverContext();
+        vehicle.Make = "Toyota";
+        vehicle.Model = "Corolla";
+        vehicle.ManufacturingYear = 2022;
+        vehicle.Colour = "Blue";
+        vehicle.Images.Add(new VehicleImage
+        {
+            ImageUrl = "https://example.test/vehicle-side.jpg"
+        });
+        vehicle.Images.Add(new VehicleImage
+        {
+            ImageUrl = "https://example.test/vehicle-primary.jpg",
+            IsPrimary = true
+        });
+        var trip = TestData.OpenTrip(driverId, vehicle);
+        trip.Driver.Profile!.ProfilePhotoUrl =
+            "https://example.test/driver.jpg";
+        unitOfWork.TripRepository.Items.Add(trip);
+        unitOfWork.TripRatingRepository.Items.AddRange(
+        [
+            new TripRating { RatedUserId = driverId, Value = 4 },
+            new TripRating { RatedUserId = driverId, Value = 5 }
+        ]);
+
+        var result = await TestData.CreateTripService(unitOfWork)
+            .GetByIdAsync(trip.Id);
+
+        Assert.Equal(trip.Id, result.TripId);
+        Assert.Equal("Lagos Island", result.OriginAddress);
+        Assert.Equal(driverId, result.Driver.Id);
+        Assert.Equal("Ada Driver", result.Driver.FullName);
+        Assert.Equal(
+            "https://example.test/driver.jpg",
+            result.Driver.ProfileImageUrl);
+        Assert.Equal(4.5, result.Driver.AverageRating);
+        Assert.Equal(vehicle.Id, result.Vehicle.Id);
+        Assert.Equal("Toyota", result.Vehicle.Make);
+        Assert.Equal("Corolla", result.Vehicle.Model);
+        Assert.Equal(2022, result.Vehicle.Year);
+        Assert.Equal("Blue", result.Vehicle.Color);
+        Assert.Equal("PRYDE-01", result.Vehicle.PlateNumber);
+        Assert.Equal(
+            "https://example.test/vehicle-primary.jpg",
+            result.Vehicle.PrimaryImageUrl);
+        Assert.Equal(vehicle.Capacity, result.Vehicle.Capacity);
+        Assert.DoesNotContain(
+            typeof(DriverSummaryDto).GetProperties(),
+            property => property.Name is "Email" or "PhoneNumber");
+    }
+
     [Fact]
     public async Task DriverCanCreateAValidTrip()
     {

@@ -221,11 +221,16 @@ public class TripService(
         return trips.Select(MapSummary).ToList();
     }
 
-    public async Task<TripDetailsResponseDto> GetByIdAsync(Guid tripId, CancellationToken cancellationToken = default)
+    public async Task<CustomerTripDetailsResponseDto> GetByIdAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default)
     {
         var trip = await unitOfWork.Trips.GetByIdWithDetailsAsync(tripId, cancellationToken)
             ?? throw new NotFoundException(nameof(Trip), tripId);
-        return MapDetails(trip);
+        var rating = await unitOfWork.TripRatings.GetSummaryAsync(
+            trip.DriverId,
+            cancellationToken);
+        return MapCustomerDetails(trip, rating.AverageRating);
     }
 
     public async Task<IReadOnlyList<TripSummaryResponseDto>> GetMineAsync(Guid driverId, CancellationToken cancellationToken = default)
@@ -892,6 +897,74 @@ public class TripService(
             CreatedAt = summary.CreatedAt,
             PendingBookingCount = trip.Bookings.Count(b => b.Status == BookingStatus.Pending),
             ApprovedBookingCount = trip.Bookings.Count(b => b.Status == BookingStatus.Approved)
+        };
+    }
+
+    private static CustomerTripDetailsResponseDto MapCustomerDetails(
+        Trip trip,
+        double averageRating)
+    {
+        var details = MapDetails(trip);
+        var profile = trip.Driver?.Profile;
+        var vehicle = trip.Vehicle;
+        return new CustomerTripDetailsResponseDto
+        {
+            NextAction = details.NextAction,
+            RequiredActor = details.RequiredActor,
+            TripId = details.TripId,
+            DriverId = details.DriverId,
+            DriverName = details.DriverName,
+            VehicleId = details.VehicleId,
+            VehicleLicensePlateNumber = details.VehicleLicensePlateNumber,
+            VehicleCapacity = details.VehicleCapacity,
+            VehicleImageUrls = details.VehicleImageUrls,
+            OriginAddress = details.OriginAddress,
+            OriginLatitude = details.OriginLatitude,
+            OriginLongitude = details.OriginLongitude,
+            DestinationAddress = details.DestinationAddress,
+            DestinationLatitude = details.DestinationLatitude,
+            DestinationLongitude = details.DestinationLongitude,
+            RoutePolyline = details.RoutePolyline,
+            DepartureTime = details.DepartureTime,
+            AvailableSeats = details.AvailableSeats,
+            AllowLuggage = details.AllowLuggage,
+            DistanceKm = details.DistanceKm,
+            EstimatedDurationMinutes = details.EstimatedDurationMinutes,
+            TripFare = details.TripFare,
+            SeatPrice = details.SeatPrice,
+            ServiceChargePercentage = details.ServiceChargePercentage,
+            PassengerServiceCharge = details.PassengerServiceCharge,
+            PassengerTotal = details.PassengerTotal,
+            BookingWindowMinutes = details.BookingWindowMinutes,
+            Status = details.Status,
+            CreatedAt = details.CreatedAt,
+            PendingBookingCount = details.PendingBookingCount,
+            ApprovedBookingCount = details.ApprovedBookingCount,
+            Driver = new DriverSummaryDto
+            {
+                Id = trip.DriverId,
+                FullName = profile is null
+                    ? string.Empty
+                    : $"{profile.FirstName} {profile.LastName}".Trim(),
+                ProfileImageUrl = profile?.ProfilePhotoUrl,
+                AverageRating = Math.Round(averageRating, 2)
+            },
+            Vehicle = new VehicleSummaryDto
+            {
+                Id = trip.VehicleId,
+                Make = vehicle?.Make,
+                Model = vehicle?.Model,
+                Year = vehicle?.ManufacturingYear,
+                Color = vehicle?.Colour,
+                PlateNumber = vehicle?.LicensePlateNumber ?? string.Empty,
+                PrimaryImageUrl = vehicle?.Images
+                    .OrderByDescending(image => image.IsPrimary)
+                    .ThenBy(image => image.ImageType)
+                    .ThenBy(image => image.Id)
+                    .Select(image => image.ImageUrl)
+                    .FirstOrDefault(),
+                Capacity = vehicle?.Capacity ?? 0
+            }
         };
     }
 }

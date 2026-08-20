@@ -9,7 +9,7 @@ public interface ITripService
     Task ValidateRecurringTemplateAsync(Guid driverId, CreateTripRequestDto request, CancellationToken cancellationToken = default);
     Task<TripDetailsResponseDto> CreateRecurringOccurrenceAsync(Guid driverId, Guid recurringTripId, CreateTripRequestDto request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TripSummaryResponseDto>> SearchAsync(SearchTripsRequestDto request, CancellationToken cancellationToken = default);
-    Task<TripDetailsResponseDto> GetByIdAsync(Guid tripId, CancellationToken cancellationToken = default);
+    Task<CustomerTripDetailsResponseDto> GetByIdAsync(Guid tripId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TripSummaryResponseDto>> GetMineAsync(Guid driverId, CancellationToken cancellationToken = default);
     Task<DriverDashboardTripSummaryResponseDto?> GetNextUpcomingAsync(
         Guid driverId,
