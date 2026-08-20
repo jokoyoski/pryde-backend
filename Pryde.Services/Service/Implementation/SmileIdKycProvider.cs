@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -94,7 +93,6 @@ public sealed class SmileIdKycProvider(
         ReadOnlyMemory<byte> payload,
         CancellationToken cancellationToken = default)
     {
-        var traceId = GetTraceId();
         SmileIdCallbackPayload callback;
         try
         {
@@ -103,49 +101,23 @@ public sealed class SmileIdKycProvider(
         }
         catch (JsonException)
         {
-            LogCallbackFailure(traceId, null, "Invalid Smile ID callback payload.");
             throw new ValidationException("Invalid Smile ID callback payload.");
         }
 
-        var callbackPartnerParams = callback.PartnerParams ?? callback.PartnerParamsSnakeCase;
-        var callbackJobId = callbackPartnerParams?.JobId;
-        var resultCode = callback.ResultCode ?? callback.ResultCodeSnakeCase;
-        var resultText = callback.ResultText ?? callback.ResultTextSnakeCase;
-        var idType = callback.IdType ?? callback.IdTypeSnakeCase;
-
-        logger.LogInformation(
-            "Smile ID callback deserialized. TraceId: {TraceId}; JobId: {JobId}; UserId: {UserId}; ResultCode: {ResultCode}; ResultText: {ResultText}; IdType: {IdType}; Flow: {Flow}; Role: {Role}.",
-            traceId,
-            callbackJobId,
-            callbackPartnerParams?.UserId,
-            resultCode,
-            resultText,
-            idType,
-            callbackPartnerParams?.Flow,
-            callbackPartnerParams?.Role);
-
         var eventTimestamp = ValidateCallbackAuthentication(
             callback.Timestamp,
-            callback.Signature,
-            traceId,
-            callbackJobId);
+            callback.Signature);
         var payloadHash = Convert.ToHexString(SHA256.HashData(payload.Span));
-        if (callbackPartnerParams is null)
-        {
-            LogCallbackFailure(
-                traceId,
-                callbackJobId,
-                "Smile ID callback PartnerParams are required.");
-            throw new ValidationException("Smile ID callback PartnerParams are required.");
-        }
+        var partnerParams = callback.PartnerParams ?? callback.PartnerParamsSnakeCase
+            ?? throw new ValidationException("Smile ID callback PartnerParams are required.");
 
         await ProcessResultAsync(
-             callbackPartnerParams,
-             resultCode,
-             resultText,
+             partnerParams,
+             callback.ResultCode ?? callback.ResultCodeSnakeCase,
+             callback.ResultText ?? callback.ResultTextSnakeCase,
              callback.SmileJobId ?? callback.SmileJobIdSnakeCase,
              callback.Country,
-             idType,
+             callback.IdType ?? callback.IdTypeSnakeCase,
              eventTimestamp,
              payloadHash,
              cancellationToken);
@@ -657,65 +629,28 @@ public sealed class SmileIdKycProvider(
         string? payloadHash,
         CancellationToken cancellationToken)
     {
-        var traceId = GetTraceId();
-        var callbackJobId = partnerParams.JobId?.Trim();
-        var jobId = RequiredCallbackValue(
-            partnerParams.JobId,
-            "job_id",
-            traceId,
-            callbackJobId);
-        var smileUserId = RequiredCallbackValue(
-            partnerParams.UserId,
-            "user_id",
-            traceId,
-            jobId);
-        var code = RequiredCallbackValue(
-            resultCode,
-            "ResultCode/result_code",
-            traceId,
-            jobId);
+        var jobId = Required(partnerParams.JobId, "job_id");
+        var smileUserId = Required(partnerParams.UserId, "user_id");
+        var code = Required(resultCode, "ResultCode/result_code");
 
         var emailEvent = await unitOfWork.ExecuteInTransactionOnceAsync(async transactionToken =>
         {
             var attempt = await unitOfWork.KycVerificationAttempts.GetByCorrelationReferenceAsync(
                 ProviderName,
                 jobId,
-                transactionToken);
-            if (attempt is null)
-            {
-                LogCallbackFailure(
-                    traceId,
-                    jobId,
-                    "Smile ID callback job_id did not correlate to an existing KYC verification attempt.");
-                throw new NotFoundException(nameof(KycVerificationAttempt), jobId);
-            }
+                transactionToken)
+                ?? throw new NotFoundException(nameof(KycVerificationAttempt), jobId);
 
             if (!string.Equals(attempt.ExternalUserReference, smileUserId, StringComparison.Ordinal))
             {
-                LogCallbackFailure(
-                    traceId,
-                    jobId,
-                    "Smile ID callback user_id does not match the job.");
                 throw new ValidationException("Smile ID callback user_id does not match the job.");
             }
 
-            string expectedRole;
-            if (IsDriverLicenseFlow(attempt.FlowType))
-            {
-                expectedRole = RoleNames.Driver;
-            }
-            else if (IsIdentityFlow(attempt.FlowType))
-            {
-                expectedRole = RoleNames.Passenger;
-            }
-            else
-            {
-                LogCallbackFailure(
-                    traceId,
-                    jobId,
-                    "Smile ID attempt has an unsupported flow.");
-                throw new ValidationException("Smile ID attempt has an unsupported flow.");
-            }
+            var expectedRole = IsDriverLicenseFlow(attempt.FlowType)
+                ? RoleNames.Driver
+                : IsIdentityFlow(attempt.FlowType)
+                    ? RoleNames.Passenger
+                    : throw new ValidationException("Smile ID attempt has an unsupported flow.");
             var isLegacyAttempt = string.IsNullOrWhiteSpace(attempt.IdentityOptions);
             if (isLegacyAttempt)
             {
@@ -725,55 +660,27 @@ public sealed class SmileIdKycProvider(
                 if (!TryGetJobType(partnerParams.JobType, out var jobType) ||
                     jobType != expectedJobType)
                 {
-                    LogCallbackFailure(
-                        traceId,
-                        jobId,
-                        "Smile ID callback job_type does not match the legacy job.");
                     throw new ValidationException("Smile ID callback job_type does not match the legacy job.");
                 }
             }
             else if (!string.Equals(partnerParams.Flow, attempt.FlowType, StringComparison.Ordinal) ||
-                      !string.Equals(partnerParams.Role, expectedRole, StringComparison.OrdinalIgnoreCase))
+                     !string.Equals(partnerParams.Role, expectedRole, StringComparison.OrdinalIgnoreCase))
             {
-                LogCallbackFailure(
-                    traceId,
-                    jobId,
-                    "Smile ID callback role or flow does not match the job.");
                 throw new ValidationException("Smile ID callback role or flow does not match the job.");
             }
-            SmileIdIdentityOption configuredOption;
-            try
-            {
-                configuredOption = GetConfiguredOption(attempt, idType);
-            }
-            catch (ValidationException exception)
-            {
-                LogCallbackFailure(traceId, jobId, exception.Message);
-                throw;
-            }
+            var configuredOption = GetConfiguredOption(attempt, idType);
 
             if (!string.IsNullOrWhiteSpace(country) &&
                 !string.Equals(country.Trim(),Country,StringComparison.OrdinalIgnoreCase))
             {
-                LogCallbackFailure(
-                    traceId,
-                    jobId,
-                    "Smile ID result country does not match the required Pryde flow.");
                 throw new ValidationException(
                     "Smile ID result country does not match the required Pryde flow.");
             }
 
             var kyc = await unitOfWork.KycVerifications.GetByIdForUpdateAsync(
                 attempt.KycVerificationId,
-                transactionToken);
-            if (kyc is null)
-            {
-                LogCallbackFailure(
-                    traceId,
-                    jobId,
-                    "Smile ID callback correlated attempt references a missing KYC verification.");
-                throw new NotFoundException(nameof(KycVerification), attempt.KycVerificationId);
-            }
+                transactionToken)
+                ?? throw new NotFoundException(nameof(KycVerification), attempt.KycVerificationId);
 
             if (eventTimestamp.HasValue && attempt.ProviderEventTimestamp.HasValue)
             {
@@ -802,10 +709,6 @@ public sealed class SmileIdKycProvider(
                         return null;
                     }
 
-                    LogCallbackFailure(
-                        traceId,
-                        jobId,
-                        "Smile ID callback timestamp was replayed with altered data.");
                     throw new UnauthorizedException(
                         "Smile ID callback timestamp was replayed with altered data.");
                 }
@@ -815,17 +718,6 @@ public sealed class SmileIdKycProvider(
             var previousAction = attempt.SmileActionSucceeded;
             var previousIdentity = attempt.SmileIdentitySucceeded;
             var previousKycStatus = kyc.Status;
-
-            logger.LogInformation(
-                "Smile ID callback correlated. TraceId: {TraceId}; JobId: {JobId}; AttemptId: {AttemptId}; KycVerificationId: {KycVerificationId}; CurrentStatus: {CurrentStatus}; CurrentRawStatus: {CurrentRawStatus}; ResultCode: {ResultCode}; ResultText: {ResultText}.",
-                traceId,
-                jobId,
-                attempt.Id,
-                attempt.KycVerificationId,
-                attempt.Status,
-                attempt.RawStatus,
-                code,
-                resultText);
 
             attempt.IdentityType = configuredOption.IdType;
             attempt.VerificationMethod = configuredOption.VerificationMethod;
@@ -857,30 +749,11 @@ public sealed class SmileIdKycProvider(
             attempt.CompletedAt = attempt.Status is KycProviderStatus.Approved or KycProviderStatus.Rejected
                 ? _timeProvider.GetUtcNow().UtcDateTime
                 : null;
-
-            logger.LogInformation(
-                "Smile ID callback result applied. TraceId: {TraceId}; JobId: {JobId}; ResultingStatus: {ResultingStatus}; ResultingRawStatus: {ResultingRawStatus}; ResultingResultCode: {ResultingResultCode}; CallbackConfirmed: {CallbackConfirmed}.",
-                traceId,
-                jobId,
-                attempt.Status,
-                attempt.RawStatus,
-                attempt.ResultCode,
-                attempt.ProviderEventTimestamp.HasValue);
-
             unitOfWork.KycVerificationAttempts.Update(attempt);
             await unitOfWork.SaveChangesAsync(transactionToken);
 
             await RecalculateKycAsync(kyc, transactionToken);
             await unitOfWork.SaveChangesAsync(transactionToken);
-
-            logger.LogInformation(
-                "Smile ID callback persisted and KYC recalculated. TraceId: {TraceId}; JobId: {JobId}; FinalAttemptStatus: {FinalAttemptStatus}; FinalKycStatus: {FinalKycStatus}; FinalProviderStatus: {FinalProviderStatus}; CallbackConfirmed: {CallbackConfirmed}.",
-                traceId,
-                jobId,
-                attempt.Status,
-                kyc.Status,
-                kyc.ProviderStatus,
-                attempt.ProviderEventTimestamp.HasValue);
 
             KycEmailEvent? transitionEmail = null;
             if (previousKycStatus != kyc.Status &&
@@ -1088,73 +961,32 @@ public sealed class SmileIdKycProvider(
             };
     }
 
-    private DateTimeOffset ValidateCallbackAuthentication(
-        string? timestamp,
-        string? signature,
-        string traceId,
-        string? jobId)
+    private DateTimeOffset ValidateCallbackAuthentication(string? timestamp, string? signature)
     {
-        var suppliedTimestamp = RequiredCallbackValue(
-            timestamp,
-            "timestamp",
-            traceId,
-            jobId);
-        var suppliedSignature = RequiredCallbackValue(
-            signature,
-            "signature",
-            traceId,
-            jobId);
+        var suppliedTimestamp = Required(timestamp, "timestamp");
+        var suppliedSignature = Required(signature, "signature");
         if (!DateTimeOffset.TryParse(
                 suppliedTimestamp,
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
                 out var parsedTimestamp))
         {
-            LogCallbackFailure(traceId, jobId, "Invalid Smile ID callback timestamp.");
             throw new UnauthorizedException("Invalid Smile ID callback timestamp.");
         }
 
         var age = (_timeProvider.GetUtcNow() - parsedTimestamp).Duration();
         if (age > TimeSpan.FromMinutes(_settings.MaximumCallbackAgeMinutes))
         {
-            LogCallbackFailure(traceId, jobId, "Smile ID callback timestamp is stale.");
             throw new UnauthorizedException("Smile ID callback timestamp is stale.");
         }
 
         if (!apiClient.ValidateSignature(suppliedTimestamp, suppliedSignature))
         {
-            LogCallbackFailure(traceId, jobId, "Invalid Smile ID callback signature.");
             throw new UnauthorizedException("Invalid Smile ID callback signature.");
         }
 
         return parsedTimestamp;
     }
-
-    private string RequiredCallbackValue(
-        string? value,
-        string name,
-        string traceId,
-        string? jobId)
-    {
-        if (!string.IsNullOrWhiteSpace(value))
-        {
-            return value.Trim();
-        }
-
-        var reason = $"Smile ID {name} is required.";
-        LogCallbackFailure(traceId, jobId, reason);
-        throw new ValidationException(reason);
-    }
-
-    private void LogCallbackFailure(string traceId, string? jobId, string reason) =>
-        logger.LogWarning(
-            "Smile ID callback rejected. TraceId: {TraceId}; JobId: {JobId}; Reason: {Reason}.",
-            traceId,
-            jobId,
-            reason);
-
-    private static string GetTraceId() =>
-        Activity.Current?.Id ?? "Unavailable";
 
     private string GetBaseUrl() =>
         (_settings.Environment == SmileIdSettings.Sandbox
