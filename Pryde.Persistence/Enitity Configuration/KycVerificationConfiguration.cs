@@ -14,7 +14,7 @@ public class KycVerificationConfiguration : IEntityTypeConfiguration<KycVerifica
         builder.Property(x => x.ProviderName).HasMaxLength(50);
         builder.Property(x => x.ProviderReference).HasMaxLength(100);
         builder.Property(x => x.DojahReference).HasMaxLength(100);
-        builder.Property(x => x.ProviderStatus).HasMaxLength(50);
+        builder.Property(x => x.ProviderStatus).HasMaxLength(500);
         builder.Property(x => x.RejectionReason).HasMaxLength(500);
 
         builder.HasIndex(x => x.UserId)
