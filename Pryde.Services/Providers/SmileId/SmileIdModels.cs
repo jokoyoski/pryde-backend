@@ -58,9 +58,6 @@ public sealed class SmileIdResultPayload
     [JsonPropertyName("Country")]
     public string? Country { get; set; }
 
-    [JsonPropertyName("country")]
-    public string? CountrySnakeCase { get; set; }
-
     [JsonPropertyName("IDType")]
     public string? IdType { get; set; }
 
@@ -114,8 +111,6 @@ public sealed class SmileIdCallbackPayload
 {
     [JsonPropertyName("Country")]
     public string? Country { get; set; }
-    [JsonPropertyName("country")]
-    public string? CountrySnakeCase { get; set; }
 
     [JsonPropertyName("IDType")]
     public string? IdType { get; set; }

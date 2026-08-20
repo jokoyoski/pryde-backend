@@ -116,7 +116,7 @@ public sealed class SmileIdKycProvider(
              callback.ResultCode ?? callback.ResultCodeSnakeCase,
              callback.ResultText ?? callback.ResultTextSnakeCase,
              callback.SmileJobId ?? callback.SmileJobIdSnakeCase,
-             callback.Country ?? callback.CountrySnakeCase,
+             callback.Country,
              callback.IdType ?? callback.IdTypeSnakeCase,
              eventTimestamp,
              payloadHash,
@@ -531,7 +531,8 @@ public sealed class SmileIdKycProvider(
                     result.ResultTextSnakeCase,
                     result.SmileJobId ??
                     result.SmileJobIdSnakeCase,
-                    result.Country ?? result.CountrySnakeCase, recoveredIdType,
+                    result.Country,
+                    recoveredIdType,
                     null,
                     null,
                     cancellationToken);
