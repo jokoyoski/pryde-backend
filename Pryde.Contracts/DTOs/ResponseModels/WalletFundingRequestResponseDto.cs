@@ -7,4 +7,5 @@ public class WalletFundingRequestResponseDto
     public string Currency { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string PublicKey { get; set; } = string.Empty;
+    public IReadOnlyList<String> Channels { get; set; } = [];
 }
