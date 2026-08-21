@@ -121,7 +121,16 @@ public class WalletService : IWalletService
             AmountKobo = fundingRequest.ExpectedAmountKobo,
             Currency = fundingRequest.Currency,
             Email = fundingRequest.CustomerEmail,
-            PublicKey = PaystackSettings.PublicKey
+            PublicKey = PaystackSettings.PublicKey,
+            Channels =
+            [
+              "card",
+              "bank",
+              "ussd",
+              "qr",
+              "bank_transfer",
+              "payattitude"
+            ]
         };
     }
 
