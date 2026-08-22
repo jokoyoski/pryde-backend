@@ -8,6 +8,11 @@ public interface IKycVerificationAttemptRepository
     Task<KycVerificationAttempt?> GetByCorrelationReferenceForUpdateAsync(string providerName, string correlationReference, CancellationToken cancellationToken = default);
     Task<KycVerificationAttempt?> GetByProviderReferenceAsync(string providerName, string providerReference, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<KycVerificationAttempt>> GetByKycVerificationIdAsync(Guid kycVerificationId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<string>> GetDistinctAttemptReferencesAsync(
+        Guid kycVerificationId,
+        DateTime startedAtInclusive,
+        DateTime startedAtExclusive,
+        CancellationToken cancellationToken = default);
     Task<KycVerificationAttempt> CreateAsync(KycVerificationAttempt attempt, CancellationToken cancellationToken = default);
     void Update(KycVerificationAttempt attempt);
 }

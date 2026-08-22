@@ -24,7 +24,8 @@ public sealed class SmileIdKycProvider(
     ILogger<SmileIdKycProvider> logger,
     INotificationService notificationService,
     IEmailService emailService,
-    TimeProvider? timeProvider = null) : IKycProvider, ISmileIdKycService
+    TimeProvider? timeProvider = null,
+    IOptions<KycSettings>? kycOptions = null) : IKycProvider, ISmileIdKycService
 {
     public const string ProviderName = "SmileId";
     public const string IdentityFlow = "IdentityVerification";
@@ -58,6 +59,8 @@ public sealed class SmileIdKycProvider(
 
     private readonly SmileIdSettings _settings = options.Value;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly KycSettings _kycSettings =
+        kycOptions?.Value ?? new KycSettings();
 
     public SmileIdKycProvider(
         IUnitOfWork unitOfWork,
@@ -252,6 +255,13 @@ public sealed class SmileIdKycProvider(
                 IdentityOptions = string.Join(',', identityOptions.Select(option =>
                     $"{option.IdType}:{option.VerificationMethod}"))
             };
+            await KycAttemptAllowanceCalculator.EnsureCanCreateAsync(
+                unitOfWork,
+                kyc.Id,
+                attempt.AttemptGroupReference ?? attempt.CorrelationReference,
+                _kycSettings,
+                _timeProvider.GetUtcNow().UtcDateTime,
+                transactionToken);
             await unitOfWork.KycVerificationAttempts.CreateAsync(attempt, transactionToken);
 
             kyc.ProviderName = ProviderName;

@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Contracts.ResponseModels;
+using Pryde.Services.Providers.Kyc;
 
 namespace Pryde.Api.Middleware;
 
@@ -37,12 +38,30 @@ public class ExceptionMiddleware(
             ForbiddenException => StatusCodes.Status403Forbidden,
             NotFoundException => StatusCodes.Status404NotFound,
             ConflictException => StatusCodes.Status409Conflict,
+            KycAttemptLimitExceededException => StatusCodes.Status429TooManyRequests,
             BadRequestException => StatusCodes.Status400BadRequest,
             ServiceUnavailableException => StatusCodes.Status503ServiceUnavailable,
             _ => StatusCodes.Status500InternalServerError
         };
 
         context.Response.StatusCode = statusCode;
+
+        if (exception is KycAttemptLimitExceededException limitException)
+        {
+            await context.Response.WriteAsync(
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        statusCode,
+                        message = exception.Message,
+                        attemptAllowance = limitException.AttemptAllowance
+                    },
+                    new JsonSerializerOptions
+                    {
+                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                    }));
+            return;
+        }
 
         var response = new ErrorResponseDto
         {

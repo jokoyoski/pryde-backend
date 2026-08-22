@@ -62,70 +62,71 @@ public class DojahKycProvider(
     {
         EnsureEnabled();
 
-        var kyc = await unitOfWork.KycVerifications
-            .GetByUserIdAsync(userId, cancellationToken);
-
-        var requiresSave = false;
-
-        if (kyc is null)
-        {
-            kyc = new KycVerification
+        return await unitOfWork.ExecuteInTransactionAsync(
+            async transactionToken =>
             {
-                UserId = userId,
-                Status = KycStatus.Pending,
-                ProviderName = ProviderName,
-                ProviderReference = CreateReference()
-            };
+                var kyc = await unitOfWork.KycVerifications
+                    .GetByUserIdForUpdateAsync(userId, transactionToken);
+                var requiresSave = false;
 
-            await unitOfWork.KycVerifications.CreateAsync(
-                kyc,
-                cancellationToken);
+                if (kyc is null)
+                {
+                    kyc = new KycVerification
+                    {
+                        UserId = userId,
+                        Status = KycStatus.Pending,
+                        ProviderName = ProviderName,
+                        ProviderReference = CreateReference()
+                    };
 
-            requiresSave = true;
-        }
-        else if (!string.IsNullOrWhiteSpace(kyc.ProviderName) &&
-                 !string.Equals(
-                     kyc.ProviderName,
-                     ProviderName,
-                     StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ConflictException(
-                "The pending KYC verification belongs to another provider.");
-        }
-        else if (kyc.ProviderReference?.StartsWith(
-                     "SMILE-GROUP-",
-                     StringComparison.OrdinalIgnoreCase) == true)
-        {
-            throw new ConflictException(
-                "The pending KYC verification belongs to another provider.");
-        }
-        else if (string.IsNullOrWhiteSpace(kyc.ProviderReference))
-        {
-            kyc.ProviderName = ProviderName;
-            kyc.ProviderReference = CreateReference();
+                    await unitOfWork.KycVerifications.CreateAsync(
+                        kyc,
+                        transactionToken);
+                    requiresSave = true;
+                }
+                else if (!string.IsNullOrWhiteSpace(kyc.ProviderName) &&
+                         !string.Equals(
+                             kyc.ProviderName,
+                             ProviderName,
+                             StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ConflictException(
+                        "The pending KYC verification belongs to another provider.");
+                }
+                else if (kyc.ProviderReference?.StartsWith(
+                             "SMILE-GROUP-",
+                             StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    throw new ConflictException(
+                        "The pending KYC verification belongs to another provider.");
+                }
+                else if (string.IsNullOrWhiteSpace(kyc.ProviderReference))
+                {
+                    kyc.ProviderName = ProviderName;
+                    kyc.ProviderReference = CreateReference();
+                    unitOfWork.KycVerifications.Update(kyc);
+                    requiresSave = true;
+                }
+                else if (string.IsNullOrWhiteSpace(kyc.ProviderName))
+                {
+                    kyc.ProviderName = ProviderName;
+                    unitOfWork.KycVerifications.Update(kyc);
+                    requiresSave = true;
+                }
 
-            unitOfWork.KycVerifications.Update(kyc);
+                if (await EnsureAttemptExistsAsync(kyc, transactionToken))
+                {
+                    requiresSave = true;
+                }
 
-            requiresSave = true;
-        }
-        else if (string.IsNullOrWhiteSpace(kyc.ProviderName))
-        {
-            kyc.ProviderName = ProviderName;
-            unitOfWork.KycVerifications.Update(kyc);
-            requiresSave = true;
-        }
+                if (requiresSave)
+                {
+                    await unitOfWork.SaveChangesAsync(transactionToken);
+                }
 
-        if (await EnsureAttemptExistsAsync(kyc, cancellationToken))
-        {
-            requiresSave = true;
-        }
-
-        if (requiresSave)
-        {
-            await unitOfWork.SaveChangesAsync(cancellationToken);
-        }
-
-        return CreateConfigResponse(kyc);
+                return CreateConfigResponse(kyc);
+            },
+            cancellationToken);
     }
 
     public async Task<DojahKycConfigResponseDto> RetryAsync(
@@ -159,7 +160,10 @@ public class DojahKycProvider(
                         "SMILE-GROUP-",
                         StringComparison.OrdinalIgnoreCase) != true)
                 {
-                    await EnsureAttemptExistsAsync(kyc, transactionToken);
+                    if (await EnsureAttemptExistsAsync(kyc, transactionToken))
+                    {
+                        await unitOfWork.SaveChangesAsync(transactionToken);
+                    }
                 }
 
                 kyc.Status = KycStatus.Pending;
@@ -1003,8 +1007,16 @@ public class DojahKycProvider(
             return false;
         }
 
+        var attempt = CreateAttempt(kyc, startedAt);
+        await KycAttemptAllowanceCalculator.EnsureCanCreateAsync(
+            unitOfWork,
+            kyc.Id,
+            attempt.AttemptGroupReference ?? attempt.CorrelationReference,
+            _kycSettings ?? new KycSettings(),
+            DateTime.UtcNow,
+            cancellationToken);
         await unitOfWork.KycVerificationAttempts.CreateAsync(
-            CreateAttempt(kyc, startedAt),
+            attempt,
             cancellationToken);
         return true;
     }
