@@ -1,4 +1,5 @@
 using Pryde.Domain.Enums;
+using Pryde.Contracts.ResponseModels;
 
 namespace Pryde.Services.Providers.Kyc;
 
@@ -20,6 +21,7 @@ public sealed class KycProviderResult
     public IReadOnlyDictionary<string, string> Metadata { get; init; } =
         new Dictionary<string, string>();
     public IReadOnlyList<KycProviderSession> Sessions { get; init; } = [];
+    public KycAttemptAllowanceResponseDto AttemptAllowance { get; set; } = new();
 }
 
 public sealed class KycProviderSession

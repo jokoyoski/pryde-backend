@@ -2,6 +2,7 @@ using Pryde.Domain.Entities;
 using Pryde.Domain.Common;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
+using System.Reflection;
 
 namespace Pryde.Tests.TestInfrastructure;
 
@@ -125,6 +126,10 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         TransactionCount++;
         IsTransactionActive = true;
         var users = UserRepository.Items.ToList();
+        var kycVerifications = Capture(
+            KycVerificationRepository.Items);
+        var kycAttempts = Capture(
+            KycVerificationAttemptRepository.Items);
 
         try
         {
@@ -134,6 +139,12 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         {
             UserRepository.Items.Clear();
             UserRepository.Items.AddRange(users);
+            Restore(
+                KycVerificationRepository.Items,
+                kycVerifications);
+            Restore(
+                KycVerificationAttemptRepository.Items,
+                kycAttempts);
             throw;
         }
         finally
@@ -154,6 +165,46 @@ internal sealed class TestUnitOfWork : IUnitOfWork
 
     public void ClearTracking()
     {
+    }
+
+    private static Dictionary<T, Dictionary<PropertyInfo, object?>> Capture<T>(
+        IEnumerable<T> items)
+        where T : class =>
+        items.ToDictionary(
+            item => item,
+            item => typeof(T).GetProperties()
+                .Where(property =>
+                    property.CanRead &&
+                    property.CanWrite &&
+                    IsScalar(property.PropertyType))
+                .ToDictionary(
+                    property => property,
+                    property => property.GetValue(item)));
+
+    private static void Restore<T>(
+        List<T> items,
+        Dictionary<T, Dictionary<PropertyInfo, object?>> snapshots)
+        where T : class
+    {
+        items.RemoveAll(item => !snapshots.ContainsKey(item));
+        foreach (var (item, values) in snapshots)
+        {
+            if (!items.Contains(item))
+            {
+                items.Add(item);
+            }
+
+            foreach (var (property, value) in values)
+            {
+                property.SetValue(item, value);
+            }
+        }
+    }
+
+    private static bool IsScalar(Type type)
+    {
+        var underlying = Nullable.GetUnderlyingType(type) ?? type;
+        return underlying.IsValueType || underlying == typeof(string);
     }
 }
 
@@ -1037,6 +1088,25 @@ internal sealed class TestKycVerificationAttemptRepository
         Task.FromResult<IReadOnlyList<KycVerificationAttempt>>(
             Items.Where(x => x.KycVerificationId == kycVerificationId)
                 .OrderBy(x => x.StartedAt)
+                .ToList());
+
+    public Task<IReadOnlyList<string>> GetDistinctAttemptReferencesAsync(
+        Guid kycVerificationId,
+        DateTime startedAtInclusive,
+        DateTime startedAtExclusive,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<string>>(
+            Items.Where(x =>
+                    x.KycVerificationId == kycVerificationId &&
+                    !x.IsDeleted &&
+                    x.StartedAt >= startedAtInclusive &&
+                    x.StartedAt < startedAtExclusive &&
+                    !string.Equals(
+                        x.RawStatus,
+                        "LinkCreationFailed",
+                        StringComparison.Ordinal))
+                .Select(x => x.AttemptGroupReference ?? x.CorrelationReference)
+                .Distinct(StringComparer.Ordinal)
                 .ToList());
 
     public Task<KycVerificationAttempt> CreateAsync(

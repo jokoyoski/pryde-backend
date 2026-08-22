@@ -30,6 +30,23 @@ public class KycVerificationAttemptRepository(PrydeDbContext context) : IKycVeri
     public async Task<IReadOnlyList<KycVerificationAttempt>> GetByKycVerificationIdAsync(Guid kycVerificationId, CancellationToken cancellationToken = default) =>
         await context.KycVerificationAttempts.AsNoTracking().Where(x => x.KycVerificationId == kycVerificationId).OrderBy(x => x.StartedAt).ToListAsync(cancellationToken);
 
+    public async Task<IReadOnlyList<string>> GetDistinctAttemptReferencesAsync(
+        Guid kycVerificationId,
+        DateTime startedAtInclusive,
+        DateTime startedAtExclusive,
+        CancellationToken cancellationToken = default) =>
+        await context.KycVerificationAttempts
+            .AsNoTracking()
+            .Where(x =>
+                x.KycVerificationId == kycVerificationId &&
+                !x.IsDeleted &&
+                x.StartedAt >= startedAtInclusive &&
+                x.StartedAt < startedAtExclusive &&
+                (x.RawStatus == null || x.RawStatus != "LinkCreationFailed"))
+            .Select(x => x.AttemptGroupReference ?? x.CorrelationReference)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
     public async Task<KycVerificationAttempt> CreateAsync(KycVerificationAttempt attempt, CancellationToken cancellationToken = default)
     {
         await context.KycVerificationAttempts.AddAsync(attempt, cancellationToken);

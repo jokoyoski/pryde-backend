@@ -21,6 +21,7 @@ public class KycVerificationResponseDto : WorkflowResponseDto
     public string? VerificationMethod { get; set; }
     public bool CallbackConfirmed { get; set; }
     public bool CanRetry { get; set; }
+    public KycAttemptAllowanceResponseDto AttemptAllowance { get; set; } = new();
     public IReadOnlyList<KycFlowStatusResponseDto> Flows { get; set; } = [];
 }
 

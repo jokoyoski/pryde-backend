@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
@@ -11,8 +12,12 @@ namespace Pryde.Services.Service.Implementation;
 public sealed class KycProviderService(
     IKycProviderResolver resolver,
     IUnitOfWork unitOfWork,
-    ILogger<KycProviderService> logger) : IKycProviderService
+    ILogger<KycProviderService> logger,
+    IOptions<KycSettings>? kycOptions = null) : IKycProviderService
 {
+    private readonly KycSettings _kycSettings =
+        kycOptions?.Value ?? new KycSettings();
+
     public async Task<KycProviderResult> CreateSessionAsync(
         Guid userId,
         CancellationToken cancellationToken = default) =>
@@ -28,19 +33,26 @@ public sealed class KycProviderService(
             cancellationToken);
         if (kyc?.Status == KycStatus.Approved)
         {
-            return CreateValidatedStatusResult(kyc, KycProviderStatus.Approved);
+            return await AddAttemptAllowanceAsync(
+                CreateValidatedStatusResult(kyc, KycProviderStatus.Approved),
+                kyc,
+                cancellationToken);
         }
 
         var recoveredKyc = kyc is null
             ? null
             : await MakeIncompleteSmileAttemptRetryableAsync(
                 kyc,
+                false,
                 cancellationToken);
         if (recoveredKyc is not null)
         {
-            return CreateValidatedStatusResult(
+            return await AddAttemptAllowanceAsync(
+                CreateValidatedStatusResult(
+                    recoveredKyc,
+                    KycProviderStatus.Rejected),
                 recoveredKyc,
-                KycProviderStatus.Rejected);
+                cancellationToken);
         }
 
         var provider = kyc is null
@@ -50,7 +62,12 @@ public sealed class KycProviderService(
             new KycProviderRequest(userId, selectedIdType),
             cancellationToken);
         KycProviderResultInvariant.Ensure(provider.Name, result);
-        return result;
+        return await AddAttemptAllowanceAsync(
+            result,
+            await unitOfWork.KycVerifications.GetByUserIdAsync(
+                userId,
+                cancellationToken),
+            cancellationToken);
     }
 
     public async Task<KycProviderResult> RetryAsync(
@@ -62,13 +79,17 @@ public sealed class KycProviderService(
             cancellationToken);
         if (kyc?.Status == KycStatus.Approved)
         {
-            return CreateValidatedStatusResult(kyc, KycProviderStatus.Approved);
+            return await AddAttemptAllowanceAsync(
+                CreateValidatedStatusResult(kyc, KycProviderStatus.Approved),
+                kyc,
+                cancellationToken);
         }
 
         if (kyc is not null)
         {
             await MakeIncompleteSmileAttemptRetryableAsync(
                 kyc,
+                true,
                 cancellationToken);
         }
 
@@ -77,7 +98,12 @@ public sealed class KycProviderService(
             new KycProviderRequest(userId),
             cancellationToken);
         KycProviderResultInvariant.Ensure(provider.Name, result);
-        return result;
+        return await AddAttemptAllowanceAsync(
+            result,
+            await unitOfWork.KycVerifications.GetByUserIdAsync(
+                userId,
+                cancellationToken),
+            cancellationToken);
     }
 
     private async Task<IKycProvider> ResolveOwnerAsync(
@@ -132,6 +158,7 @@ public sealed class KycProviderService(
 
     private async Task<KycVerification?> MakeIncompleteSmileAttemptRetryableAsync(
         KycVerification kyc,
+        bool enforceAttemptLimit,
         CancellationToken cancellationToken)
     {
         if (kyc.Status is KycStatus.Approved or KycStatus.Rejected ||
@@ -163,6 +190,17 @@ public sealed class KycProviderService(
             if (incomplete.Count == 0)
             {
                 return null;
+            }
+
+            if (enforceAttemptLimit)
+            {
+                await KycAttemptAllowanceCalculator.EnsureCanCreateAsync(
+                    unitOfWork,
+                    lockedKyc.Id,
+                    $"preflight-{Guid.NewGuid():N}",
+                    _kycSettings,
+                    DateTime.UtcNow,
+                    transactionToken);
             }
 
             var now = DateTime.UtcNow;
@@ -242,6 +280,29 @@ public sealed class KycProviderService(
             Status = status
         };
         KycProviderResultInvariant.Ensure(result.Provider, result);
+        return result;
+    }
+
+    private async Task<KycProviderResult> AddAttemptAllowanceAsync(
+        KycProviderResult result,
+        KycVerification? kyc,
+        CancellationToken cancellationToken)
+    {
+        if (kyc is null)
+        {
+            result.AttemptAllowance =
+                KycAttemptAllowanceCalculator.CreateEmpty(
+                    _kycSettings,
+                    DateTime.UtcNow);
+            return result;
+        }
+
+        result.AttemptAllowance = await KycAttemptAllowanceCalculator.GetAsync(
+            unitOfWork,
+            kyc.Id,
+            _kycSettings,
+            DateTime.UtcNow,
+            cancellationToken);
         return result;
     }
 

@@ -1,4 +1,5 @@
 using Mapster;
+using Microsoft.Extensions.Options;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Constants;
@@ -6,15 +7,20 @@ using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Service.Interface;
+using Pryde.Services.Providers.Kyc;
+using Pryde.Services.Settings;
 
 namespace Pryde.Services.Service.Implementation;
 
 public class KycService(
     IUnitOfWork unitOfWork,
-    INotificationService notificationService) : IKycService
+    INotificationService notificationService,
+    IOptions<KycSettings>? kycOptions = null) : IKycService
 {
     private const string DojahProviderName = "Dojah";
     private const string DojahCompletedStatus = "Completed";
+    private readonly KycSettings _kycSettings =
+        kycOptions?.Value ?? new KycSettings();
 
     public KycService(IUnitOfWork unitOfWork)
         : this(
@@ -37,8 +43,16 @@ public class KycService(
         }
 
         var response = kyc.Adapt<KycVerificationResponseDto>();
+        response.AttemptAllowance = await KycAttemptAllowanceCalculator.GetAsync(
+            unitOfWork,
+            kyc.Id,
+            _kycSettings,
+            DateTime.UtcNow,
+            cancellationToken);
         if (!string.Equals(kyc.ProviderName, "SmileId", StringComparison.OrdinalIgnoreCase))
         {
+            response.CanRetry = kyc.Status == KycStatus.Rejected &&
+                                response.AttemptAllowance.CanAttempt;
             return response;
         }
 
@@ -59,6 +73,13 @@ public class KycService(
 
             var attempts = await unitOfWork.KycVerificationAttempts
                 .GetByKycVerificationIdAsync(lockedKyc.Id, transactionToken);
+            lockedResponse.AttemptAllowance =
+                await KycAttemptAllowanceCalculator.GetAsync(
+                    unitOfWork,
+                    lockedKyc.Id,
+                    _kycSettings,
+                    DateTime.UtcNow,
+                    transactionToken);
             var latest = attempts
                 .Where(x => x.ProviderName == "SmileId" &&
                             x.AttemptGroupReference == lockedKyc.ProviderReference)
@@ -88,7 +109,8 @@ public class KycService(
                     VerificationMethod = attempt?.VerificationMethod,
                     CallbackConfirmed = attempt?.ProviderEventTimestamp.HasValue == true,
                     CanRetry = lockedKyc.Status != KycStatus.Approved &&
-                               attempt?.Status == KycProviderStatus.Rejected
+                               attempt?.Status == KycProviderStatus.Rejected &&
+                               lockedResponse.AttemptAllowance.CanAttempt
                 };
             }).ToList();
             var latestAttempt = latest.Values
