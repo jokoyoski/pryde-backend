@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
@@ -7,12 +8,14 @@ using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Service.Interface;
+using Pryde.Services.Settings;
 
 namespace Pryde.Services.Service.Implementation;
 
 public class FinancialService(
     IUnitOfWork unitOfWork,
-    INotificationService notificationService) : IFinancialService
+    INotificationService notificationService,
+    IOptions<PricingSettings>? pricingOptions = null) : IFinancialService
 {
     private const string Currency = "NGN";
     private const string EscrowAccountCode = "SYSTEM:ESCROW:NGN";
@@ -24,7 +27,17 @@ public class FinancialService(
     private const string PaystackProvider = "Paystack";
 
     public FinancialService(IUnitOfWork unitOfWork)
-        : this(unitOfWork, new NotificationService(unitOfWork))
+        : this(unitOfWork, new NotificationService(unitOfWork), null)
+    {
+    }
+
+    public FinancialService(
+        IUnitOfWork unitOfWork,
+        IOptions<PricingSettings> pricingOptions)
+        : this(
+            unitOfWork,
+            new NotificationService(unitOfWork),
+            pricingOptions)
     {
     }
 
@@ -138,6 +151,22 @@ public class FinancialService(
                     "Booking Escrow",
                     LedgerAccountType.Escrow,
                     transactionToken);
+                var pricing = pricingOptions?.Value
+                    ?? throw new InvalidOperationException(
+                        "PricingSettings configuration is required to hold a booking payment.");
+                if (!PricingSettings.HasValidPlatformShare(pricing))
+                {
+                    throw new InvalidOperationException(
+                        PricingSettings.PlatformShareValidationError);
+                }
+
+                var driverAmount = Math.Round(
+                    booking.SeatPrice *
+                    (100m - pricing.PlatformSharePercent) /
+                    100m,
+                    2);
+                var platformAmount =
+                    booking.TotalAmount - driverAmount;
                 var escrow = new Escrow
                 {
                     BookingId = booking.Id,
@@ -145,8 +174,8 @@ public class FinancialService(
                     PassengerId = passengerId,
                     DriverId = trip.DriverId,
                     Amount = booking.TotalAmount,
-                    DriverAmount = booking.SeatPrice,
-                    PlatformAmount = booking.ServiceCharge,
+                    DriverAmount = driverAmount,
+                    PlatformAmount = platformAmount,
                     Currency = Currency,
                     Status = EscrowStatus.Held,
                     HeldAt = now

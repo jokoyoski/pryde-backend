@@ -1,9 +1,11 @@
+using Microsoft.Extensions.Options;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Services.Service.Implementation;
+using Pryde.Services.Settings;
 using Pryde.Tests.TestInfrastructure;
 
 namespace Pryde.Tests.Services;
@@ -14,7 +16,7 @@ public class FinancialServiceTests
     public async Task HoldPaymentMovesWalletFundsAndPostsBalancedLedgerEntries()
     {
         var context = CreateContext();
-        var service = new FinancialService(context.UnitOfWork);
+        var service = CreateService(context.UnitOfWork);
 
         var result = await service.HoldBookingPaymentAsync(
             context.Passenger.Id, context.Booking.Id, "payment-1");
@@ -36,12 +38,96 @@ public class FinancialServiceTests
     }
 
     [Fact]
+    public async Task ConfiguredPlatformShareCreatesConfirmedSplitWithoutChangingPassengerTotal()
+    {
+        var context = CreateContext();
+        context.Booking.SeatPrice = 2250m;
+        context.Booking.ServiceCharge = 112.50m;
+        context.Booking.TotalAmount = 2362.50m;
+
+        var result = await CreateService(context.UnitOfWork)
+            .HoldBookingPaymentAsync(
+                context.Passenger.Id,
+                context.Booking.Id,
+                "confirmed-split");
+
+        Assert.Equal(2362.50m, context.Booking.TotalAmount);
+        Assert.Equal(2362.50m, result.Amount);
+        Assert.Equal(1575m, result.DriverAmount);
+        Assert.Equal(787.50m, result.PlatformAmount);
+        Assert.Equal(
+            result.Amount,
+            result.DriverAmount + result.PlatformAmount);
+        Assert.Equal(637.50m, context.PassengerWallet.Balance);
+        Assert.Equal(2362.50m, context.PassengerWallet.EscrowBalance);
+    }
+
+    [Fact]
+    public async Task StoredSplitUsesConfiguredPercentageInsteadOfHardcodedValue()
+    {
+        var context = CreateContext();
+
+        var result = await CreateService(
+                context.UnitOfWork,
+                25m)
+            .HoldBookingPaymentAsync(
+                context.Passenger.Id,
+                context.Booking.Id,
+                "configured-split");
+
+        Assert.Equal(1800m, result.DriverAmount);
+        Assert.Equal(700m, result.PlatformAmount);
+        Assert.Equal(2500m, result.Amount);
+    }
+
+    [Fact]
+    public async Task UnevenSeatPriceRoundingKeepsEscrowExactlyBalanced()
+    {
+        var context = CreateContext();
+        context.Booking.SeatPrice = 100.01m;
+        context.Booking.ServiceCharge = 5m;
+        context.Booking.TotalAmount = 105.01m;
+
+        var result = await CreateService(context.UnitOfWork)
+            .HoldBookingPaymentAsync(
+                context.Passenger.Id,
+                context.Booking.Id,
+                "rounded-split");
+
+        Assert.Equal(70.01m, result.DriverAmount);
+        Assert.Equal(35m, result.PlatformAmount);
+        Assert.Equal(
+            result.Amount,
+            result.DriverAmount + result.PlatformAmount);
+        AssertBalanced(
+            context.UnitOfWork.LedgerRepository.Transactions.Single());
+    }
+
+    [Fact]
+    public async Task ExistingBookingPriceIsNotRepricedFromCurrentTripValues()
+    {
+        var context = CreateContext();
+        context.Trip.SeatPrice = 9999m;
+        context.Trip.ServiceChargePercentage = 99m;
+
+        var result = await CreateService(context.UnitOfWork)
+            .HoldBookingPaymentAsync(
+                context.Passenger.Id,
+                context.Booking.Id,
+                "frozen-booking-price");
+
+        Assert.Equal(2500m, result.Amount);
+        Assert.Equal(1680m, result.DriverAmount);
+        Assert.Equal(820m, result.PlatformAmount);
+    }
+
+    [Fact]
     public async Task BookingPaymentReturnsNextTripAction()
     {
         var context = CreateContext();
         var service = new TripBookingService(
             context.UnitOfWork,
-            new FinancialService(context.UnitOfWork));
+            CreateService(context.UnitOfWork));
 
         var result = await service.PayAsync(
             context.Booking.Id,
@@ -60,7 +146,7 @@ public class FinancialServiceTests
     public async Task SameIdempotencyKeyDoesNotDebitTwice()
     {
         var context = CreateContext();
-        var service = new FinancialService(context.UnitOfWork);
+        var service = CreateService(context.UnitOfWork);
 
         var first = await service.HoldBookingPaymentAsync(context.Passenger.Id, context.Booking.Id, "same-key");
         var second = await service.HoldBookingPaymentAsync(context.Passenger.Id, context.Booking.Id, "same-key");
@@ -74,7 +160,7 @@ public class FinancialServiceTests
     public async Task DifferentKeyCannotPayAnAlreadyPaidBooking()
     {
         var context = CreateContext();
-        var service = new FinancialService(context.UnitOfWork);
+        var service = CreateService(context.UnitOfWork);
         await service.HoldBookingPaymentAsync(context.Passenger.Id, context.Booking.Id, "first-key");
 
         await Assert.ThrowsAsync<ConflictException>(() =>
@@ -85,7 +171,7 @@ public class FinancialServiceTests
     public async Task RefundRestoresPassengerWalletAndRejectsSecondRefund()
     {
         var context = CreateContext();
-        var service = new FinancialService(context.UnitOfWork);
+        var service = CreateService(context.UnitOfWork);
         await service.HoldBookingPaymentAsync(context.Passenger.Id, context.Booking.Id, "refund-hold");
 
         await service.RefundBookingAsync(context.Booking.Id);
@@ -103,7 +189,7 @@ public class FinancialServiceTests
     public async Task ReleasedEscrowCannotBeRefunded()
     {
         var context = CreateContext();
-        var service = new FinancialService(context.UnitOfWork);
+        var service = CreateService(context.UnitOfWork);
         await service.HoldBookingPaymentAsync(
             context.Passenger.Id,
             context.Booking.Id,
@@ -125,7 +211,7 @@ public class FinancialServiceTests
     {
         var context = CreateContext();
         context.Trip.DepartureTime = DateTime.UtcNow.AddMinutes(-30);
-        var service = new FinancialService(context.UnitOfWork);
+        var service = CreateService(context.UnitOfWork);
         await service.HoldBookingPaymentAsync(context.Passenger.Id, context.Booking.Id, "release-hold");
         context.Trip.Status =
             TripStatus.DropoffConfirmationPending;
@@ -135,10 +221,34 @@ public class FinancialServiceTests
         await service.CompleteTripAsync(context.Trip.Id, context.Driver.Id);
         var summary = await service.GetSummaryAsync();
 
-        Assert.Equal(2400m, context.DriverWallet.Balance);
-        Assert.Equal(2400m, context.DriverWallet.WithdrawableBalance);
-        Assert.Equal(100m, summary.TotalPlatformEarnings);
-        Assert.Equal(2400m, summary.TotalDriverPayouts);
+        Assert.Equal(1680m, context.DriverWallet.Balance);
+        Assert.Equal(1680m, context.DriverWallet.WithdrawableBalance);
+        Assert.Equal(820m, summary.TotalPlatformEarnings);
+        Assert.Equal(1680m, summary.TotalDriverPayouts);
+        Assert.Equal(
+            1680m,
+            Assert.Single(
+                context.UnitOfWork.WalletTransactionRepository.Items,
+                transaction =>
+                    transaction.Type ==
+                    WalletTransactionType.EscrowRelease).Amount);
+        var release = Assert.Single(
+            context.UnitOfWork.LedgerRepository.Transactions,
+            transaction =>
+                transaction.TransactionType ==
+                LedgerTransactionType.EscrowRelease);
+        Assert.Equal(
+            1680m,
+            release.Entries.Single(entry =>
+                entry.EntryType == LedgerEntryType.Credit &&
+                entry.LedgerAccount.AccountType ==
+                    LedgerAccountType.Wallet).Amount);
+        Assert.Equal(
+            820m,
+            release.Entries.Single(entry =>
+                entry.EntryType == LedgerEntryType.Credit &&
+                entry.LedgerAccount.AccountType ==
+                    LedgerAccountType.PlatformRevenue).Amount);
         Assert.Equal(EscrowStatus.Released, context.UnitOfWork.EscrowRepository.Items.Single().Status);
         Assert.Equal(TripStatus.Completed, context.Trip.Status);
         Assert.NotNull(context.Trip.CompletedAt);
@@ -162,10 +272,71 @@ public class FinancialServiceTests
     }
 
     [Fact]
+    public async Task ManualCompletionReleasesExistingStoredSplitWithoutRepricing()
+    {
+        var context = CreateContext();
+        context.Trip.Status =
+            TripStatus.DropoffConfirmationPending;
+        context.Booking.PaidAt = DateTime.UtcNow.AddMinutes(-30);
+        context.Booking.DropoffConfirmed = true;
+        context.PassengerWallet.EscrowBalance = 2500m;
+        var escrow = new Escrow
+        {
+            BookingId = context.Booking.Id,
+            Booking = context.Booking,
+            PassengerId = context.Passenger.Id,
+            DriverId = context.Driver.Id,
+            Amount = 2500m,
+            DriverAmount = 2400m,
+            PlatformAmount = 100m,
+            Status = EscrowStatus.Held,
+            HeldAt = DateTime.UtcNow.AddMinutes(-30)
+        };
+        context.Booking.Escrow = escrow;
+        context.UnitOfWork.EscrowRepository.Items.Add(escrow);
+
+        var service = CreateService(
+            context.UnitOfWork,
+            30m);
+        await service.CompleteTripAsync(
+            context.Trip.Id,
+            context.Driver.Id);
+        var summary = await service.GetSummaryAsync();
+
+        Assert.Equal(2400m, context.DriverWallet.Balance);
+        Assert.Equal(
+            2400m,
+            context.DriverWallet.WithdrawableBalance);
+        Assert.Equal(100m, summary.TotalPlatformEarnings);
+        Assert.Equal(2400m, summary.TotalDriverPayouts);
+        Assert.Equal(EscrowStatus.Released, escrow.Status);
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(30, true)]
+    [InlineData(100, true)]
+    [InlineData(-0.01, false)]
+    [InlineData(100.01, false)]
+    public void PlatformShareValidationRequiresInclusiveZeroToOneHundred(
+        double platformSharePercent,
+        bool expected)
+    {
+        var settings = new PricingSettings
+        {
+            PlatformSharePercent = (decimal)platformSharePercent
+        };
+
+        Assert.Equal(
+            expected,
+            PricingSettings.HasValidPlatformShare(settings));
+    }
+
+    [Fact]
     public async Task EscrowListingFiltersByStatusAndLedgerDetailIsBalanced()
     {
         var context = CreateContext();
-        var service = new FinancialService(context.UnitOfWork);
+        var service = CreateService(context.UnitOfWork);
         await service.HoldBookingPaymentAsync(context.Passenger.Id, context.Booking.Id, "list-hold");
 
         var escrows = await service.GetEscrowsAsync(new AdminEscrowsRequestDto
@@ -189,7 +360,7 @@ public class FinancialServiceTests
         context.Trip.AvailableSeats = 1;
         context.Booking.PaymentExpiresAt =
             DateTime.UtcNow.AddMinutes(-1);
-        var service = new FinancialService(
+        var service = CreateService(
             context.UnitOfWork);
 
         var first = await service
@@ -218,7 +389,7 @@ public class FinancialServiceTests
         context.Booking.PaymentExpiresAt =
             DateTime.UtcNow.AddMinutes(-2);
 
-        var expired = await new FinancialService(
+        var expired = await CreateService(
                 context.UnitOfWork)
             .ExpireUnpaidApprovedBookingAsync(
                 context.Booking.Id,
@@ -237,7 +408,7 @@ public class FinancialServiceTests
         context.Booking.PaymentExpiresAt =
             DateTime.UtcNow.AddMinutes(1);
 
-        var expired = await new FinancialService(
+        var expired = await CreateService(
                 context.UnitOfWork)
             .ExpireUnpaidApprovedBookingAsync(
                 context.Booking.Id,
@@ -261,7 +432,7 @@ public class FinancialServiceTests
 
         var exception = await Assert.ThrowsAsync<
             ConflictException>(() =>
-            new FinancialService(context.UnitOfWork)
+            CreateService(context.UnitOfWork)
                 .HoldBookingPaymentAsync(
                     context.Passenger.Id,
                     context.Booking.Id,
@@ -291,7 +462,7 @@ public class FinancialServiceTests
         context.Booking.PaymentExpiresAt =
             DateTime.UtcNow.AddMinutes(1);
 
-        var result = await new FinancialService(
+        var result = await CreateService(
                 context.UnitOfWork)
             .HoldBookingPaymentAsync(
                 context.Passenger.Id,
@@ -310,7 +481,7 @@ public class FinancialServiceTests
         context.Trip.AvailableSeats = 1;
         context.Booking.PaymentExpiresAt =
             DateTime.UtcNow.AddMinutes(-1);
-        var service = new FinancialService(
+        var service = CreateService(
             context.UnitOfWork);
 
         var paymentTask = CaptureConflictAsync(() =>
@@ -361,7 +532,7 @@ public class FinancialServiceTests
         };
         unitOfWork.WalletRepository.Items.Add(wallet);
         unitOfWork.WalletTransactionRepository.Items.Add(withdrawal);
-        var service = new FinancialService(unitOfWork);
+        var service = CreateService(unitOfWork);
 
         var first = await service.ProcessPaystackTransferStatusAsync(
             withdrawal.Reference,
@@ -411,7 +582,7 @@ public class FinancialServiceTests
         unitOfWork.WalletRepository.Items.Add(wallet);
         unitOfWork.WalletTransactionRepository.Items.Add(withdrawal);
 
-        var handled = await new FinancialService(unitOfWork)
+        var handled = await CreateService(unitOfWork)
             .ProcessPaystackTransferStatusAsync(
                 withdrawal.Reference,
                 50000,
@@ -482,6 +653,16 @@ public class FinancialServiceTests
         unitOfWork.WalletRepository.Items.AddRange([passengerWallet, driverWallet]);
         return new FinancialContext(unitOfWork, driver, passenger, trip, booking, driverWallet, passengerWallet);
     }
+
+    private static FinancialService CreateService(
+        TestUnitOfWork unitOfWork,
+        decimal platformSharePercent = 30m) =>
+        new(
+            unitOfWork,
+            Options.Create(new PricingSettings
+            {
+                PlatformSharePercent = platformSharePercent
+            }));
 
     private static void AssertBalanced(LedgerTransaction transaction)
     {

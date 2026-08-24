@@ -10,3 +10,4 @@ TestResults/
 
 # Environment files
 .env
+.diagnostics/

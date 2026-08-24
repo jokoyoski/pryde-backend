@@ -78,8 +78,14 @@ builder.Services.AddHttpClient<IEmailService, ResendEmailService>();
 builder.Services.AddAuthenticationConfiguration(
     builder.Configuration);
 
-builder.Services.Configure<PricingSettings>(
-    builder.Configuration.GetSection("PricingSettings"));
+builder.Services
+    .AddOptions<PricingSettings>()
+    .Bind(builder.Configuration.GetSection(
+        PricingSettings.SectionName))
+    .Validate(
+        PricingSettings.HasValidPlatformShare,
+        PricingSettings.PlatformShareValidationError)
+    .ValidateOnStart();
 
 builder.Services
     .AddOptions<TripSettings>()
