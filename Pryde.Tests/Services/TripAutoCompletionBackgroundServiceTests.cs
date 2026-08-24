@@ -29,7 +29,33 @@ public class TripAutoCompletionBackgroundServiceTests
         Assert.NotNull(context.Trip.AutoCompletedAt);
         Assert.Equal(EscrowStatus.Released, context.Escrow.Status);
         Assert.Equal(100m, context.DriverWallet.Balance);
+        Assert.Equal(
+            100m,
+            context.DriverWallet.WithdrawableBalance);
         Assert.Equal(BookingStatus.Completed, context.Booking.Status);
+        var release = Assert.Single(
+            unitOfWork.LedgerRepository.Transactions);
+        Assert.Equal(
+            100m,
+            release.Entries.Single(entry =>
+                entry.EntryType == LedgerEntryType.Credit &&
+                entry.LedgerAccount.AccountType ==
+                    LedgerAccountType.Wallet).Amount);
+        Assert.Equal(
+            10m,
+            release.Entries.Single(entry =>
+                entry.EntryType == LedgerEntryType.Credit &&
+                entry.LedgerAccount.AccountType ==
+                    LedgerAccountType.PlatformRevenue).Amount);
+        Assert.Equal(
+            release.Entries
+                .Where(entry =>
+                    entry.EntryType == LedgerEntryType.Debit)
+                .Sum(entry => entry.Amount),
+            release.Entries
+                .Where(entry =>
+                    entry.EntryType == LedgerEntryType.Credit)
+                .Sum(entry => entry.Amount));
     }
 
     [Fact]
