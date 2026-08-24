@@ -35,6 +35,7 @@ public interface ITripRepository
         CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Trip>> GetActiveAsync(CancellationToken cancellationToken = default);
     Task<bool> RecurringOccurrenceExistsAsync(Guid recurringTripId, DateTime departureTime, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Trip>> GetOpenRecurringOccurrencesAsync(DateTime utcNow, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Guid>> GetExpiredConfirmationTripIdsAsync(
         DateTime utcNow,
         CancellationToken cancellationToken = default);
