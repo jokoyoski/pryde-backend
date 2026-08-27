@@ -33,3 +33,7 @@ public class AdminRecurringTripsRequestDto : PaginationRequestDto
     public bool? IsActive { get; set; }
     public bool? IsCancelled { get; set; }
 }
+
+public class SavedRecurringTripsRequestDto : PaginationRequestDto
+{
+}

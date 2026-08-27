@@ -23,6 +23,7 @@ public class UnitOfWork(
     ITripRepository trip,
     IRecurringTripRepository recurringTrip,
     ITripSubscriptionRepository tripSubscription,
+    ISavedRecurringTripRepository savedRecurringTrip,
     IWalletRepository wallet,
     IWalletTransactionRepository walletTransaction,
     IPaystackWalletFundingRequestRepository paystackFundingRequest,
@@ -51,6 +52,7 @@ public class UnitOfWork(
     public ITripRepository Trips { get; } = trip;
     public IRecurringTripRepository RecurringTrips { get; } = recurringTrip;
     public ITripSubscriptionRepository TripSubscriptions { get; } = tripSubscription;
+    public ISavedRecurringTripRepository SavedRecurringTrips { get; } = savedRecurringTrip;
     public IWalletRepository Wallets { get; } = wallet;
     public IWalletTransactionRepository WalletTransactions { get; } = walletTransaction;
     public IPaystackWalletFundingRequestRepository PaystackWalletFundingRequests { get; } =

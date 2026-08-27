@@ -214,6 +214,105 @@ public class RecurringTripServiceTests
     }
 
     [Fact]
+    public async Task SavingScheduleIsIdempotentAndDoesNotGenerateOccurrences()
+    {
+        var context = CreateContext();
+        var created = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        var passengerId = AddPassenger(context.UnitOfWork);
+
+        var first = await context.Service.SaveAsync(
+            created.RecurringTripId, passengerId);
+        var second = await context.Service.SaveAsync(
+            created.RecurringTripId, passengerId);
+
+        Assert.Equal(first.SavedAt, second.SavedAt);
+        Assert.Single(context.UnitOfWork.SavedRecurringTripRepository.Items);
+        Assert.Empty(context.UnitOfWork.TripRepository.Items);
+    }
+
+    [Fact]
+    public async Task ConcurrentSavesCreateOnePassengerScheduleRecord()
+    {
+        var context = CreateContext();
+        var created = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        var passengerId = AddPassenger(context.UnitOfWork);
+
+        await Task.WhenAll(
+            context.Service.SaveAsync(created.RecurringTripId, passengerId),
+            context.Service.SaveAsync(created.RecurringTripId, passengerId));
+
+        Assert.Single(context.UnitOfWork.SavedRecurringTripRepository.Items);
+    }
+
+    [Fact]
+    public async Task SavedListIsPaginatedAndKeepsEndedAndCancelledSchedulesVisible()
+    {
+        var context = CreateContext();
+        var passengerId = AddPassenger(context.UnitOfWork);
+        var ended = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        var cancelled = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        await context.Service.SaveAsync(ended.RecurringTripId, passengerId);
+        await context.Service.SaveAsync(cancelled.RecurringTripId, passengerId);
+        await context.Service.SubscribeAsync(
+            ended.RecurringTripId, passengerId);
+
+        context.UnitOfWork.RecurringTripRepository.Items
+            .Single(item => item.Id == ended.RecurringTripId).EndDate =
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1));
+        await context.Service.CancelAsync(
+            cancelled.RecurringTripId, context.DriverId);
+
+        var page = await context.Service.GetSavedAsync(
+            passengerId,
+            new SavedRecurringTripsRequestDto
+            {
+                PageNumber = 1,
+                PageSize = 10
+            });
+
+        Assert.Equal(2, page.TotalCount);
+        Assert.Equal(RecurringTripScheduleStatus.Ended,
+            page.Items.Single(item =>
+                item.RecurringTripId == ended.RecurringTripId).Status);
+        Assert.True(page.Items.Single(item =>
+            item.RecurringTripId == ended.RecurringTripId).IsSubscribed);
+        Assert.Equal(RecurringTripScheduleStatus.Cancelled,
+            page.Items.Single(item =>
+                item.RecurringTripId == cancelled.RecurringTripId).Status);
+        Assert.All(page.Items, item => Assert.False(item.IsAvailable));
+    }
+
+    [Fact]
+    public async Task RemovingSavedScheduleDoesNotCancelSubscriptionOrBooking()
+    {
+        var context = CreateContext();
+        var passengerId = AddPassenger(context.UnitOfWork);
+        var created = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        await context.Service.SubscribeAsync(
+            created.RecurringTripId, passengerId);
+        await context.Service.SaveAsync(
+            created.RecurringTripId, passengerId);
+        await context.Service.GenerateOccurrencesAsync(DateTime.UtcNow);
+        var bookingCount = context.UnitOfWork.TripBookingRepository.Items.Count;
+
+        await context.Service.RemoveSavedAsync(
+            created.RecurringTripId, passengerId);
+        await context.Service.RemoveSavedAsync(
+            created.RecurringTripId, passengerId);
+
+        Assert.Empty(context.UnitOfWork.SavedRecurringTripRepository.Items);
+        Assert.True(context.UnitOfWork.TripSubscriptionRepository.Items
+            .Single().IsActive);
+        Assert.Equal(bookingCount,
+            context.UnitOfWork.TripBookingRepository.Items.Count);
+    }
+
+    [Fact]
     public async Task GeneratorCreatesPendingBookingForEveryActiveSubscriber()
     {
         var context = CreateContext();

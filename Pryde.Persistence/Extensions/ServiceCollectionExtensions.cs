@@ -50,6 +50,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITripBookingRepository, TripBookingRepository>();
         services.AddScoped<IRecurringTripRepository, RecurringTripRepository>();
         services.AddScoped<ITripSubscriptionRepository, TripSubscriptionRepository>();
+        services.AddScoped<ISavedRecurringTripRepository, SavedRecurringTripRepository>();
         services.AddScoped<IWalletRepository, WalletRepository>();
         services.AddScoped<IWalletTransactionRepository, WalletTransactionRepository>();
         services.AddScoped<IPaystackWalletFundingRequestRepository, PaystackWalletFundingRequestRepository>();

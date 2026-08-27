@@ -20,6 +20,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
             (TestRecurringTripRepository)RecurringTrips);
         TripSubscriptions = new TestTripSubscriptionRepository(
             (TestRecurringTripRepository)RecurringTrips);
+        SavedRecurringTrips = new TestSavedRecurringTripRepository(
+            (TestRecurringTripRepository)RecurringTrips);
         TripBookings = new TestTripBookingRepository((TestTripRepository)Trips);
         Vehicles = new TestVehicleRepository();
         UserRoles = new TestUserRoleRepository(((TestUserRepository)Users).Items, ((TestRoleRepository)Roles).Items);
@@ -78,6 +80,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         (TestRecurringTripRepository)RecurringTrips;
     public TestTripSubscriptionRepository TripSubscriptionRepository =>
         (TestTripSubscriptionRepository)TripSubscriptions;
+    public TestSavedRecurringTripRepository SavedRecurringTripRepository =>
+        (TestSavedRecurringTripRepository)SavedRecurringTrips;
     public int SaveChangesCount { get; private set; }
     public int TransactionCount { get; private set; }
     public bool IsTransactionActive { get; private set; }
@@ -98,6 +102,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public ITripBookingRepository TripBookings { get; }
     public IRecurringTripRepository RecurringTrips { get; }
     public ITripSubscriptionRepository TripSubscriptions { get; }
+    public ISavedRecurringTripRepository SavedRecurringTrips { get; }
     public IWalletRepository Wallets { get; }
     public IWalletTransactionRepository WalletTransactions { get; }
     public IPaystackWalletFundingRequestRepository PaystackWalletFundingRequests { get; }
@@ -349,6 +354,79 @@ internal sealed class TestTripSubscriptionRepository(
 
     public void Update(TripSubscription subscription)
     {
+    }
+}
+
+internal sealed class TestSavedRecurringTripRepository(
+    TestRecurringTripRepository recurringTrips)
+    : ISavedRecurringTripRepository
+{
+    public List<SavedRecurringTrip> Items { get; } = [];
+
+    public Task<SavedRecurringTrip?> GetAsync(
+        Guid recurringTripId,
+        Guid passengerId,
+        CancellationToken cancellationToken = default)
+    {
+        var saved = Items.FirstOrDefault(item =>
+            item.RecurringTripId == recurringTripId &&
+            item.PassengerId == passengerId);
+        if (saved is not null)
+            saved.RecurringTrip = recurringTrips.Items.Single(item =>
+                item.Id == recurringTripId);
+        return Task.FromResult(saved);
+    }
+
+    public Task<SavedRecurringTrip?> GetForUpdateAsync(
+        Guid recurringTripId,
+        Guid passengerId,
+        CancellationToken cancellationToken = default) =>
+        GetAsync(recurringTripId, passengerId, cancellationToken);
+
+    public Task<(IReadOnlyList<SavedRecurringTrip> Items, int TotalCount)>
+        GetByPassengerIdAsync(
+            Guid passengerId,
+            int pageNumber,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+    {
+        var saved = Items
+            .Where(item => item.PassengerId == passengerId)
+            .OrderByDescending(item => item.CreatedAt)
+            .ToList();
+        foreach (var item in saved)
+            item.RecurringTrip = recurringTrips.Items.Single(schedule =>
+                schedule.Id == item.RecurringTripId);
+        return Task.FromResult((
+            (IReadOnlyList<SavedRecurringTrip>)saved
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToList(),
+            saved.Count));
+    }
+
+    public Task<SavedRecurringTrip> CreateAsync(
+        SavedRecurringTrip savedRecurringTrip,
+        CancellationToken cancellationToken = default)
+    {
+        if (Items.Any(item =>
+                item.RecurringTripId == savedRecurringTrip.RecurringTripId &&
+                item.PassengerId == savedRecurringTrip.PassengerId))
+            return Task.FromResult(Items.Single(item =>
+                item.RecurringTripId == savedRecurringTrip.RecurringTripId &&
+                item.PassengerId == savedRecurringTrip.PassengerId));
+
+        Items.Add(savedRecurringTrip);
+        savedRecurringTrip.RecurringTrip.SavedByPassengers.Add(
+            savedRecurringTrip);
+        return Task.FromResult(savedRecurringTrip);
+    }
+
+    public void Delete(SavedRecurringTrip savedRecurringTrip)
+    {
+        Items.Remove(savedRecurringTrip);
+        savedRecurringTrip.RecurringTrip.SavedByPassengers.Remove(
+            savedRecurringTrip);
     }
 }
 
