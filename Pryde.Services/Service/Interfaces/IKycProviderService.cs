@@ -10,4 +10,8 @@ public interface IKycProviderService
         string? selectedIdType,
         CancellationToken cancellationToken = default);
     Task<KycProviderResult> RetryAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<KycProviderResult> RetryAsync(
+        Guid userId,
+        string? selectedIdType,
+        CancellationToken cancellationToken = default);
 }

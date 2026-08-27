@@ -19,6 +19,7 @@ public interface IUnitOfWork
     ITripBookingRepository TripBookings { get; }
     IRecurringTripRepository RecurringTrips { get; }
     ITripSubscriptionRepository TripSubscriptions { get; }
+    ISavedRecurringTripRepository SavedRecurringTrips { get; }
     IWalletRepository Wallets { get; }
     IWalletTransactionRepository WalletTransactions { get; }
     IPaystackWalletFundingRequestRepository PaystackWalletFundingRequests { get; }

@@ -49,10 +49,13 @@ public class KycController(
     [HttpPost("retry")]
     [Authorize(Policy = AuthorizationPolicies.EmailVerified)]
     public async Task<IActionResult> RetryVerification(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)]
+        KycSessionRequest? request,
         CancellationToken cancellationToken)
     {
         return Ok(await kycProviderService.RetryAsync(
             GetUserId(),
+            request?.SelectedIdType,
             cancellationToken));
     }
 

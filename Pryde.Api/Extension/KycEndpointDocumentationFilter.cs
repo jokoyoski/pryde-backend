@@ -21,7 +21,7 @@ public sealed class KycEndpointDocumentationFilter : IOperationFilter
         else if (path.EndsWith("/kyc/retry", StringComparison.OrdinalIgnoreCase))
         {
             operation.Summary = "Retry KYC";
-            operation.Description = "Retries an eligible rejected KYC verification and returns the updated monthly attempt allowance. Attempts are limited across all KYC providers. Returns HTTP 429 without calling the provider or changing KYC state when the monthly allowance is exhausted.";
+            operation.Description = "Retries an eligible rejected KYC verification and returns the updated monthly attempt allowance. Smile ID passengers may optionally supply selectedIdType to choose another enabled passenger identity option; an omitted body reuses the previous identity type. Attempts are limited across all KYC providers. Returns HTTP 429 without calling the provider or changing KYC state when the monthly allowance is exhausted.";
             AddAttemptLimitResponse(operation);
         }
         else if (path.EndsWith("/kyc/mine", StringComparison.OrdinalIgnoreCase))

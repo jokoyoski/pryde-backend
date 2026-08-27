@@ -214,6 +214,293 @@ public class RecurringTripServiceTests
     }
 
     [Fact]
+    public async Task SavingScheduleIsIdempotentAndDoesNotGenerateOccurrences()
+    {
+        var context = CreateContext();
+        var created = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        var passengerId = AddPassenger(context.UnitOfWork);
+
+        var first = await context.Service.SaveAsync(
+            created.RecurringTripId, passengerId);
+        var second = await context.Service.SaveAsync(
+            created.RecurringTripId, passengerId);
+
+        Assert.Equal(first.SavedAt, second.SavedAt);
+        Assert.Single(context.UnitOfWork.SavedRecurringTripRepository.Items);
+        Assert.Empty(context.UnitOfWork.TripRepository.Items);
+    }
+
+    [Fact]
+    public async Task ConcurrentSavesCreateOnePassengerScheduleRecord()
+    {
+        var context = CreateContext();
+        var created = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        var passengerId = AddPassenger(context.UnitOfWork);
+
+        await Task.WhenAll(
+            context.Service.SaveAsync(created.RecurringTripId, passengerId),
+            context.Service.SaveAsync(created.RecurringTripId, passengerId));
+
+        Assert.Single(context.UnitOfWork.SavedRecurringTripRepository.Items);
+    }
+
+    [Fact]
+    public async Task SavedListIsPaginatedAndKeepsEndedAndCancelledSchedulesVisible()
+    {
+        var context = CreateContext();
+        var passengerId = AddPassenger(context.UnitOfWork);
+        var ended = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        var cancelled = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        await context.Service.SaveAsync(ended.RecurringTripId, passengerId);
+        await context.Service.SaveAsync(cancelled.RecurringTripId, passengerId);
+        await context.Service.SubscribeAsync(
+            ended.RecurringTripId, passengerId);
+
+        context.UnitOfWork.RecurringTripRepository.Items
+            .Single(item => item.Id == ended.RecurringTripId).EndDate =
+                DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1));
+        await context.Service.CancelAsync(
+            cancelled.RecurringTripId, context.DriverId);
+
+        var page = await context.Service.GetSavedAsync(
+            passengerId,
+            new SavedRecurringTripsRequestDto
+            {
+                PageNumber = 1,
+                PageSize = 10
+            });
+
+        Assert.Equal(2, page.TotalCount);
+        Assert.Equal(RecurringTripScheduleStatus.Ended,
+            page.Items.Single(item =>
+                item.RecurringTripId == ended.RecurringTripId).Status);
+        Assert.True(page.Items.Single(item =>
+            item.RecurringTripId == ended.RecurringTripId).IsSubscribed);
+        Assert.Equal(RecurringTripScheduleStatus.Cancelled,
+            page.Items.Single(item =>
+                item.RecurringTripId == cancelled.RecurringTripId).Status);
+        Assert.All(page.Items, item => Assert.False(item.IsAvailable));
+    }
+
+    [Fact]
+    public async Task RemovingSavedScheduleDoesNotCancelSubscriptionOrBooking()
+    {
+        var context = CreateContext();
+        var passengerId = AddPassenger(context.UnitOfWork);
+        var created = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        await context.Service.SubscribeAsync(
+            created.RecurringTripId, passengerId);
+        await context.Service.SaveAsync(
+            created.RecurringTripId, passengerId);
+        await context.Service.GenerateOccurrencesAsync(DateTime.UtcNow);
+        var bookingCount = context.UnitOfWork.TripBookingRepository.Items.Count;
+
+        await context.Service.RemoveSavedAsync(
+            created.RecurringTripId, passengerId);
+        await context.Service.RemoveSavedAsync(
+            created.RecurringTripId, passengerId);
+
+        Assert.Empty(context.UnitOfWork.SavedRecurringTripRepository.Items);
+        Assert.True(context.UnitOfWork.TripSubscriptionRepository.Items
+            .Single().IsActive);
+        Assert.Equal(bookingCount,
+            context.UnitOfWork.TripBookingRepository.Items.Count);
+    }
+
+    [Fact]
+    public async Task GeneratorCreatesPendingBookingForEveryActiveSubscriber()
+    {
+        var context = CreateContext();
+        var created = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        var firstPassengerId = AddPassenger(context.UnitOfWork);
+        var secondPassengerId = AddPassenger(context.UnitOfWork);
+        await context.Service.SubscribeAsync(
+            created.RecurringTripId, firstPassengerId);
+        await context.Service.SubscribeAsync(
+            created.RecurringTripId, secondPassengerId);
+
+        await context.Service.GenerateOccurrencesAsync(DateTime.UtcNow);
+
+        var trip = Assert.Single(context.UnitOfWork.TripRepository.Items);
+        var bookings = context.UnitOfWork.TripBookingRepository.Items;
+        Assert.Equal(2, bookings.Count);
+        Assert.All(bookings, booking =>
+        {
+            Assert.Equal(BookingStatus.Pending, booking.Status);
+            Assert.Equal(trip.SeatPrice, booking.SeatPrice);
+            Assert.Equal(
+                trip.SeatPrice + booking.ServiceCharge,
+                booking.TotalAmount);
+        });
+        Assert.Equal(context.Request.AvailableSeats, trip.AvailableSeats);
+        Assert.Equal(2, context.UnitOfWork.NotificationRepository.Items.Count);
+    }
+
+    [Fact]
+    public async Task RepeatedGenerationDoesNotCreateDuplicateSubscriberBooking()
+    {
+        var context = CreateContext();
+        var created = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        var passengerId = AddPassenger(context.UnitOfWork);
+        await context.Service.SubscribeAsync(
+            created.RecurringTripId, passengerId);
+
+        await context.Service.GenerateOccurrencesAsync(DateTime.UtcNow);
+        await context.Service.GenerateOccurrencesAsync(DateTime.UtcNow);
+
+        Assert.Single(context.UnitOfWork.TripRepository.Items);
+        Assert.Single(context.UnitOfWork.TripBookingRepository.Items);
+        Assert.Single(context.UnitOfWork.NotificationRepository.Items);
+    }
+
+    [Fact]
+    public async Task CancellingSubscriptionPreservesExistingBookingAndStopsFutureRequests()
+    {
+        var context = CreateContext();
+        var created = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        var passengerId = AddPassenger(context.UnitOfWork);
+        await context.Service.SubscribeAsync(
+            created.RecurringTripId, passengerId);
+        await context.Service.GenerateOccurrencesAsync(DateTime.UtcNow);
+        var existingBooking = Assert.Single(
+            context.UnitOfWork.TripBookingRepository.Items);
+
+        await context.Service.CancelSubscriptionAsync(
+            created.RecurringTripId, passengerId);
+        await CreateExistingOccurrenceAsync(
+            context,
+            created.RecurringTripId,
+            DateTime.UtcNow.AddDays(2));
+        await context.Service.GenerateOccurrencesAsync(DateTime.UtcNow);
+
+        Assert.Single(context.UnitOfWork.TripBookingRepository.Items);
+        Assert.Equal(BookingStatus.Pending, existingBooking.Status);
+    }
+
+    [Fact]
+    public async Task GeneratorBackfillsOpenExistingFutureOccurrence()
+    {
+        var context = CreateContext();
+        var created = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        var departure = ToUtc(
+            context.Request.StartDate,
+            context.Request.DepartureTime);
+        var occurrence = await CreateExistingOccurrenceAsync(
+            context, created.RecurringTripId, departure);
+        var passengerId = AddPassenger(context.UnitOfWork);
+        await context.Service.SubscribeAsync(
+            created.RecurringTripId, passengerId);
+
+        var generated = await context.Service.GenerateOccurrencesAsync(
+            DateTime.UtcNow);
+
+        Assert.Equal(0, generated);
+        var booking = Assert.Single(
+            context.UnitOfWork.TripBookingRepository.Items);
+        Assert.Equal(occurrence.TripId, booking.TripId);
+        Assert.Equal(passengerId, booking.PassengerId);
+        Assert.Equal(BookingStatus.Pending, booking.Status);
+    }
+
+    [Fact]
+    public async Task BackfillSkipsPastClosedAndCancelledOccurrences()
+    {
+        var context = CreateContext();
+        var created = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        var schedule = context.UnitOfWork.RecurringTripRepository.Items.Single();
+        schedule.StartDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30));
+        schedule.EndDate = schedule.StartDate;
+        await context.Service.SubscribeAsync(
+            created.RecurringTripId,
+            AddPassenger(context.UnitOfWork));
+
+        var past = TestData.OpenTrip(context.DriverId, context.Vehicle);
+        past.RecurringTripId = created.RecurringTripId;
+        past.DepartureTime = DateTime.UtcNow.AddMinutes(-1);
+        var closed = TestData.OpenTrip(context.DriverId, context.Vehicle);
+        closed.RecurringTripId = created.RecurringTripId;
+        closed.DepartureTime = DateTime.UtcNow.AddMinutes(10);
+        closed.BookingWindowMinutes = 15;
+        var cancelled = TestData.OpenTrip(context.DriverId, context.Vehicle);
+        cancelled.RecurringTripId = created.RecurringTripId;
+        cancelled.Status = TripStatus.Cancelled;
+        context.UnitOfWork.TripRepository.Items.AddRange(
+            [past, closed, cancelled]);
+
+        await context.Service.GenerateOccurrencesAsync(DateTime.UtcNow);
+
+        Assert.Empty(context.UnitOfWork.TripBookingRepository.Items);
+    }
+
+    [Fact]
+    public async Task CapacityUpdateAndSubscriptionCannotOversubscribeSchedule()
+    {
+        var context = CreateContext(capacity: 2);
+        context.Request.AvailableSeats = 2;
+        var created = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        await context.Service.SubscribeAsync(
+            created.RecurringTripId,
+            AddPassenger(context.UnitOfWork));
+        var secondPassengerId = AddPassenger(context.UnitOfWork);
+        var update = ToUpdate(context.Request);
+        update.AvailableSeats = 1;
+
+        var results = await Task.WhenAll(
+            CaptureExceptionAsync(() => context.Service.SubscribeAsync(
+                created.RecurringTripId, secondPassengerId)),
+            CaptureExceptionAsync(() => context.Service.UpdateAsync(
+                created.RecurringTripId, context.DriverId, update)));
+
+        Assert.Single(results, exception => exception is ConflictException);
+        var schedule = context.UnitOfWork.RecurringTripRepository.Items.Single();
+        var activeCount = context.UnitOfWork.TripSubscriptionRepository.Items
+            .Count(subscription => subscription.IsActive);
+        Assert.True(activeCount <= schedule.AvailableSeats);
+    }
+
+    [Fact]
+    public async Task GeneratedBookingUsesNormalApprovalAndPaymentFlow()
+    {
+        var context = CreateContext();
+        var created = await context.Service.CreateAsync(
+            context.DriverId, context.Request);
+        var passengerId = AddPassenger(context.UnitOfWork);
+        context.UnitOfWork.WalletRepository.Items.Add(new Wallet
+        {
+            UserId = passengerId,
+            Balance = 100_000m
+        });
+        await context.Service.SubscribeAsync(
+            created.RecurringTripId, passengerId);
+        await context.Service.GenerateOccurrencesAsync(DateTime.UtcNow);
+        var trip = Assert.Single(context.UnitOfWork.TripRepository.Items);
+        var booking = Assert.Single(
+            context.UnitOfWork.TripBookingRepository.Items);
+        var initialSeats = trip.AvailableSeats;
+
+        var approved = await context.TripBookingService.ApproveAsync(
+            booking.Id, context.DriverId);
+        var payment = await context.TripBookingService.PayAsync(
+            booking.Id, passengerId, "recurring-booking-payment");
+
+        Assert.Equal(BookingStatus.Approved, approved.Status);
+        Assert.Equal(initialSeats - 1, trip.AvailableSeats);
+        Assert.Equal(EscrowStatus.Held, payment.Status);
+        Assert.NotNull(booking.PaidAt);
+    }
+
+    [Fact]
     public async Task CancellingGeneratedOccurrenceDoesNotCancelSchedule()
     {
         var context = CreateContext();
@@ -238,8 +525,6 @@ public class RecurringTripServiceTests
         var created = await context.Service.CreateAsync(
             context.DriverId, context.Request);
         await context.Service.GenerateOccurrencesAsync(DateTime.UtcNow);
-        var schedule = context.UnitOfWork.RecurringTripRepository.Items.Single();
-        schedule.Trips.Add(context.UnitOfWork.TripRepository.Items.Single());
 
         var page = await context.Service.AdminGetAllAsync(
             new AdminRecurringTripsRequestDto());
@@ -268,9 +553,18 @@ public class RecurringTripServiceTests
         var (unitOfWork, driverId, vehicle) =
             TestData.CreateDriverContext(capacity);
         var tripService = TestData.CreateTripService(unitOfWork);
+        var tripBookingService = new TripBookingService(
+            unitOfWork,
+            new FinancialService(
+                unitOfWork,
+                Options.Create(new PricingSettings
+                {
+                    PlatformSharePercent = 30m
+                })));
         var service = new RecurringTripService(
             unitOfWork,
             tripService,
+            tripBookingService,
             Options.Create(new RecurringTripSettings
             {
                 GenerationHorizonDays = 14,
@@ -283,6 +577,7 @@ public class RecurringTripServiceTests
             driverId,
             vehicle,
             tripService,
+            tripBookingService,
             service,
             new CreateRecurringTripRequestDto
             {
@@ -310,6 +605,39 @@ public class RecurringTripServiceTests
         var passenger = new User { Id = Guid.NewGuid() };
         unitOfWork.UserRepository.Items.Add(passenger);
         return passenger.Id;
+    }
+
+    private static async Task<Pryde.Contracts.ResponseModels.TripDetailsResponseDto>
+        CreateExistingOccurrenceAsync(
+            RecurringTestContext context,
+            Guid recurringTripId,
+            DateTime departureTime)
+    {
+        var request = TestData.ValidTripRequest(context.Vehicle.Id);
+        request.DepartureTime = departureTime;
+        request.AvailableSeats = context.Request.AvailableSeats;
+        request.BookingWindowMinutes = context.Request.BookingWindowMinutes;
+        return await context.TripService.CreateRecurringOccurrenceAsync(
+            context.DriverId,
+            recurringTripId,
+            request);
+    }
+
+    private static DateTime ToUtc(DateOnly date, TimeOnly time) =>
+        DateTime.SpecifyKind(date.ToDateTime(time), DateTimeKind.Utc);
+
+    private static async Task<Exception?> CaptureExceptionAsync(
+        Func<Task> action)
+    {
+        try
+        {
+            await action();
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return exception;
+        }
     }
 
     private static UpdateRecurringTripRequestDto ToUpdate(
@@ -351,6 +679,7 @@ public class RecurringTripServiceTests
         Guid DriverId,
         Vehicle Vehicle,
         TripService TripService,
+        TripBookingService TripBookingService,
         RecurringTripService Service,
         CreateRecurringTripRequestDto Request);
 }

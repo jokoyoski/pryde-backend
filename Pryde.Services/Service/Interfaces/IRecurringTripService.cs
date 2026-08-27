@@ -15,6 +15,9 @@ public interface IRecurringTripService
     Task<TripSubscriptionResponseDto> SubscribeAsync(Guid recurringTripId, Guid passengerId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TripSubscriptionResponseDto>> GetMySubscriptionsAsync(Guid passengerId, CancellationToken cancellationToken = default);
     Task<TripSubscriptionResponseDto> CancelSubscriptionAsync(Guid recurringTripId, Guid passengerId, CancellationToken cancellationToken = default);
+    Task<SavedRecurringTripResponseDto> SaveAsync(Guid recurringTripId, Guid passengerId, CancellationToken cancellationToken = default);
+    Task<PagedResponseDto<SavedRecurringTripResponseDto>> GetSavedAsync(Guid passengerId, SavedRecurringTripsRequestDto request, CancellationToken cancellationToken = default);
+    Task RemoveSavedAsync(Guid recurringTripId, Guid passengerId, CancellationToken cancellationToken = default);
     Task<PagedResponseDto<RecurringTripResponseDto>> AdminGetAllAsync(AdminRecurringTripsRequestDto request, CancellationToken cancellationToken = default);
     Task<RecurringTripResponseDto> AdminGetByIdAsync(Guid recurringTripId, CancellationToken cancellationToken = default);
     Task<int> GenerateOccurrencesAsync(DateTime utcNow, CancellationToken cancellationToken = default);

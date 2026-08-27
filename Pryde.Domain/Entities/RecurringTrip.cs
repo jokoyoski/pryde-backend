@@ -34,5 +34,6 @@ namespace Pryde.Domain.Entities
 
         public ICollection<Trip> Trips { get; set; } = new List<Trip>();
         public ICollection<TripSubscription> Subscriptions { get; set; } = new List<TripSubscription>();
+        public ICollection<SavedRecurringTrip> SavedByPassengers { get; set; } = new List<SavedRecurringTrip>();
     }
 }

@@ -23,6 +23,7 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     public DbSet<TripBooking> TripBookings { get; set; }
     public DbSet<RecurringTrip> RecurringTrips { get; set; }
     public DbSet<TripSubscription> TripSubscriptions { get; set; }
+    public DbSet<SavedRecurringTrip> SavedRecurringTrips { get; set; }
     public DbSet<Wallet> Wallets { get; set; }
     public DbSet<WalletTransaction> WalletTransactions { get; set; }
     public DbSet<PaystackWalletFundingRequest> PaystackWalletFundingRequests { get; set; }

@@ -14,12 +14,36 @@ public class RecurringTripRepository(PrydeDbContext context) : IRecurringTripRep
 
     public async Task<RecurringTrip?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        return await context.RecurringTrips
-            .Include(r => r.Vehicle)
-            .Include(r => r.Subscriptions)
-                .ThenInclude(s => s.Passenger)
-            .Include(r => r.Trips)
-            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        var recurringTrip = await context.RecurringTrips
+            .FromSqlInterpolated(
+                $"""
+                SELECT *
+                FROM "RecurringTrips"
+                WHERE "Id" = {id}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (recurringTrip is null)
+            return null;
+
+        await context.Entry(recurringTrip)
+            .Reference(item => item.Driver)
+            .Query()
+            .Include(driver => driver.Profile)
+            .LoadAsync(cancellationToken);
+        await context.Entry(recurringTrip)
+            .Reference(item => item.Vehicle)
+            .LoadAsync(cancellationToken);
+        await context.Entry(recurringTrip)
+            .Collection(item => item.Subscriptions)
+            .Query()
+            .Include(subscription => subscription.Passenger)
+            .LoadAsync(cancellationToken);
+        await context.Entry(recurringTrip)
+            .Collection(item => item.Trips)
+            .LoadAsync(cancellationToken);
+        return recurringTrip;
     }
 
     public async Task<IReadOnlyList<RecurringTrip>> GetByDriverIdAsync(Guid driverId, CancellationToken cancellationToken = default)
