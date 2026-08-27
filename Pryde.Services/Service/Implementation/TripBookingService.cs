@@ -462,6 +462,8 @@ public class TripBookingService(
         {
             BookingId = booking.Id,
             TripId = booking.TripId,
+            IsRecurring = trip.RecurringTripId.HasValue,
+            RecurringTripId = trip.RecurringTripId,
             PassengerId = booking.PassengerId,
             PassengerName = passengerName,
             TripOrigin = trip.OriginAddress,

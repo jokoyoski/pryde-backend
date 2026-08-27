@@ -5,6 +5,8 @@ namespace Pryde.Contracts.ResponseModels;
 public class TripSummaryResponseDto : WorkflowResponseDto
 {
     public Guid TripId { get; set; }
+    public bool IsRecurring { get; set; }
+    public Guid? RecurringTripId { get; set; }
     public Guid DriverId { get; set; }
     public string DriverName { get; set; } = string.Empty;
     public Guid VehicleId { get; set; }

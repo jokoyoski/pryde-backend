@@ -6,6 +6,8 @@ public class TripBookingResponseDto : WorkflowResponseDto
 {
     public Guid BookingId { get; set; }
     public Guid TripId { get; set; }
+    public bool IsRecurring { get; set; }
+    public Guid? RecurringTripId { get; set; }
     public Guid PassengerId { get; set; }
     public string? PassengerName { get; set; }
     public string TripOrigin { get; set; } = string.Empty;
