@@ -14,6 +14,33 @@ public class TripBookingServiceTests
     private static readonly DateTimeOffset RatingNow =
         new(2026, 8, 13, 12, 0, 0, TimeSpan.Zero);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PassengerBookingResponsesExposeRecurringIdentity(
+        bool isRecurring)
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        trip.RecurringTripId = isRecurring ? Guid.NewGuid() : null;
+        var passengerId = Guid.NewGuid();
+        var service = new TripBookingService(unitOfWork);
+
+        var created = await service.CreateAsync(passengerId, trip.Id);
+        var listed = Assert.Single(await service.GetMineAsync(passengerId));
+        var cancelled = await service.CancelAsync(
+            created.BookingId,
+            passengerId);
+
+        Assert.Equal(isRecurring, created.IsRecurring);
+        Assert.Equal(trip.RecurringTripId, created.RecurringTripId);
+        Assert.Equal(isRecurring, listed.IsRecurring);
+        Assert.Equal(trip.RecurringTripId, listed.RecurringTripId);
+        Assert.Equal(isRecurring, cancelled.IsRecurring);
+        Assert.Equal(trip.RecurringTripId, cancelled.RecurringTripId);
+    }
+
     [Fact]
     public async Task PassengerCanRequestAnOpenTrip()
     {

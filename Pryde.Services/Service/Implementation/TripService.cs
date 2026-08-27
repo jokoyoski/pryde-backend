@@ -817,6 +817,8 @@ public class TripService(
         return new TripSummaryResponseDto
         {
             TripId = trip.Id,
+            IsRecurring = trip.RecurringTripId.HasValue,
+            RecurringTripId = trip.RecurringTripId,
             DriverId = trip.DriverId,
             DriverName = trip.Driver?.Profile is null ? string.Empty : $"{trip.Driver.Profile.FirstName} {trip.Driver.Profile.LastName}".Trim(),
             VehicleId = trip.VehicleId,
@@ -869,6 +871,8 @@ public class TripService(
         return new TripDetailsResponseDto
         {
             TripId = summary.TripId,
+            IsRecurring = summary.IsRecurring,
+            RecurringTripId = summary.RecurringTripId,
             DriverId = summary.DriverId,
             DriverName = summary.DriverName,
             VehicleId = summary.VehicleId,
@@ -912,6 +916,8 @@ public class TripService(
             NextAction = details.NextAction,
             RequiredActor = details.RequiredActor,
             TripId = details.TripId,
+            IsRecurring = details.IsRecurring,
+            RecurringTripId = details.RecurringTripId,
             DriverId = details.DriverId,
             DriverName = details.DriverName,
             VehicleId = details.VehicleId,

@@ -182,6 +182,8 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
         return new TripSummaryResponseDto
         {
             TripId = trip.Id,
+            IsRecurring = trip.RecurringTripId.HasValue,
+            RecurringTripId = trip.RecurringTripId,
             DriverId = trip.DriverId,
             DriverName = trip.Driver?.Profile is null
                 ? string.Empty
@@ -221,6 +223,8 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
         return new TripDetailsResponseDto
         {
             TripId = summary.TripId,
+            IsRecurring = summary.IsRecurring,
+            RecurringTripId = summary.RecurringTripId,
             DriverId = summary.DriverId,
             DriverName = summary.DriverName,
             VehicleId = summary.VehicleId,
@@ -258,6 +262,8 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
     {
         BookingId = booking.Id,
         TripId = booking.TripId,
+        IsRecurring = booking.Trip.RecurringTripId.HasValue,
+        RecurringTripId = booking.Trip.RecurringTripId,
         PassengerId = booking.PassengerId,
         PassengerName = booking.Passenger?.Profile is null
             ? null
