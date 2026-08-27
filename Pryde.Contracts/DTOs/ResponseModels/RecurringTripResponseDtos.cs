@@ -54,3 +54,33 @@ public class TripSubscriptionResponseDto
     public TimeOnly DepartureTime { get; set; }
     public DateTime CreatedAt { get; set; }
 }
+
+public class SavedRecurringTripResponseDto
+{
+    public Guid RecurringTripId { get; set; }
+    public Guid DriverId { get; set; }
+    public string DriverName { get; set; } = string.Empty;
+    public Guid? VehicleId { get; set; }
+    public string VehicleLicensePlateNumber { get; set; } = string.Empty;
+    public string? VehicleMake { get; set; }
+    public string? VehicleModel { get; set; }
+    public string? VehicleColour { get; set; }
+    public double OriginLatitude { get; set; }
+    public double OriginLongitude { get; set; }
+    public string OriginAddress { get; set; } = string.Empty;
+    public double DestinationLatitude { get; set; }
+    public double DestinationLongitude { get; set; }
+    public string DestinationAddress { get; set; } = string.Empty;
+    public string? RoutePolyline { get; set; }
+    public double DistanceKm { get; set; }
+    public int EstimatedDurationMinutes { get; set; }
+    public RecurringDays DaysOfWeek { get; set; }
+    public TimeOnly DepartureTime { get; set; }
+    public DateOnly StartDate { get; set; }
+    public DateOnly? EndDate { get; set; }
+    public RecurringTripScheduleStatus Status { get; set; }
+    public bool IsAvailable { get; set; }
+    public int AvailableSeats { get; set; }
+    public bool IsSubscribed { get; set; }
+    public DateTime SavedAt { get; set; }
+}

@@ -1,6 +1,7 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Routing;
 using Pryde.Api.Controllers.V1;
 using Pryde.Domain.Constants;
 
@@ -54,5 +55,27 @@ public class RecurringTripsControllerTests
         Assert.Equal(
             "api/v{version:apiVersion}/admin/recurring-trips",
             adminRoute?.Template);
+    }
+
+    [Theory]
+    [InlineData(nameof(PassengerRecurringTripsController.Save),
+        "{recurringTripId:guid}/save", typeof(HttpPostAttribute))]
+    [InlineData(nameof(PassengerRecurringTripsController.GetSaved),
+        "saved", typeof(HttpGetAttribute))]
+    [InlineData(nameof(PassengerRecurringTripsController.RemoveSaved),
+        "{recurringTripId:guid}/save", typeof(HttpDeleteAttribute))]
+    public void SavedRecurringTripEndpointsUseRequiredTemplates(
+        string methodName,
+        string template,
+        Type attributeType)
+    {
+        var method = typeof(PassengerRecurringTripsController)
+            .GetMethod(methodName);
+        var route = method?.GetCustomAttributes(attributeType, false)
+            .Cast<HttpMethodAttribute>()
+            .Single();
+
+        Assert.NotNull(route);
+        Assert.Equal(template, route.Template);
     }
 }

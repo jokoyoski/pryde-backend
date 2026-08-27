@@ -227,10 +227,18 @@ public sealed class SmileIdKycProvider(
             }
             else if (retry)
             {
-                var previousAttempt = latestByFlow[IdentityFlow];
-                var storedOption = GetConfiguredOption(previousAttempt, null);
-                identityOptions =
-                    [GetSelectedPassengerIdentityOption(storedOption.IdType)];
+                if (!string.IsNullOrWhiteSpace(request.SelectedIdType))
+                {
+                    identityOptions =
+                        [GetSelectedPassengerIdentityOption(request.SelectedIdType)];
+                }
+                else
+                {
+                    var previousAttempt = latestByFlow[IdentityFlow];
+                    var storedOption = GetConfiguredOption(previousAttempt, null);
+                    identityOptions =
+                        [GetSelectedPassengerIdentityOption(storedOption.IdType)];
+                }
             }
             else
             {

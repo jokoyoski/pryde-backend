@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.Extensions.Configuration;
 using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Models;
@@ -18,6 +19,7 @@ using Pryde.Api.Extensions;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Constants;
+using Pryde.Services.Providers.Kyc;
 using Pryde.Domain.Entities;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.DependencyInjection;
@@ -339,6 +341,22 @@ public class ApiConfigurationTests
             .Single();
 
         Assert.Equal(route, attribute.Template);
+    }
+
+    [Fact]
+    public void GenericKycRetryAllowsAnOmittedSelectionBody()
+    {
+        var action = typeof(KycController).GetMethod(
+            nameof(KycController.RetryVerification));
+        var request = Assert.Single(
+            action!.GetParameters(),
+            parameter => parameter.ParameterType ==
+                typeof(KycSessionRequest));
+        var fromBody = Assert.Single(request.GetCustomAttributes(
+                typeof(FromBodyAttribute), true)
+            .Cast<FromBodyAttribute>());
+
+        Assert.Equal(EmptyBodyBehavior.Allow, fromBody.EmptyBodyBehavior);
     }
 
     [Theory]

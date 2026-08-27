@@ -1,4 +1,6 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common;
@@ -14,6 +16,7 @@ namespace Pryde.Services.Service.Implementation;
 public sealed class RecurringTripService(
     IUnitOfWork unitOfWork,
     ITripService tripService,
+    ITripBookingService tripBookingService,
     IOptions<RecurringTripSettings> settings,
     IOptions<TripSettings> tripSettings) : IRecurringTripService
 {
@@ -95,18 +98,24 @@ public sealed class RecurringTripService(
                 bookingWindowMinutes),
             cancellationToken);
 
-        var schedule = await GetOwnedScheduleAsync(
-            recurringTripId, driverId, true, cancellationToken);
-        EnsureNotCancelled(schedule);
-        var activeSubscriptions = schedule.Subscriptions.Count(s => s.IsActive);
-        if (activeSubscriptions > request.AvailableSeats)
-            throw new ConflictException(
-                "Available seats cannot be lower than the active subscription count.");
+        var scheduleId = await unitOfWork.ExecuteInTransactionAsync(
+            async transactionToken =>
+            {
+                var schedule = await GetOwnedScheduleAsync(
+                    recurringTripId, driverId, true, transactionToken);
+                EnsureNotCancelled(schedule);
+                var activeSubscriptions = schedule.Subscriptions.Count(
+                    subscription => subscription.IsActive);
+                if (activeSubscriptions > request.AvailableSeats)
+                    throw new ConflictException(
+                        "Available seats cannot be lower than the active subscription count.");
 
-        Apply(schedule, request, bookingWindowMinutes);
-        unitOfWork.RecurringTrips.Update(schedule);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
-        return await GetOwnedAsync(schedule.Id, driverId, cancellationToken);
+                Apply(schedule, request, bookingWindowMinutes);
+                unitOfWork.RecurringTrips.Update(schedule);
+                await unitOfWork.SaveChangesAsync(transactionToken);
+                return schedule.Id;
+            }, cancellationToken);
+        return await GetOwnedAsync(scheduleId, driverId, cancellationToken);
     }
 
     public Task<RecurringTripResponseDto> PauseAsync(
@@ -203,27 +212,117 @@ public sealed class RecurringTripService(
         Guid passengerId,
         CancellationToken cancellationToken = default)
     {
-        var subscription = await unitOfWork.TripSubscriptions
-            .GetByRecurringTripAndPassengerAsync(
-                recurringTripId, passengerId, cancellationToken)
-            ?? throw new NotFoundException(
-                nameof(TripSubscription), recurringTripId);
-        if (subscription.IsActive)
-        {
-            subscription.IsActive = false;
-            subscription.CancelledAt = DateTime.UtcNow;
-            unitOfWork.TripSubscriptions.Update(subscription);
-            await unitOfWork.SaveChangesAsync(cancellationToken);
-        }
+        return await unitOfWork.ExecuteInTransactionAsync(
+            async transactionToken =>
+            {
+                _ = await unitOfWork.RecurringTrips.GetByIdForUpdateAsync(
+                        recurringTripId, transactionToken)
+                    ?? throw new NotFoundException(
+                        nameof(RecurringTrip), recurringTripId);
+                var subscription = await unitOfWork.TripSubscriptions
+                    .GetByRecurringTripAndPassengerForUpdateAsync(
+                        recurringTripId, passengerId, transactionToken)
+                    ?? throw new NotFoundException(
+                        nameof(TripSubscription), recurringTripId);
+                if (subscription.IsActive)
+                {
+                    subscription.IsActive = false;
+                    subscription.CancelledAt = DateTime.UtcNow;
+                    unitOfWork.TripSubscriptions.Update(subscription);
+                    await unitOfWork.SaveChangesAsync(transactionToken);
+                }
 
-        if (subscription.RecurringTrip is null)
+                return Map(subscription);
+            }, cancellationToken);
+    }
+
+    public async Task<SavedRecurringTripResponseDto> SaveAsync(
+        Guid recurringTripId,
+        Guid passengerId,
+        CancellationToken cancellationToken = default)
+    {
+        try
         {
-            subscription.RecurringTrip = await unitOfWork.RecurringTrips
-                .GetByIdAsync(recurringTripId, cancellationToken)
-                ?? throw new NotFoundException(
-                    nameof(RecurringTrip), recurringTripId);
+            return await unitOfWork.ExecuteInTransactionAsync(
+                async transactionToken =>
+                {
+                    if (!await unitOfWork.Users.ExistsByIdAsync(
+                            passengerId, transactionToken))
+                        throw new NotFoundException(nameof(User), passengerId);
+
+                    var schedule = await unitOfWork.RecurringTrips
+                        .GetByIdForUpdateAsync(recurringTripId, transactionToken)
+                        ?? throw new NotFoundException(
+                            nameof(RecurringTrip), recurringTripId);
+                    var existing = await unitOfWork.SavedRecurringTrips.GetAsync(
+                        recurringTripId, passengerId, transactionToken);
+                    if (existing is not null)
+                        return MapSaved(existing, passengerId);
+
+                    var saved = new SavedRecurringTrip
+                    {
+                        RecurringTripId = recurringTripId,
+                        RecurringTrip = schedule,
+                        PassengerId = passengerId
+                    };
+                    await unitOfWork.SavedRecurringTrips.CreateAsync(
+                        saved, transactionToken);
+                    await unitOfWork.SaveChangesAsync(transactionToken);
+                    return MapSaved(saved, passengerId);
+                }, cancellationToken);
         }
-        return Map(subscription);
+        catch (DbUpdateException exception) when (IsDuplicateSavedTrip(exception))
+        {
+            unitOfWork.ClearTracking();
+            var existing = await unitOfWork.SavedRecurringTrips.GetAsync(
+                recurringTripId, passengerId, cancellationToken);
+            if (existing is null)
+                throw;
+            return MapSaved(existing, passengerId);
+        }
+    }
+
+    public async Task<PagedResponseDto<SavedRecurringTripResponseDto>>
+        GetSavedAsync(
+            Guid passengerId,
+            SavedRecurringTripsRequestDto request,
+            CancellationToken cancellationToken = default)
+    {
+        var result = await unitOfWork.SavedRecurringTrips.GetByPassengerIdAsync(
+            passengerId,
+            request.PageNumber,
+            request.PageSize,
+            cancellationToken);
+        return new PagedResponseDto<SavedRecurringTripResponseDto>
+        {
+            Items = result.Items.Select(item =>
+                MapSaved(item, passengerId)).ToList(),
+            PageNumber = request.PageNumber,
+            PageSize = request.PageSize,
+            TotalCount = result.TotalCount,
+            TotalPages = (int)Math.Ceiling(
+                result.TotalCount / (double)request.PageSize)
+        };
+    }
+
+    public async Task RemoveSavedAsync(
+        Guid recurringTripId,
+        Guid passengerId,
+        CancellationToken cancellationToken = default)
+    {
+        await unitOfWork.ExecuteInTransactionAsync(
+            async transactionToken =>
+            {
+                var saved = await unitOfWork.SavedRecurringTrips
+                    .GetForUpdateAsync(
+                        recurringTripId, passengerId, transactionToken);
+                if (saved is null)
+                    return false;
+
+                unitOfWork.SavedRecurringTrips.Delete(saved);
+                await unitOfWork.SaveChangesAsync(transactionToken);
+                return true;
+            }, cancellationToken);
     }
 
     public async Task<PagedResponseDto<RecurringTripResponseDto>>
@@ -300,7 +399,69 @@ public sealed class RecurringTripService(
             }
         }
 
+        await BackfillSubscriberBookingsAsync(utcNow, cancellationToken);
+
         return generatedCount;
+    }
+
+    private async Task BackfillSubscriberBookingsAsync(
+        DateTime utcNow,
+        CancellationToken cancellationToken)
+    {
+        var occurrences = await unitOfWork.Trips
+            .GetOpenRecurringOccurrencesAsync(utcNow, cancellationToken);
+        foreach (var occurrence in occurrences)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!occurrence.RecurringTripId.HasValue)
+                continue;
+
+            var recurringTripId = occurrence.RecurringTripId.Value;
+            var passengerIds = await unitOfWork.TripSubscriptions
+                .GetActivePassengerIdsAsync(
+                    recurringTripId, cancellationToken);
+            foreach (var passengerId in passengerIds)
+            {
+                try
+                {
+                    await unitOfWork.ExecuteInTransactionAsync(
+                        async transactionToken =>
+                        {
+                            var schedule = await unitOfWork.RecurringTrips
+                                .GetByIdForUpdateAsync(
+                                    recurringTripId, transactionToken);
+                            if (schedule?.CancelledAt.HasValue != false)
+                                return false;
+
+                            var subscription = await unitOfWork.TripSubscriptions
+                                .GetByRecurringTripAndPassengerForUpdateAsync(
+                                    recurringTripId,
+                                    passengerId,
+                                    transactionToken);
+                            if (subscription?.IsActive != true)
+                                return false;
+
+                            if (await unitOfWork.TripBookings
+                                    .HasActiveBookingAsync(
+                                        occurrence.Id,
+                                        passengerId,
+                                        transactionToken))
+                                return false;
+
+                            await tripBookingService.CreateAsync(
+                                passengerId,
+                                occurrence.Id,
+                                transactionToken);
+                            return true;
+                        }, cancellationToken);
+                }
+                catch (ConflictException)
+                {
+                    // Another request may have created the booking, or the
+                    // occurrence may have closed after it was selected.
+                }
+            }
+        }
     }
 
     private async Task<RecurringTripResponseDto> SetActivityAsync(
@@ -310,33 +471,39 @@ public sealed class RecurringTripService(
         bool cancel,
         CancellationToken cancellationToken)
     {
-        var schedule = await GetOwnedScheduleAsync(
-            recurringTripId, driverId, true, cancellationToken);
-        if (schedule.CancelledAt.HasValue)
-        {
-            if (cancel)
-                return Map(schedule);
-            throw new ConflictException(
-                "A cancelled recurring trip cannot be paused or resumed.");
-        }
+        var scheduleId = await unitOfWork.ExecuteInTransactionAsync(
+            async transactionToken =>
+            {
+                var schedule = await GetOwnedScheduleAsync(
+                    recurringTripId, driverId, true, transactionToken);
+                if (schedule.CancelledAt.HasValue)
+                {
+                    if (cancel)
+                        return schedule.Id;
+                    throw new ConflictException(
+                        "A cancelled recurring trip cannot be paused or resumed.");
+                }
 
-        if (cancel)
-        {
-            schedule.IsActive = false;
-            schedule.CancelledAt = DateTime.UtcNow;
-        }
-        else
-        {
-            if (isActive && schedule.EndDate.HasValue &&
-                schedule.EndDate.Value < DateOnly.FromDateTime(DateTime.UtcNow))
-                throw new ConflictException(
-                    "An ended recurring trip cannot be resumed.");
-            schedule.IsActive = isActive;
-        }
+                if (cancel)
+                {
+                    schedule.IsActive = false;
+                    schedule.CancelledAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    if (isActive && schedule.EndDate.HasValue &&
+                        schedule.EndDate.Value <
+                        DateOnly.FromDateTime(DateTime.UtcNow))
+                        throw new ConflictException(
+                            "An ended recurring trip cannot be resumed.");
+                    schedule.IsActive = isActive;
+                }
 
-        unitOfWork.RecurringTrips.Update(schedule);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
-        return await GetOwnedAsync(schedule.Id, driverId, cancellationToken);
+                unitOfWork.RecurringTrips.Update(schedule);
+                await unitOfWork.SaveChangesAsync(transactionToken);
+                return schedule.Id;
+            }, cancellationToken);
+        return await GetOwnedAsync(scheduleId, driverId, cancellationToken);
     }
 
     private async Task<RecurringTrip> GetOwnedScheduleAsync(
@@ -545,4 +712,77 @@ public sealed class RecurringTripService(
             DepartureTime = subscription.RecurringTrip.DepartureTime,
             CreatedAt = subscription.CreatedAt
         };
+
+    private static SavedRecurringTripResponseDto MapSaved(
+        SavedRecurringTrip saved,
+        Guid passengerId)
+    {
+        var schedule = saved.RecurringTrip;
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var status = schedule.CancelledAt.HasValue
+            ? RecurringTripScheduleStatus.Cancelled
+            : schedule.EndDate.HasValue && schedule.EndDate.Value < today
+                ? RecurringTripScheduleStatus.Ended
+                : schedule.IsActive
+                    ? RecurringTripScheduleStatus.Active
+                    : RecurringTripScheduleStatus.Paused;
+        var isSubscribed = schedule.Subscriptions.Any(subscription =>
+            subscription.PassengerId == passengerId &&
+            subscription.IsActive);
+        var activeSubscriptionCount = schedule.Subscriptions.Count(
+            subscription => subscription.IsActive);
+
+        return new SavedRecurringTripResponseDto
+        {
+            RecurringTripId = schedule.Id,
+            DriverId = schedule.DriverId,
+            DriverName = schedule.Driver?.Profile is null
+                ? string.Empty
+                : $"{schedule.Driver.Profile.FirstName} {schedule.Driver.Profile.LastName}".Trim(),
+            VehicleId = schedule.VehicleId,
+            VehicleLicensePlateNumber =
+                schedule.Vehicle?.LicensePlateNumber ?? string.Empty,
+            VehicleMake = schedule.Vehicle?.Make,
+            VehicleModel = schedule.Vehicle?.Model,
+            VehicleColour = schedule.Vehicle?.Colour,
+            OriginLatitude = schedule.OriginLatitude,
+            OriginLongitude = schedule.OriginLongitude,
+            OriginAddress = schedule.OriginAddress,
+            DestinationLatitude = schedule.DestinationLatitude,
+            DestinationLongitude = schedule.DestinationLongitude,
+            DestinationAddress = schedule.DestinationAddress,
+            RoutePolyline = schedule.RoutePolyline,
+            DistanceKm = schedule.DistanceKm,
+            EstimatedDurationMinutes = schedule.EstimatedDurationMinutes,
+            DaysOfWeek = schedule.DaysOfWeek,
+            DepartureTime = schedule.DepartureTime,
+            StartDate = schedule.StartDate,
+            EndDate = schedule.EndDate,
+            Status = status,
+            IsAvailable = status == RecurringTripScheduleStatus.Active &&
+                (isSubscribed ||
+                    activeSubscriptionCount < schedule.AvailableSeats),
+            AvailableSeats = schedule.AvailableSeats,
+            IsSubscribed = isSubscribed,
+            SavedAt = saved.CreatedAt
+        };
+    }
+
+    private static bool IsDuplicateSavedTrip(Exception exception)
+    {
+        for (Exception? current = exception;
+             current is not null;
+             current = current.InnerException)
+        {
+            if (current is PostgresException
+                {
+                    SqlState: PostgresErrorCodes.UniqueViolation,
+                    ConstraintName:
+                        "IX_SavedRecurringTrips_RecurringTripId_PassengerId"
+                })
+                return true;
+        }
+
+        return false;
+    }
 }

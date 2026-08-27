@@ -52,7 +52,7 @@ public static class NpgsqlConnectionExtension
             Username = username,
             Port = settings.Port,
 
-            IncludeErrorDetail = true,
+            IncludeErrorDetail = false,
             Pooling = true,
 
             SslMode = parsedSslMode

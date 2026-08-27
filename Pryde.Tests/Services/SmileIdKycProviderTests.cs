@@ -1015,6 +1015,123 @@ public class SmileIdKycProviderTests
     }
 
     [Fact]
+    public async Task PassengerRetryCanChangeFromVoterIdToEnabledNinV2()
+    {
+        var context = Context(
+            RoleNames.Passenger,
+            configureSettings: settings =>
+                settings.PassengerIdentityOptions.Single(option =>
+                    option.IdType == "NIN_V2").Enabled = true);
+        var first = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
+        await context.Provider.ProcessCallbackAsync(
+            Callback(first, "0811", "Face mismatch"));
+
+        var retried = Assert.Single((await PublicService(context).RetryAsync(
+            context.UserId,
+            "NIN_V2")).Sessions);
+
+        var attempt = CurrentAttempt(context, retried);
+        Assert.Equal("NIN_V2", attempt.IdentityType);
+        Assert.Equal("biometric_kyc", attempt.VerificationMethod);
+        Assert.Equal(
+            "NIN_V2",
+            Assert.Single(context.ApiClient.LinkRequests.Last()
+                .IdentityOptions).IdType);
+    }
+
+    [Fact]
+    public async Task PassengerRetryWithoutSelectionReusesPreviousIdType()
+    {
+        var context = Context(
+            RoleNames.Passenger,
+            configureSettings: settings =>
+                settings.PassengerIdentityOptions.Single(option =>
+                    option.IdType == "NIN_V2").Enabled = true);
+        var first = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
+        await context.Provider.ProcessCallbackAsync(
+            Callback(first, "0811", "Face mismatch"));
+
+        var retried = Assert.Single((await PublicService(context).RetryAsync(
+            context.UserId)).Sessions);
+
+        Assert.Equal(
+            "VOTER_ID",
+            CurrentAttempt(context, retried).IdentityType);
+        Assert.Equal(
+            "VOTER_ID",
+            Assert.Single(context.ApiClient.LinkRequests.Last()
+                .IdentityOptions).IdType);
+    }
+
+    [Fact]
+    public async Task PassengerRetryRejectsUnsupportedOrDisabledSelection()
+    {
+        var context = Context(RoleNames.Passenger);
+        var first = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
+        await context.Provider.ProcessCallbackAsync(
+            Callback(first, "0811", "Face mismatch"));
+
+        var exception = await Assert.ThrowsAsync<ValidationException>(() =>
+            PublicService(context).RetryAsync(context.UserId, "NIN_V2"));
+
+        Assert.Equal(
+            "The selected passenger identity type is unsupported or disabled.",
+            exception.Message);
+        Assert.Single(
+            context.UnitOfWork.KycVerificationAttemptRepository.Items);
+        Assert.Single(context.ApiClient.LinkRequests);
+        Assert.Equal(KycStatus.Rejected, CurrentKyc(context).Status);
+    }
+
+    [Fact]
+    public async Task ConcurrentPassengerRetriesWithSelectionCreateOneAttempt()
+    {
+        var context = Context(
+            RoleNames.Passenger,
+            configureSettings: settings =>
+                settings.PassengerIdentityOptions.Single(option =>
+                    option.IdType == "NIN_V2").Enabled = true);
+        var first = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
+        await context.Provider.ProcessCallbackAsync(
+            Callback(first, "0811", "Face mismatch"));
+        var service = PublicService(context);
+
+        async Task<Exception?> RetryAsync()
+        {
+            try
+            {
+                await service.RetryAsync(context.UserId, "NIN_V2");
+                return null;
+            }
+            catch (Exception exception)
+            {
+                return exception;
+            }
+        }
+
+        var outcomes = await Task.WhenAll(RetryAsync(), RetryAsync());
+
+        Assert.Single(outcomes, exception => exception is null);
+        Assert.IsType<ConflictException>(Assert.Single(
+            outcomes,
+            exception => exception is not null));
+        Assert.Equal(
+            2,
+            context.UnitOfWork.KycVerificationAttemptRepository.Items.Count);
+        Assert.Equal(
+            "NIN_V2",
+            context.UnitOfWork.KycVerificationAttemptRepository.Items
+                .Single(attempt =>
+                    attempt.Status == KycProviderStatus.Pending)
+                .IdentityType);
+        Assert.Equal(2, context.ApiClient.LinkRequests.Count);
+    }
+
+    [Fact]
     public async Task JobStatusHistoryRecoversSubmittedAttemptAfterMissedFinalCallback()
     {
         var context = Context(RoleNames.Passenger);
@@ -1167,7 +1284,21 @@ public class SmileIdKycProviderTests
         Assert.Contains("at least one enabled option", result.FailureMessage);
     }
 
-    private static TestContext Context(string role, string environment = "Sandbox")
+    private static KycProviderService PublicService(TestContext context) =>
+        new(
+            new KycProviderResolver(
+                [new StubProvider("Dojah"), context.Provider],
+                Options.Create(new KycSettings
+                {
+                    ActiveProvider = SmileIdKycProvider.ProviderName
+                })),
+            context.UnitOfWork,
+            NullLogger<KycProviderService>.Instance);
+
+    private static TestContext Context(
+        string role,
+        string environment = "Sandbox",
+        Action<SmileIdSettings>? configureSettings = null)
     {
         var unitOfWork = new TestUnitOfWork();
         var userId = Guid.NewGuid();
@@ -1185,6 +1316,7 @@ public class SmileIdKycProviderTests
         var apiClient = new StubSmileIdApiClient();
         var email = new CapturingEmailService();
         var settings = Settings(environment);
+        configureSettings?.Invoke(settings);
         var provider = new SmileIdKycProvider(
             unitOfWork,
             apiClient,

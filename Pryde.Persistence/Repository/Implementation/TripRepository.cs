@@ -156,6 +156,25 @@ public class TripRepository(PrydeDbContext context) : ITripRepository
             cancellationToken);
     }
 
+    public async Task<IReadOnlyList<Trip>> GetOpenRecurringOccurrencesAsync(
+        DateTime utcNow,
+        CancellationToken cancellationToken = default)
+    {
+        utcNow = utcNow.ToUniversalTime();
+        return await context.Trips
+            .AsNoTracking()
+            .Where(trip =>
+                trip.RecurringTripId.HasValue &&
+                trip.RecurringTrip != null &&
+                trip.RecurringTrip.CancelledAt == null &&
+                trip.Status == TripStatus.Scheduled &&
+                trip.DepartureTime > utcNow)
+            .Where(TripBookingWindow.IsOpenAtUtc(utcNow))
+            .OrderBy(trip => trip.DepartureTime)
+            .ThenBy(trip => trip.Id)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<int> CountCompletedByDriverIdAsync(
         Guid driverId,
         CancellationToken cancellationToken = default)

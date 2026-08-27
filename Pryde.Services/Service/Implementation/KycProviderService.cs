@@ -72,6 +72,12 @@ public sealed class KycProviderService(
 
     public async Task<KycProviderResult> RetryAsync(
         Guid userId,
+        CancellationToken cancellationToken = default) =>
+        await RetryAsync(userId, null, cancellationToken);
+
+    public async Task<KycProviderResult> RetryAsync(
+        Guid userId,
+        string? selectedIdType,
         CancellationToken cancellationToken = default)
     {
         var kyc = await unitOfWork.KycVerifications.GetByUserIdAsync(
@@ -95,7 +101,7 @@ public sealed class KycProviderService(
 
         var provider = resolver.ResolveActive();
         var result = await provider.RetryAsync(
-            new KycProviderRequest(userId),
+            new KycProviderRequest(userId, selectedIdType),
             cancellationToken);
         KycProviderResultInvariant.Ensure(provider.Name, result);
         return await AddAttemptAllowanceAsync(
