@@ -10,6 +10,29 @@ namespace Pryde.Tests.Services;
 
 public class TripServiceTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PassengerSearchAndDetailsExposeRecurringIdentity(
+        bool isRecurring)
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var trip = TestData.OpenTrip(driverId, vehicle);
+        trip.RecurringTripId = isRecurring ? Guid.NewGuid() : null;
+        unitOfWork.TripRepository.Items.Add(trip);
+        var service = TestData.CreateTripService(unitOfWork);
+
+        var summary = Assert.Single(await service.SearchAsync(
+            new SearchTripsRequestDto()));
+        var details = await service.GetByIdAsync(trip.Id);
+
+        Assert.Equal(isRecurring, summary.IsRecurring);
+        Assert.Equal(trip.RecurringTripId, summary.RecurringTripId);
+        Assert.Equal(isRecurring, details.IsRecurring);
+        Assert.Equal(trip.RecurringTripId, details.RecurringTripId);
+    }
+
     [Fact]
     public async Task CustomerTripDetailsIncludeSafeDriverAndVehicleSummaries()
     {
@@ -484,6 +507,8 @@ public class TripServiceTests
         Assert.Equal(
             WorkflowActor.Passenger,
             response.RequiredActor);
+        Assert.False(response.IsRecurring);
+        Assert.Null(response.RecurringTripId);
         var notifications = context.UnitOfWork.NotificationRepository.Items
             .Where(notification =>
                 notification.Type == NotificationType.PickupConfirmationRequired)
@@ -531,6 +556,37 @@ public class TripServiceTests
         Assert.Equal(
             WorkflowActor.Passenger,
             response.RequiredActor);
+        Assert.False(response.IsRecurring);
+        Assert.Null(response.RecurringTripId);
+    }
+
+    [Fact]
+    public async Task RecurringPassengerConfirmationResponsesExposeParentSchedule()
+    {
+        var context = CreateLifecycleContext();
+        var recurringTripId = Guid.NewGuid();
+        context.Trip.RecurringTripId = recurringTripId;
+        await context.Service.StartAsync(
+            context.Trip.Id,
+            context.DriverId);
+
+        var pickup = await context.Service.ConfirmPickupAsync(
+            context.Trip.Id,
+            context.Bookings[0].PassengerId);
+        await context.Service.ConfirmPickupAsync(
+            context.Trip.Id,
+            context.Bookings[1].PassengerId);
+        await context.Service.EndAsync(
+            context.Trip.Id,
+            context.DriverId);
+        var dropoff = await context.Service.ConfirmDropoffAsync(
+            context.Trip.Id,
+            context.Bookings[0].PassengerId);
+
+        Assert.True(pickup.IsRecurring);
+        Assert.Equal(recurringTripId, pickup.RecurringTripId);
+        Assert.True(dropoff.IsRecurring);
+        Assert.Equal(recurringTripId, dropoff.RecurringTripId);
     }
 
     [Fact]
@@ -632,6 +688,8 @@ public class TripServiceTests
         Assert.Equal(
             WorkflowActor.Passenger,
             response.RequiredActor);
+        Assert.False(response.IsRecurring);
+        Assert.Null(response.RecurringTripId);
     }
 
     [Fact]
