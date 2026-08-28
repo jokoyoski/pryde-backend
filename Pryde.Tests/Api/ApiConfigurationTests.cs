@@ -47,8 +47,10 @@ public class ApiConfigurationTests
 
     [Theory]
     [InlineData(typeof(AdminUsersController), nameof(AdminUsersController.GetAll))]
+    [InlineData(typeof(AdminUsersController), nameof(AdminUsersController.Get))]
     [InlineData(typeof(AdminUsersController), nameof(AdminUsersController.GetRatings))]
     [InlineData(typeof(AdminDriversController), nameof(AdminDriversController.GetAll))]
+    [InlineData(typeof(AdminDriversController), nameof(AdminDriversController.Get))]
     [InlineData(typeof(AdminDriversController), nameof(AdminDriversController.Reject))]
     [InlineData(typeof(AdminTripsController), nameof(AdminTripsController.GetAll))]
     [InlineData(typeof(AdminBookingsController), nameof(AdminBookingsController.GetAll))]

@@ -250,14 +250,14 @@ public class AdminPortalService(
     public Task<AdminUserDetailResponseDto> DeactivateUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
         SetCustomerStatusAsync(userId, UserStatus.Deactivated, false, cancellationToken);
 
-    public async Task<PagedResponseDto<UserSummaryResponseDto>> GetDriversAsync(
+    public async Task<PagedResponseDto<AdminUserSummaryResponseDto>> GetDriversAsync(
         AdminDriversRequestDto request, CancellationToken cancellationToken = default)
     {
         request ??= new AdminDriversRequestDto();
         var result = await unitOfWork.AdminListings.GetDriversAsync(
             request.Search, request.Status, request.KycStatus, request.DocumentStatus,
             request.PageNumber, request.PageSize, cancellationToken);
-        return new PagedResponseDto<UserSummaryResponseDto>
+        return new PagedResponseDto<AdminUserSummaryResponseDto>
         {
             Items = result.Items.Select(MapUserSummary).ToList(),
             PageNumber = request.PageNumber,
@@ -272,7 +272,8 @@ public class AdminPortalService(
     {
         var user = await GetCustomerAsync(driverId, true, cancellationToken);
         var tripSummary = await unitOfWork.AdminListings.GetDriverTripSummaryAsync(driverId, cancellationToken);
-        return MapDriverDetail(user, tripSummary);
+        var ratingSummary = await unitOfWork.TripRatings.GetSummaryAsync(driverId, cancellationToken);
+        return MapDriverDetail(user, tripSummary, ratingSummary);
     }
 
     public async Task<AdminDriverDetailResponseDto> ActivateDriverAsync(
@@ -532,13 +533,14 @@ public class AdminPortalService(
         };
     }
 
-    private static UserSummaryResponseDto MapUserSummary(User user) => new()
+    private static AdminUserSummaryResponseDto MapUserSummary(User user) => new()
     {
         Id = user.Id,
         Email = user.Email,
         PhoneNumber = user.PhoneNumber,
         FirstName = user.Profile?.FirstName ?? string.Empty,
         LastName = user.Profile?.LastName ?? string.Empty,
+        ProfilePhotoUrl = user.Profile?.ProfilePhotoUrl,
         Status = user.Status.ToString(),
         IsEmailVerified = user.IsEmailVerified,
         IsPhoneNumberVerified = user.IsPhoneNumberVerified,
@@ -557,6 +559,7 @@ public class AdminPortalService(
             PhoneNumber = summary.PhoneNumber,
             FirstName = summary.FirstName,
             LastName = summary.LastName,
+            ProfilePhotoUrl = summary.ProfilePhotoUrl,
             FullName = $"{summary.FirstName} {summary.LastName}".Trim(),
             Status = summary.Status,
             IsEmailVerified = summary.IsEmailVerified,
@@ -568,7 +571,10 @@ public class AdminPortalService(
         };
     }
 
-    private static AdminDriverDetailResponseDto MapDriverDetail(User user, AdminDriverTripSummary tripSummary)
+    private static AdminDriverDetailResponseDto MapDriverDetail(
+        User user,
+        AdminDriverTripSummary tripSummary,
+        RatingSummaryData ratingSummary)
     {
         var detail = MapUserDetail(user);
         var documentStatuses = user.Vehicles.SelectMany(vehicle => vehicle.Documents).Select(document => document.ReviewStatus).ToList();
@@ -582,6 +588,7 @@ public class AdminPortalService(
             PhoneNumber = detail.PhoneNumber,
             FirstName = detail.FirstName,
             LastName = detail.LastName,
+            ProfilePhotoUrl = detail.ProfilePhotoUrl,
             FullName = detail.FullName,
             Status = detail.Status,
             IsEmailVerified = detail.IsEmailVerified,
@@ -590,6 +597,8 @@ public class AdminPortalService(
             Kyc = detail.Kyc,
             Roles = detail.Roles,
             CreatedAt = detail.CreatedAt,
+            AverageRating = ratingSummary.AverageRating,
+            RatingCount = ratingSummary.RatingCount,
             Vehicles = user.Vehicles.Select(MapVehicle).ToList(),
             VehicleDocumentStatus = documentStatus,
             TripSummary = new DriverTripSummaryResponseDto

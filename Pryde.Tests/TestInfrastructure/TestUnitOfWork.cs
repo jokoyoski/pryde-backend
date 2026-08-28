@@ -435,6 +435,7 @@ internal sealed class TestTripRatingRepository
 {
     public List<TripRating> Items { get; } = [];
     public int RatingStateQueryCount { get; private set; }
+    public int SummaryQueryCount { get; private set; }
 
     public Task<bool> ExistsAsync(
         Guid bookingId,
@@ -467,6 +468,7 @@ internal sealed class TestTripRatingRepository
         Guid ratedUserId,
         CancellationToken cancellationToken = default)
     {
+        SummaryQueryCount++;
         var ratings = Items
             .Where(rating => rating.RatedUserId == ratedUserId)
             .ToList();

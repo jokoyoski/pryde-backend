@@ -9,6 +9,61 @@ namespace Pryde.Tests.Services;
 public class AdminListingServiceTests
 {
     [Fact]
+    public async Task UserListingIncludesPassengerAndDriverProfilePhotosAndPreservesNull()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var passenger = User("passenger.photo@test.local");
+        passenger.Profile = new Profile
+        {
+            FirstName = "Passenger",
+            LastName = "Photo",
+            ProfilePhotoUrl = "https://media.test/passenger.jpg"
+        };
+        var passengerRole = new Role { Name = "Passenger" };
+        passenger.UserRoles.Add(new UserRole
+        {
+            User = passenger,
+            UserId = passenger.Id,
+            Role = passengerRole,
+            RoleId = passengerRole.Id
+        });
+        var driver = User("driver.photo@test.local");
+        driver.Profile = new Profile
+        {
+            FirstName = "Driver",
+            LastName = "Photo",
+            ProfilePhotoUrl = "https://media.test/driver.jpg"
+        };
+        var driverRole = new Role { Name = "Driver" };
+        driver.UserRoles.Add(new UserRole
+        {
+            User = driver,
+            UserId = driver.Id,
+            Role = driverRole,
+            RoleId = driverRole.Id
+        });
+        var noPhoto = User("no.photo@test.local");
+        noPhoto.Profile = new Profile
+        {
+            FirstName = "No",
+            LastName = "Photo"
+        };
+        unitOfWork.AdminListingRepository.Users.AddRange(
+            [passenger, driver, noPhoto]);
+
+        var result = await new AdminListingService(unitOfWork)
+            .GetUsersAsync(new AdminUsersRequestDto());
+
+        Assert.Equal(
+            "https://media.test/passenger.jpg",
+            result.Items.Single(item => item.Id == passenger.Id).ProfilePhotoUrl);
+        Assert.Equal(
+            "https://media.test/driver.jpg",
+            result.Items.Single(item => item.Id == driver.Id).ProfilePhotoUrl);
+        Assert.Null(result.Items.Single(item => item.Id == noPhoto.Id).ProfilePhotoUrl);
+    }
+
+    [Fact]
     public async Task UserListingPaginationWorks()
     {
         var unitOfWork = new TestUnitOfWork();
