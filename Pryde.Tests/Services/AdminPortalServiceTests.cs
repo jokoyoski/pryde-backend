@@ -346,6 +346,168 @@ public class AdminPortalServiceTests
                 NotificationType.DriverDeactivated);
     }
 
+    [Fact]
+    public async Task PassengerDetailIncludesProfilePhotoAndExistingFields()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var passenger = new User
+        {
+            Email = "passenger.detail@test.local",
+            PhoneNumber = "08000000002",
+            Status = UserStatus.Active,
+            IsEmailVerified = true,
+            Profile = new Profile
+            {
+                FirstName = "Passenger",
+                LastName = "Detail",
+                ProfilePhotoUrl = "https://media.test/passenger-detail.jpg"
+            }
+        };
+        var role = new Role { Name = "Passenger" };
+        passenger.UserRoles.Add(new UserRole
+        {
+            User = passenger,
+            UserId = passenger.Id,
+            Role = role,
+            RoleId = role.Id
+        });
+        passenger.KycVerification = new KycVerification
+        {
+            User = passenger,
+            UserId = passenger.Id,
+            Status = KycStatus.Approved
+        };
+        unitOfWork.UserRepository.Items.Add(passenger);
+        var service = CreateService(unitOfWork, new FakeEmailService());
+
+        var result = await service.GetUserAsync(passenger.Id);
+
+        Assert.Equal("https://media.test/passenger-detail.jpg", result.ProfilePhotoUrl);
+        Assert.Equal(passenger.Email, result.Email);
+        Assert.Equal(passenger.PhoneNumber, result.PhoneNumber);
+        Assert.Equal("Passenger Detail", result.FullName);
+        Assert.True(result.IsEmailVerified);
+        Assert.Equal("Approved", result.KycStatus);
+        Assert.NotNull(result.Kyc);
+        Assert.Contains("Passenger", result.Roles);
+    }
+
+    [Fact]
+    public async Task DriverListingIncludesProfilePhoto()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var driver = CreateDriver("driver.list@test.local", "https://media.test/driver-list.jpg");
+        unitOfWork.UserRepository.Items.Add(driver);
+        var service = CreateService(unitOfWork, new FakeEmailService());
+
+        var result = await service.GetDriversAsync(new AdminDriversRequestDto());
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal(driver.Id, item.Id);
+        Assert.Equal("https://media.test/driver-list.jpg", item.ProfilePhotoUrl);
+        Assert.Equal(driver.Email, item.Email);
+        Assert.Contains("Driver", item.Roles);
+    }
+
+    [Fact]
+    public async Task DriverDetailIncludesProfilePhotoRatingSummaryAndExistingFields()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var driver = CreateDriver(
+            "driver.detail@test.local",
+            "https://media.test/driver-detail.jpg");
+        driver.KycVerification = new KycVerification
+        {
+            User = driver,
+            UserId = driver.Id,
+            Status = KycStatus.Approved
+        };
+        var vehicle = new Vehicle
+        {
+            User = driver,
+            UserId = driver.Id,
+            LicensePlateNumber = "PRYDE-01",
+            Make = "Toyota",
+            Model = "Camry",
+            Capacity = 4,
+            IsActive = true
+        };
+        vehicle.Images.Add(new VehicleImage
+        {
+            Vehicle = vehicle,
+            VehicleId = vehicle.Id,
+            ImageUrl = "https://media.test/vehicle.jpg",
+            IsPrimary = true
+        });
+        vehicle.Documents.Add(new VehicleDocument
+        {
+            Vehicle = vehicle,
+            VehicleId = vehicle.Id,
+            DocumentType = VehicleDocumentType.Insurance,
+            DocumentUrl = "https://media.test/insurance.pdf",
+            ReviewStatus = VehicleDocumentReviewStatus.Approved
+        });
+        driver.Vehicles.Add(vehicle);
+        unitOfWork.UserRepository.Items.Add(driver);
+        unitOfWork.TripRatingRepository.Items.AddRange(
+        [
+            new TripRating
+            {
+                BookingId = Guid.NewGuid(),
+                RaterId = Guid.NewGuid(),
+                RatedUserId = driver.Id,
+                Value = 4
+            },
+            new TripRating
+            {
+                BookingId = Guid.NewGuid(),
+                RaterId = Guid.NewGuid(),
+                RatedUserId = driver.Id,
+                Value = 5
+            },
+            new TripRating
+            {
+                BookingId = Guid.NewGuid(),
+                RaterId = driver.Id,
+                RatedUserId = Guid.NewGuid(),
+                Value = 1
+            }
+        ]);
+        var service = CreateService(unitOfWork, new FakeEmailService());
+
+        var result = await service.GetDriverAsync(driver.Id);
+
+        Assert.Equal("https://media.test/driver-detail.jpg", result.ProfilePhotoUrl);
+        Assert.Equal(4.5, result.AverageRating);
+        Assert.Equal(2, result.RatingCount);
+        Assert.Equal(1, unitOfWork.TripRatingRepository.SummaryQueryCount);
+        Assert.Equal(driver.Email, result.Email);
+        Assert.Equal("Approved", result.KycStatus);
+        Assert.NotNull(result.Kyc);
+        var mappedVehicle = Assert.Single(result.Vehicles);
+        Assert.Equal("PRYDE-01", mappedVehicle.LicensePlateNumber);
+        Assert.Single(mappedVehicle.Images);
+        Assert.Single(mappedVehicle.Documents);
+        Assert.Equal("Approved", result.VehicleDocumentStatus);
+        Assert.NotNull(result.TripSummary);
+    }
+
+    [Fact]
+    public async Task DriverDetailWithoutRatingsOrProfilePhotoReturnsDefaults()
+    {
+        var unitOfWork = new TestUnitOfWork();
+        var driver = CreateDriver("driver.defaults@test.local", null);
+        unitOfWork.UserRepository.Items.Add(driver);
+        var service = CreateService(unitOfWork, new FakeEmailService());
+
+        var result = await service.GetDriverAsync(driver.Id);
+
+        Assert.Null(result.ProfilePhotoUrl);
+        Assert.Equal(0, result.AverageRating);
+        Assert.Equal(0, result.RatingCount);
+        Assert.Equal(1, unitOfWork.TripRatingRepository.SummaryQueryCount);
+    }
+
     private static AdminPortalService CreateService(
         TestUnitOfWork unitOfWork,
         IEmailService email,
@@ -368,6 +530,31 @@ public class AdminPortalServiceTests
             {
                 FirstName = "Test",
                 LastName = "Driver"
+            }
+        };
+        var role = new Role { Name = "Driver" };
+        user.UserRoles.Add(new UserRole
+        {
+            User = user,
+            UserId = user.Id,
+            Role = role,
+            RoleId = role.Id
+        });
+        return user;
+    }
+
+    private static User CreateDriver(string email, string? profilePhotoUrl)
+    {
+        var user = new User
+        {
+            Email = email,
+            PhoneNumber = "08000000003",
+            Status = UserStatus.Active,
+            Profile = new Profile
+            {
+                FirstName = "Test",
+                LastName = "Driver",
+                ProfilePhotoUrl = profilePhotoUrl
             }
         };
         var role = new Role { Name = "Driver" };

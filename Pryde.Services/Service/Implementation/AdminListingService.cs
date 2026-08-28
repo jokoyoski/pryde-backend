@@ -10,7 +10,7 @@ namespace Pryde.Services.Service.Implementation;
 
 public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
 {
-    public async Task<PagedResponseDto<UserSummaryResponseDto>> GetUsersAsync(AdminUsersRequestDto request, CancellationToken cancellationToken = default)
+    public async Task<PagedResponseDto<AdminUserSummaryResponseDto>> GetUsersAsync(AdminUsersRequestDto request, CancellationToken cancellationToken = default)
     {
         ValidateDateRange(request.CreatedFrom, request.CreatedTo, "CreatedFrom", "CreatedTo");
         ValidateUserSort(request.SortBy, request.SortDirection);
@@ -19,13 +19,14 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
             request.IsEmailVerified, request.IsPhoneVerified, request.KycStatus,
             request.CreatedFrom, request.CreatedTo, request.SortBy, request.SortDirection,
             request.PageNumber, request.PageSize, cancellationToken);
-        return Page(result.Items.Select(user => new UserSummaryResponseDto
+        return Page(result.Items.Select(user => new AdminUserSummaryResponseDto
         {
             Id = user.Id,
             Email = user.Email,
             PhoneNumber = user.PhoneNumber,
             FirstName = user.Profile?.FirstName ?? string.Empty,
             LastName = user.Profile?.LastName ?? string.Empty,
+            ProfilePhotoUrl = user.Profile?.ProfilePhotoUrl,
             Status = user.Status.ToString(),
             IsEmailVerified = user.IsEmailVerified,
             IsPhoneNumberVerified = user.IsPhoneNumberVerified,

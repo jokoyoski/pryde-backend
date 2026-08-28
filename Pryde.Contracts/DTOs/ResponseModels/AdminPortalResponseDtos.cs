@@ -28,7 +28,12 @@ public class StaffListResponseDto : PagedResponseDto<StaffResponseDto>
     public StaffSummaryResponseDto Summary { get; set; } = new();
 }
 
-public class AdminUserDetailResponseDto : UserSummaryResponseDto
+public class AdminUserSummaryResponseDto : UserSummaryResponseDto
+{
+    public string? ProfilePhotoUrl { get; set; }
+}
+
+public class AdminUserDetailResponseDto : AdminUserSummaryResponseDto
 {
     public string FullName { get; set; } = string.Empty;
     public KycVerificationResponseDto? Kyc { get; set; }
@@ -43,6 +48,8 @@ public class DriverTripSummaryResponseDto
 
 public class AdminDriverDetailResponseDto : AdminUserDetailResponseDto
 {
+    public double AverageRating { get; set; }
+    public int RatingCount { get; set; }
     public IReadOnlyList<AdminVehicleResponseDto> Vehicles { get; set; } = [];
     public string VehicleDocumentStatus { get; set; } = "NotSubmitted";
     public DriverTripSummaryResponseDto TripSummary { get; set; } = new();

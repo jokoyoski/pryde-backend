@@ -13,7 +13,7 @@ public interface IAdminPortalService
     Task<AdminUserDetailResponseDto> GetUserAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<AdminUserDetailResponseDto> ActivateUserAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<AdminUserDetailResponseDto> DeactivateUserAsync(Guid userId, CancellationToken cancellationToken = default);
-    Task<PagedResponseDto<UserSummaryResponseDto>> GetDriversAsync(AdminDriversRequestDto request, CancellationToken cancellationToken = default);
+    Task<PagedResponseDto<AdminUserSummaryResponseDto>> GetDriversAsync(AdminDriversRequestDto request, CancellationToken cancellationToken = default);
     Task<AdminDriverDetailResponseDto> GetDriverAsync(Guid driverId, CancellationToken cancellationToken = default);
     Task<AdminDriverDetailResponseDto> ActivateDriverAsync(Guid driverId, CancellationToken cancellationToken = default);
     Task<AdminDriverDetailResponseDto> DeactivateDriverAsync(Guid driverId, CancellationToken cancellationToken = default);
