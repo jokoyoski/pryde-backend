@@ -31,6 +31,10 @@ public class TripServiceTests
         Assert.Equal(trip.RecurringTripId, summary.RecurringTripId);
         Assert.Equal(isRecurring, details.IsRecurring);
         Assert.Equal(trip.RecurringTripId, details.RecurringTripId);
+        Assert.Equal(148.75m, summary.PassengerServiceCharge);
+        Assert.Equal(2523.75m, summary.PassengerTotal);
+        Assert.Equal(148.75m, details.PassengerServiceCharge);
+        Assert.Equal(2523.75m, details.PassengerTotal);
     }
 
     [Fact]
@@ -267,8 +271,8 @@ public class TripServiceTests
 
         Assert.Equal(9500m, result.TripFare);
         Assert.Equal(2375m, result.SeatPrice);
-        Assert.Equal(118.75m, result.PassengerServiceCharge);
-        Assert.Equal(2493.75m, result.PassengerTotal);
+        Assert.Equal(148.75m, result.PassengerServiceCharge);
+        Assert.Equal(2523.75m, result.PassengerTotal);
     }
 
     [Fact]

@@ -1,7 +1,9 @@
 using Pryde.Contracts.RequestModels;
+using Microsoft.Extensions.Options;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Services.Service.Implementation;
+using Pryde.Services.Settings;
 using Pryde.Tests.TestInfrastructure;
 
 namespace Pryde.Tests.Services;
@@ -174,7 +176,9 @@ public class AdminListingServiceTests
             OriginAddress = "Lagos",
             DestinationAddress = "Abuja",
             DepartureTime = DateTime.UtcNow.AddDays(1),
-            Status = TripStatus.Scheduled
+            Status = TripStatus.Scheduled,
+            SeatPrice = 1000m,
+            ServiceChargePercentage = 5m
         };
         var passenger = User("passenger@test.local");
         var booking = new TripBooking
@@ -189,9 +193,16 @@ public class AdminListingServiceTests
         unitOfWork.AdminListingRepository.Trips.Add(trip);
         unitOfWork.AdminListingRepository.Bookings.Add(booking);
 
-        var trips = await new AdminListingService(unitOfWork).GetTripsAsync(
+        var service = new AdminListingService(
+            unitOfWork,
+            Options.Create(new PricingSettings
+            {
+                LagosMaintenanceFee = 30m
+            }));
+        var trips = await service.GetTripsAsync(
             new AdminTripsRequestDto { DriverId = driver.Id, IsActive = true });
-        var bookings = await new AdminListingService(unitOfWork).GetBookingsAsync(
+        var tripDetails = await service.GetTripAsync(trip.Id);
+        var bookings = await service.GetBookingsAsync(
             new AdminBookingsRequestDto
             {
                 DriverId = driver.Id,
@@ -201,6 +212,10 @@ public class AdminListingServiceTests
 
         Assert.Single(trips.Items);
         Assert.Equal(1, trips.TotalCount);
+        Assert.Equal(80m, trips.Items[0].PassengerServiceCharge);
+        Assert.Equal(1080m, trips.Items[0].PassengerTotal);
+        Assert.Equal(80m, tripDetails.PassengerServiceCharge);
+        Assert.Equal(1080m, tripDetails.PassengerTotal);
         Assert.Single(bookings.Items);
         Assert.Equal(1, bookings.TotalCount);
     }

@@ -699,6 +699,9 @@ public class ApiConfigurationTests
         Assert.Contains("hasRated", bookingProperties.Keys);
         Assert.Contains("canRate", bookingProperties.Keys);
         Assert.Contains("ratedAt", bookingProperties.Keys);
+        Assert.Contains("passengerProfileImageUrl", bookingProperties.Keys);
+        Assert.DoesNotContain("passengerEmail", bookingProperties.Keys);
+        Assert.DoesNotContain("passengerPhoneNumber", bookingProperties.Keys);
         Assert.Equal("boolean", bookingProperties["hasRated"].Type);
         Assert.Equal("boolean", bookingProperties["canRate"].Type);
         Assert.Equal("date-time", bookingProperties["ratedAt"].Format);

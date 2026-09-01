@@ -18,7 +18,8 @@ public class TripBookingService(
     IFinancialService financialService,
     IOptions<BookingPaymentSettings> bookingPaymentOptions,
     INotificationService notificationService,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IOptions<PricingSettings>? pricingOptions = null)
     : ITripBookingService
 {
     private static readonly TimeSpan RatingWindow =
@@ -27,6 +28,8 @@ public class TripBookingService(
         bookingPaymentOptions.Value;
     private readonly TimeProvider _timeProvider =
         timeProvider ?? TimeProvider.System;
+    private readonly PricingSettings _pricingSettings =
+        pricingOptions?.Value ?? new PricingSettings();
 
     public TripBookingService(IUnitOfWork unitOfWork)
         : this(
@@ -76,7 +79,9 @@ public class TripBookingService(
         if (await unitOfWork.TripBookings.HasActiveBookingAsync(tripId, passengerId, cancellationToken))
             throw new ConflictException("You already have an active booking for this trip.");
 
-        var serviceCharge = Math.Round(trip.SeatPrice * trip.ServiceChargePercentage / 100m, 2);
+        var serviceCharge = _pricingSettings.CalculatePassengerServiceCharge(
+            trip.SeatPrice,
+            trip.ServiceChargePercentage);
         var booking = new TripBooking
         {
             TripId = trip.Id,
@@ -108,7 +113,8 @@ public class TripBookingService(
             trip,
             profile is null ? null : GetName(profile),
             WorkflowNextAction.AwaitDriverDecision,
-            WorkflowActor.Driver);
+            WorkflowActor.Driver,
+            profile?.ProfilePhotoUrl);
         await notificationService.TryCreateAsync(
             NewNotification(
                 trip.DriverId,
@@ -137,7 +143,8 @@ public class TripBookingService(
             b.Trip,
             passengerName,
             passengerId,
-            ratings)).ToList();
+            ratings,
+            profile?.ProfilePhotoUrl)).ToList();
     }
 
     public async Task<IReadOnlyList<TripBookingResponseDto>> GetPendingForTripAsync(
@@ -434,7 +441,8 @@ public class TripBookingService(
         Trip trip,
         string? passengerName,
         Guid? requesterId = null,
-        IReadOnlyDictionary<Guid, DateTime>? ratings = null)
+        IReadOnlyDictionary<Guid, DateTime>? ratings = null,
+        string? passengerProfileImageUrl = null)
     {
         DateTime? ratedAt = null;
         var hasRated = false;
@@ -466,6 +474,8 @@ public class TripBookingService(
             RecurringTripId = trip.RecurringTripId,
             PassengerId = booking.PassengerId,
             PassengerName = passengerName,
+            PassengerProfileImageUrl = passengerProfileImageUrl ??
+                booking.Passenger?.Profile?.ProfilePhotoUrl,
             TripOrigin = trip.OriginAddress,
             TripDestination = trip.DestinationAddress,
             DepartureTime = trip.DepartureTime,
@@ -490,12 +500,14 @@ public class TripBookingService(
         Trip trip,
         string? passengerName,
         WorkflowNextAction nextAction,
-        WorkflowActor requiredActor)
+        WorkflowActor requiredActor,
+        string? passengerProfileImageUrl = null)
     {
         var response = MapResponse(
             booking,
             trip,
-            passengerName);
+            passengerName,
+            passengerProfileImageUrl: passengerProfileImageUrl);
         response.NextAction = nextAction;
         response.RequiredActor = requiredActor;
         return response;

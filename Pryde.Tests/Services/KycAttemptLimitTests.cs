@@ -19,7 +19,7 @@ namespace Pryde.Tests.Services;
 public class KycAttemptLimitTests
 {
     private static readonly DateTime UtcNow =
-        new(2026, 8, 22, 12, 0, 0, DateTimeKind.Utc);
+        new(2026, 9, 22, 12, 0, 0, DateTimeKind.Utc);
 
     [Fact]
     public async Task AttemptsOneThroughThreeAreAllowedWithCorrectRemainingCounts()
@@ -87,7 +87,7 @@ public class KycAttemptLimitTests
         SeedRejectedSmileKyc(
             context,
             3,
-            new DateTime(2026, 7, 31, 23, 59, 0, DateTimeKind.Utc));
+            new DateTime(2026, 8, 31, 23, 59, 0, DateTimeKind.Utc));
 
         var result = await context.Service.RetryAsync(context.UserId);
 
@@ -278,7 +278,7 @@ public class KycAttemptLimitTests
         Assert.Equal(0, responseAllowance.GetProperty("remaining").GetInt32());
         Assert.False(responseAllowance.GetProperty("canAttempt").GetBoolean());
         Assert.Equal(
-            new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc),
             responseAllowance.GetProperty("resetsAt").GetDateTime());
         Assert.Equal(
             "You have no KYC attempts remaining this month. You can try again next month.",

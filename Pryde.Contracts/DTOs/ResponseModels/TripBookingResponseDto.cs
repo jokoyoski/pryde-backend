@@ -10,6 +10,7 @@ public class TripBookingResponseDto : WorkflowResponseDto
     public Guid? RecurringTripId { get; set; }
     public Guid PassengerId { get; set; }
     public string? PassengerName { get; set; }
+    public string? PassengerProfileImageUrl { get; set; }
     public string TripOrigin { get; set; } = string.Empty;
     public string TripDestination { get; set; } = string.Empty;
     public DateTime DepartureTime { get; set; }

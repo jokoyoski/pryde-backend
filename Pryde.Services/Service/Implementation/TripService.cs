@@ -811,9 +811,11 @@ public class TripService(
             throw new ValidationException("Longitude must be between -180 and 180.");
     }
 
-    private static TripSummaryResponseDto MapSummary(Trip trip)
+    private TripSummaryResponseDto MapSummary(Trip trip)
     {
-        var serviceCharge = Math.Round(trip.SeatPrice * trip.ServiceChargePercentage / 100m, 2);
+        var serviceCharge = _pricingSettings.CalculatePassengerServiceCharge(
+            trip.SeatPrice,
+            trip.ServiceChargePercentage);
         return new TripSummaryResponseDto
         {
             TripId = trip.Id,
@@ -865,7 +867,7 @@ public class TripService(
         };
     }
 
-    private static TripDetailsResponseDto MapDetails(Trip trip)
+    private TripDetailsResponseDto MapDetails(Trip trip)
     {
         var summary = MapSummary(trip);
         return new TripDetailsResponseDto
@@ -904,7 +906,7 @@ public class TripService(
         };
     }
 
-    private static CustomerTripDetailsResponseDto MapCustomerDetails(
+    private CustomerTripDetailsResponseDto MapCustomerDetails(
         Trip trip,
         double averageRating)
     {
