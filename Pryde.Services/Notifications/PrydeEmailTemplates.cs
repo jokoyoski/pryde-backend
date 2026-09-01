@@ -4,8 +4,7 @@ namespace Pryde.Services.Notifications;
 
 internal static class PrydeEmailTemplates
 {
-    internal const string LogoUrl =
-        "https://res.cloudinary.com/pinterest-site/image/upload/v1788134947/white-pryde_yxr0ej.jpg";
+    internal const string LogoUrl = "https://res.cloudinary.com/pinterest-site/image/upload/f_jpg,q_auto:good/v1788134947/white-pryde_yxr0ej.jpg";
 
     public static string EmailVerificationOtp(
         string? firstName,
@@ -262,13 +261,13 @@ internal static class PrydeEmailTemplates
 
     private static string BuildLayout(string greeting, string content) =>
         $"""
-        <div style="margin:0; padding:24px; background-color:#f5f7fa; font-family:Arial, Helvetica, sans-serif; color:#1f2937;">
+           <div style="margin:0; padding:24px; background-color:#f5f7fa; font-family:Arial, Helvetica, sans-serif; color:#1f2937;">
             <div style="max-width:600px; margin:0 auto; background-color:#ffffff; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden;">
                 <div style="padding:28px 32px; text-align:center; background-color:#111827;">
-                    <img src="{LogoUrl}" alt="Pryde" width="140" style="display:block; max-width:100%; height:auto; margin:0 auto; border:0;" />
-                </div>
+            <img src="{LogoUrl}" alt="Pryde" width="140" style="display:block; width:140px; height:auto; margin:0 auto; border:0;" />
+            </div>
 
-                <div style="padding:32px;">
+            <div style="padding:32px;">
                     <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">
                         {greeting}
                     </p>

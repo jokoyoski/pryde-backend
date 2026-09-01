@@ -16,7 +16,9 @@ public class FareCalculator(IOptions<PricingSettings> pricingSettings) : IFareCa
 
         var totalTripCost = Math.Max(rawCost, _settings.MinimumFare);
         var seatPrice = Math.Round(totalTripCost / vehicleCapacity, 2);
-        var serviceCharge = Math.Round(seatPrice * (_settings.ServiceChargePercent / 100m), 2);
+        var serviceCharge = _settings.CalculatePassengerServiceCharge(
+            seatPrice,
+            _settings.ServiceChargePercent);
 
         return new FareBreakdown
         {

@@ -38,12 +38,12 @@ public class FinancialServiceTests
     }
 
     [Fact]
-    public async Task ConfiguredPlatformShareCreatesConfirmedSplitWithoutChangingPassengerTotal()
+    public async Task CombinedServiceChargeFlowsThroughPaymentWithoutChangingPlatformShare()
     {
         var context = CreateContext();
         context.Booking.SeatPrice = 2250m;
-        context.Booking.ServiceCharge = 112.50m;
-        context.Booking.TotalAmount = 2362.50m;
+        context.Booking.ServiceCharge = 142.50m;
+        context.Booking.TotalAmount = 2392.50m;
 
         var result = await CreateService(context.UnitOfWork)
             .HoldBookingPaymentAsync(
@@ -51,15 +51,15 @@ public class FinancialServiceTests
                 context.Booking.Id,
                 "confirmed-split");
 
-        Assert.Equal(2362.50m, context.Booking.TotalAmount);
-        Assert.Equal(2362.50m, result.Amount);
+        Assert.Equal(2392.50m, context.Booking.TotalAmount);
+        Assert.Equal(2392.50m, result.Amount);
         Assert.Equal(1575m, result.DriverAmount);
-        Assert.Equal(787.50m, result.PlatformAmount);
+        Assert.Equal(817.50m, result.PlatformAmount);
         Assert.Equal(
             result.Amount,
             result.DriverAmount + result.PlatformAmount);
-        Assert.Equal(637.50m, context.PassengerWallet.Balance);
-        Assert.Equal(2362.50m, context.PassengerWallet.EscrowBalance);
+        Assert.Equal(607.50m, context.PassengerWallet.Balance);
+        Assert.Equal(2392.50m, context.PassengerWallet.EscrowBalance);
     }
 
     [Fact]

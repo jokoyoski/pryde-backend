@@ -202,7 +202,7 @@ public class PrydeEmailTemplatesTests
         params string[] dynamicValues)
     {
         Assert.Contains(
-            $"<img src=\"{LogoUrl}\" alt=\"Pryde\" width=\"140\" " +
+            $"<img src=\"{LogoUrl}\" alt=\"Pryde\" width=\"140\" height=\"140\" " +
             "style=\"display:block; max-width:100%; height:auto; margin:0 auto; border:0;\" />",
             html);
         Assert.Contains("background-color:#111827", html);

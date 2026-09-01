@@ -56,8 +56,8 @@ public class TripBookingServiceTests
             result.NextAction);
         Assert.Equal(WorkflowActor.Driver, result.RequiredActor);
         Assert.Equal(2375m, result.SeatPrice);
-        Assert.Equal(118.75m, result.ServiceCharge);
-        Assert.Equal(2493.75m, result.TotalAmount);
+        Assert.Equal(148.75m, result.ServiceCharge);
+        Assert.Equal(2523.75m, result.TotalAmount);
         Assert.Equal(2, trip.AvailableSeats);
         Assert.Equal(2, unitOfWork.SaveChangesCount);
         var notification = Assert.Single(
@@ -483,6 +483,8 @@ public class TripBookingServiceTests
             unitOfWork,
             trip,
             status: BookingStatus.Approved);
+        booking.Passenger.Profile!.ProfilePhotoUrl =
+            "https://files.test/confirmed-passenger.jpg";
         booking.PaidAt = DateTime.UtcNow.AddMinutes(-5);
 
         var result = await new TripBookingService(unitOfWork).GetConfirmedPassengersAsync(trip.Id, driverId);
@@ -491,6 +493,38 @@ public class TripBookingServiceTests
         Assert.Equal(BookingStatus.Approved, result[0].Status);
         Assert.Equal(booking.PaidAt, result[0].PaidAt);
         Assert.True(result[0].IsPaid);
+        Assert.Equal(booking.PassengerId, result[0].PassengerId);
+        Assert.Equal("Pat Passenger", result[0].PassengerName);
+        Assert.Equal(
+            "https://files.test/confirmed-passenger.jpg",
+            result[0].PassengerProfileImageUrl);
+        Assert.Equal(118.75m, result[0].ServiceCharge);
+        Assert.Equal(2493.75m, result[0].TotalAmount);
+        Assert.DoesNotContain(
+            typeof(Pryde.Contracts.ResponseModels.TripBookingResponseDto)
+                .GetProperties(),
+            property => property.Name is "PassengerEmail" or
+                "PassengerPhoneNumber" or "Email" or "PhoneNumber");
+    }
+
+    [Fact]
+    public async Task DriverCanViewPendingPassengerSafeIdentity()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var trip = AddOpenTrip(unitOfWork, driverId, vehicle);
+        var booking = AddBooking(unitOfWork, trip);
+        booking.Passenger.Profile!.ProfilePhotoUrl =
+            "https://files.test/pending-passenger.jpg";
+
+        var result = Assert.Single(await new TripBookingService(unitOfWork)
+            .GetPendingForTripAsync(trip.Id, driverId));
+
+        Assert.Equal(booking.PassengerId, result.PassengerId);
+        Assert.Equal("Pat Passenger", result.PassengerName);
+        Assert.Equal(
+            "https://files.test/pending-passenger.jpg",
+            result.PassengerProfileImageUrl);
     }
 
     [Fact]
@@ -669,6 +703,7 @@ public class TripBookingServiceTests
             result.Items,
             booking => Assert.Equal(1, booking.RequestedSeats));
         Assert.Equal("Pat Passenger", result.Items[1].PassengerName);
+        Assert.Equal(older.PassengerId, result.Items[1].PassengerId);
         Assert.Equal(
             "https://files.test/passenger.jpg",
             result.Items[1].PassengerProfileImageUrl);

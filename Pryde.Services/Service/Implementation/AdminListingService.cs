@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Pryde.Contracts.RequestModels;
 using Pryde.Contracts.ResponseModels;
 using Pryde.Domain.Common.Exceptions;
@@ -5,11 +6,17 @@ using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
 using Pryde.Services.Service.Interface;
+using Pryde.Services.Settings;
 
 namespace Pryde.Services.Service.Implementation;
 
-public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
+public class AdminListingService(
+    IUnitOfWork unitOfWork,
+    IOptions<PricingSettings>? pricingOptions = null) : IAdminListingService
 {
+    private readonly PricingSettings _pricingSettings =
+        pricingOptions?.Value ?? new PricingSettings();
+
     public async Task<PagedResponseDto<AdminUserSummaryResponseDto>> GetUsersAsync(AdminUsersRequestDto request, CancellationToken cancellationToken = default)
     {
         ValidateDateRange(request.CreatedFrom, request.CreatedTo, "CreatedFrom", "CreatedTo");
@@ -176,10 +183,11 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
         return MapBooking(booking);
     }
 
-    private static TripSummaryResponseDto MapTripSummary(Trip trip)
+    private TripSummaryResponseDto MapTripSummary(Trip trip)
     {
-        var serviceCharge = Math.Round(
-            trip.SeatPrice * trip.ServiceChargePercentage / 100m, 2);
+        var serviceCharge = _pricingSettings.CalculatePassengerServiceCharge(
+            trip.SeatPrice,
+            trip.ServiceChargePercentage);
         return new TripSummaryResponseDto
         {
             TripId = trip.Id,
@@ -218,7 +226,7 @@ public class AdminListingService(IUnitOfWork unitOfWork) : IAdminListingService
         };
     }
 
-    private static TripDetailsResponseDto MapTripDetails(Trip trip)
+    private TripDetailsResponseDto MapTripDetails(Trip trip)
     {
         var summary = MapTripSummary(trip);
         return new TripDetailsResponseDto
