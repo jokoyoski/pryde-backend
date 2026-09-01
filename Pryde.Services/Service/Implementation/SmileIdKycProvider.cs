@@ -467,10 +467,6 @@ public sealed class SmileIdKycProvider(
                     attempt.RawStatus,
                     "LinkCreated",
                     StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(
-                    attempt.VerificationMethod,
-                    "biometric_kyc",
-                    StringComparison.OrdinalIgnoreCase) &&
                 !unavailableHostedLink)
             {
                 continue;
