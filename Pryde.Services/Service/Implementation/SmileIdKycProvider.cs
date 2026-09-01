@@ -92,6 +92,11 @@ public sealed class SmileIdKycProvider(
         CancellationToken cancellationToken = default) =>
         CreateOrReturnSessionAsync(request, true, cancellationToken);
 
+    public Task ReconcilePendingAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default) =>
+        RecoverPendingAttemptsAsync(userId, cancellationToken);
+
     public async Task ProcessCallbackAsync(
         ReadOnlyMemory<byte> payload,
         CancellationToken cancellationToken = default)
@@ -462,6 +467,10 @@ public sealed class SmileIdKycProvider(
                     attempt.RawStatus,
                     "LinkCreated",
                     StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(
+                    attempt.VerificationMethod,
+                    "biometric_kyc",
+                    StringComparison.OrdinalIgnoreCase) &&
                 !unavailableHostedLink)
             {
                 continue;
@@ -520,46 +529,39 @@ public sealed class SmileIdKycProvider(
                 results.Add(status.Result);
             }
 
-            var recoveredResult = false;
-
-            foreach (var result in results)
-            {
-                var partnerParams =
-                    result.PartnerParams ??
-                    result.PartnerParamsSnakeCase;
-
-                var resultCode =
-                    result.ResultCode ??
-                    result.ResultCodeSnakeCase;
-
-                if (partnerParams is null ||
-                    string.IsNullOrWhiteSpace(resultCode))
-                {
-                    continue;
-                }
-
-                var recoveredIdType =
-                    result.IdType ??
-                    result.IdTypeSnakeCase;
-
-                await ProcessResultAsync(
-                    partnerParams,
-                    resultCode,
-                    result.ResultText ??
-                    result.ResultTextSnakeCase,
-                    result.SmileJobId ??
-                    result.SmileJobIdSnakeCase,
+            var recoveredResults = results
+                .Select(result => new SmileResultInput(
+                    result.PartnerParams ?? result.PartnerParamsSnakeCase,
+                    result.ResultCode ?? result.ResultCodeSnakeCase,
+                    result.ResultText ?? result.ResultTextSnakeCase,
+                    result.SmileJobId ?? result.SmileJobIdSnakeCase,
                     result.Country,
-                    recoveredIdType,
+                    result.IdType ?? result.IdTypeSnakeCase,
                     null,
-                    null,
-                    cancellationToken);
+                    null))
+                .Where(result =>
+                    result.PartnerParams is not null &&
+                    !string.IsNullOrWhiteSpace(result.ResultCode))
+                .GroupBy(result => new
+                {
+                    result.PartnerParams!.JobId,
+                    result.PartnerParams.UserId,
+                    result.ResultCode,
+                    result.ResultText,
+                    result.SmileJobId,
+                    result.Country,
+                    result.IdType
+                })
+                .Select(group => group.First())
+                .ToList();
 
-                recoveredResult = true;
+            if (recoveredResults.Count > 0)
+            {
+                await ProcessResultsAsync(recoveredResults, cancellationToken);
             }
 
             if (unavailableHostedLink &&
-                !recoveredResult)
+                recoveredResults.Count == 0)
             {
                 await MarkRecoveryAttemptUnusableAsync(
                     attempt.CorrelationReference,
@@ -647,9 +649,31 @@ public sealed class SmileIdKycProvider(
         string? payloadHash,
         CancellationToken cancellationToken)
     {
-        var jobId = Required(partnerParams.JobId, "job_id");
-        var smileUserId = Required(partnerParams.UserId, "user_id");
-        var code = Required(resultCode, "ResultCode/result_code");
+        await ProcessResultsAsync(
+            [new SmileResultInput(
+                partnerParams,
+                resultCode,
+                resultText,
+                smileJobId,
+                country,
+                idType,
+                eventTimestamp,
+                payloadHash)],
+            cancellationToken);
+    }
+
+    private async Task ProcessResultsAsync(
+        IReadOnlyList<SmileResultInput> results,
+        CancellationToken cancellationToken)
+    {
+        if (results.Count == 0)
+        {
+            return;
+        }
+
+        var firstPartnerParams = results[0].PartnerParams
+            ?? throw new ValidationException("Smile ID result PartnerParams are required.");
+        var jobId = Required(firstPartnerParams.JobId, "job_id");
 
         var emailEvent = await unitOfWork.ExecuteInTransactionOnceAsync(async transactionToken =>
         {
@@ -659,110 +683,132 @@ public sealed class SmileIdKycProvider(
                 transactionToken)
                 ?? throw new NotFoundException(nameof(KycVerificationAttempt), jobId);
 
-            if (!string.Equals(attempt.ExternalUserReference, smileUserId, StringComparison.Ordinal))
-            {
-                throw new ValidationException("Smile ID callback user_id does not match the job.");
-            }
-
-            var expectedRole = IsDriverLicenseFlow(attempt.FlowType)
-                ? RoleNames.Driver
-                : IsIdentityFlow(attempt.FlowType)
-                    ? RoleNames.Passenger
-                    : throw new ValidationException("Smile ID attempt has an unsupported flow.");
-            var isLegacyAttempt = string.IsNullOrWhiteSpace(attempt.IdentityOptions);
-            if (isLegacyAttempt)
-            {
-                var expectedJobType = IsIdentityFlow(attempt.FlowType)
-                    ? BiometricJobType
-                    : DocumentVerificationJobType;
-                if (!TryGetJobType(partnerParams.JobType, out var jobType) ||
-                    jobType != expectedJobType)
-                {
-                    throw new ValidationException("Smile ID callback job_type does not match the legacy job.");
-                }
-            }
-            else if (!string.Equals(partnerParams.Flow, attempt.FlowType, StringComparison.Ordinal) ||
-                     !string.Equals(partnerParams.Role, expectedRole, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new ValidationException("Smile ID callback role or flow does not match the job.");
-            }
-            var configuredOption = GetConfiguredOption(attempt, idType);
-
-            if (!string.IsNullOrWhiteSpace(country) &&
-                !string.Equals(country.Trim(),Country,StringComparison.OrdinalIgnoreCase))
-            {
-                throw new ValidationException(
-                    "Smile ID result country does not match the required Pryde flow.");
-            }
-
             var kyc = await unitOfWork.KycVerifications.GetByIdForUpdateAsync(
                 attempt.KycVerificationId,
                 transactionToken)
                 ?? throw new NotFoundException(nameof(KycVerification), attempt.KycVerificationId);
+            var previousKycStatus = kyc.Status;
+            var attemptChanged = false;
 
-            if (eventTimestamp.HasValue && attempt.ProviderEventTimestamp.HasValue)
+            foreach (var result in results)
             {
-                var storedTimestamp = new DateTimeOffset(
-                    DateTime.SpecifyKind(
-                        attempt.ProviderEventTimestamp.Value,
-                        DateTimeKind.Utc));
-                if (eventTimestamp.Value < storedTimestamp)
+                var partnerParams = result.PartnerParams
+                    ?? throw new ValidationException("Smile ID result PartnerParams are required.");
+                var resultJobId = Required(partnerParams.JobId, "job_id");
+                var smileUserId = Required(partnerParams.UserId, "user_id");
+                var code = Required(result.ResultCode, "ResultCode/result_code");
+
+                if (!string.Equals(resultJobId, jobId, StringComparison.Ordinal))
                 {
-                    logger.LogInformation(
-                        "Older Smile ID callback ignored for job {JobId}.",
-                        jobId);
-                    return null;
+                    throw new ValidationException("Smile ID result job_id does not match the job.");
+                }
+                if (!string.Equals(attempt.ExternalUserReference, smileUserId, StringComparison.Ordinal))
+                {
+                    throw new ValidationException("Smile ID callback user_id does not match the job.");
                 }
 
-                if (eventTimestamp.Value == storedTimestamp)
+                var expectedRole = IsDriverLicenseFlow(attempt.FlowType)
+                    ? RoleNames.Driver
+                    : IsIdentityFlow(attempt.FlowType)
+                        ? RoleNames.Passenger
+                        : throw new ValidationException("Smile ID attempt has an unsupported flow.");
+                var isLegacyAttempt = string.IsNullOrWhiteSpace(attempt.IdentityOptions);
+                if (isLegacyAttempt)
                 {
-                    if (string.Equals(
-                            attempt.CallbackPayloadHash,
-                            payloadHash,
-                            StringComparison.Ordinal))
+                    var expectedJobType = IsIdentityFlow(attempt.FlowType)
+                        ? BiometricJobType
+                        : DocumentVerificationJobType;
+                    if (!TryGetJobType(partnerParams.JobType, out var jobType) ||
+                        jobType != expectedJobType)
+                    {
+                        throw new ValidationException("Smile ID callback job_type does not match the legacy job.");
+                    }
+                }
+                else if (!string.Equals(partnerParams.Flow, attempt.FlowType, StringComparison.Ordinal) ||
+                         !string.Equals(partnerParams.Role, expectedRole, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ValidationException("Smile ID callback role or flow does not match the job.");
+                }
+                var configuredOption = GetConfiguredOption(attempt, result.IdType);
+
+                if (!string.IsNullOrWhiteSpace(result.Country) &&
+                    !string.Equals(result.Country.Trim(), Country, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ValidationException(
+                        "Smile ID result country does not match the required Pryde flow.");
+                }
+
+                if (result.EventTimestamp.HasValue && attempt.ProviderEventTimestamp.HasValue)
+                {
+                    var storedTimestamp = new DateTimeOffset(
+                        DateTime.SpecifyKind(
+                            attempt.ProviderEventTimestamp.Value,
+                            DateTimeKind.Utc));
+                    if (result.EventTimestamp.Value < storedTimestamp)
                     {
                         logger.LogInformation(
-                            "Duplicate Smile ID callback ignored for job {JobId}.",
+                            "Older Smile ID callback ignored for job {JobId}.",
                             jobId);
-                        return null;
+                        continue;
                     }
 
-                    throw new UnauthorizedException(
-                        "Smile ID callback timestamp was replayed with altered data.");
+                    if (result.EventTimestamp.Value == storedTimestamp)
+                    {
+                        if (string.Equals(
+                                attempt.CallbackPayloadHash,
+                                result.PayloadHash,
+                                StringComparison.Ordinal))
+                        {
+                            logger.LogInformation(
+                                "Duplicate Smile ID callback ignored for job {JobId}.",
+                                jobId);
+                            continue;
+                        }
+
+                        throw new UnauthorizedException(
+                            "Smile ID callback timestamp was replayed with altered data.");
+                    }
                 }
+
+                var previousStatus = attempt.Status;
+                var previousAction = attempt.SmileActionSucceeded;
+                var previousIdentity = attempt.SmileIdentitySucceeded;
+
+                attempt.IdentityType = configuredOption.IdType;
+                attempt.VerificationMethod = configuredOption.VerificationMethod;
+                ApplyResult(attempt, code, configuredOption.VerificationMethod);
+                if (attempt.Status == previousStatus &&
+                    attempt.SmileActionSucceeded == previousAction &&
+                    attempt.SmileIdentitySucceeded == previousIdentity &&
+                    attempt.ResultCode == code &&
+                    attempt.ResultText == result.ResultText &&
+                    (string.IsNullOrWhiteSpace(result.SmileJobId) ||
+                     attempt.ProviderReference == result.SmileJobId))
+                {
+                    logger.LogInformation("Duplicate Smile ID callback ignored for job {JobId}.", jobId);
+                    continue;
+                }
+
+                attempt.RawStatus = result.ResultText ?? code;
+                attempt.ResultCode = code;
+                attempt.ResultText = result.ResultText;
+                attempt.ProviderReference = string.IsNullOrWhiteSpace(result.SmileJobId)
+                    ? attempt.ProviderReference
+                    : result.SmileJobId;
+                attempt.ProviderUpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+                attempt.ProviderEventTimestamp = result.EventTimestamp?.UtcDateTime ??
+                                                 attempt.ProviderEventTimestamp;
+                attempt.CallbackPayloadHash = result.PayloadHash ?? attempt.CallbackPayloadHash;
+                attemptChanged = true;
             }
 
-            var previousStatus = attempt.Status;
-            var previousAction = attempt.SmileActionSucceeded;
-            var previousIdentity = attempt.SmileIdentitySucceeded;
-            var previousKycStatus = kyc.Status;
-
-            attempt.IdentityType = configuredOption.IdType;
-            attempt.VerificationMethod = configuredOption.VerificationMethod;
-            ApplyResult(attempt, code, configuredOption.VerificationMethod);
-            if (attempt.Status == previousStatus &&
-                attempt.SmileActionSucceeded == previousAction &&
-                attempt.SmileIdentitySucceeded == previousIdentity &&
-                attempt.ResultCode == code &&
-                attempt.ResultText == resultText &&
-                (string.IsNullOrWhiteSpace(smileJobId) || attempt.ProviderReference == smileJobId))
+            if (!attemptChanged)
             {
-                logger.LogInformation("Duplicate Smile ID callback ignored for job {JobId}.", jobId);
                 return null;
             }
 
-            attempt.RawStatus = resultText ?? code;
-            attempt.ResultCode = code;
-            attempt.ResultText = resultText;
-            attempt.ProviderReference = string.IsNullOrWhiteSpace(smileJobId)
-                ? attempt.ProviderReference
-                : smileJobId;
-            attempt.ProviderUpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
-            attempt.ProviderEventTimestamp = eventTimestamp?.UtcDateTime ??
-                                             attempt.ProviderEventTimestamp;
-            attempt.CallbackPayloadHash = payloadHash ?? attempt.CallbackPayloadHash;
             attempt.FailureReason = attempt.Status == KycProviderStatus.Rejected
-                ? resultText ?? code
+                ? attempt.ResultText ?? attempt.ResultCode
                 : null;
             attempt.CompletedAt = attempt.Status is KycProviderStatus.Approved or KycProviderStatus.Rejected
                 ? _timeProvider.GetUtcNow().UtcDateTime
@@ -830,6 +876,16 @@ public sealed class SmileIdKycProvider(
                     emailEvent.RejectionReason),
             cancellationToken);
     }
+
+    private sealed record SmileResultInput(
+        SmileIdPartnerParams? PartnerParams,
+        string? ResultCode,
+        string? ResultText,
+        string? SmileJobId,
+        string? Country,
+        string? IdType,
+        DateTimeOffset? EventTimestamp,
+        string? PayloadHash);
 
     private sealed record KycEmailEvent(
         Guid UserId,

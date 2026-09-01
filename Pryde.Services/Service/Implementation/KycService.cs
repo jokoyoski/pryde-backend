@@ -15,7 +15,8 @@ namespace Pryde.Services.Service.Implementation;
 public class KycService(
     IUnitOfWork unitOfWork,
     INotificationService notificationService,
-    IOptions<KycSettings>? kycOptions = null) : IKycService
+    IOptions<KycSettings>? kycOptions = null,
+    ISmileIdKycService? smileIdKycService = null) : IKycService
 {
     private const string DojahProviderName = "Dojah";
     private const string DojahCompletedStatus = "Completed";
@@ -40,6 +41,21 @@ public class KycService(
         if (kyc is null)
         { 
             throw new NotFoundException( nameof(KycVerification), userId);
+        }
+
+        if (smileIdKycService is not null &&
+            string.Equals(
+                kyc.ProviderName,
+                SmileIdKycProvider.ProviderName,
+                StringComparison.OrdinalIgnoreCase) &&
+            kyc.Status is KycStatus.Pending or KycStatus.Submitted)
+        {
+            await smileIdKycService.ReconcilePendingAsync(userId, cancellationToken);
+            unitOfWork.ClearTracking();
+            kyc = await unitOfWork.KycVerifications.GetByUserIdAsync(
+                userId,
+                cancellationToken)
+                ?? throw new NotFoundException(nameof(KycVerification), userId);
         }
 
         var response = kyc.Adapt<KycVerificationResponseDto>();

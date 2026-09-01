@@ -13,7 +13,6 @@ using Pryde.Services.Security.Implementation;
 using Pryde.Services.Security.Interface;
 using Pryde.Services.Service.Interface;
 using Pryde.Services.Settings;
-using System.Text.Encodings.Web;
 
 namespace Pryde.Services.Service.Implementation;
 
@@ -357,81 +356,9 @@ public class AuthService(
     private Task SendPasswordResetCodeAsync( string email,string? firstName,
         string code, CancellationToken cancellationToken)
     {
-        var safeFirstName = string.IsNullOrWhiteSpace(firstName)
-            ? null
-            : HtmlEncoder.Default.Encode(firstName.Trim());
-
-        var safeCode = HtmlEncoder.Default.Encode(code);
-
-        var greeting = safeFirstName is null
-            ? "Hello,"
-            : $"Hello {safeFirstName},";
-
-        var emailBody = $"""
-        <div style="margin:0; padding:24px; background-color:#f5f7fa; font-family:Arial, Helvetica, sans-serif; color:#1f2937;">
-            <div style="max-width:600px; margin:0 auto; background-color:#ffffff; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden;">
-
-                <div style="padding:28px 32px; text-align:center; background-color:#111827;">
-                    <h1 style="margin:0; color:#ffffff; font-size:28px;">
-                        Pryde
-                    </h1>
-                </div>
-
-                <div style="padding:32px;">
-                    <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">
-                        {greeting}
-                    </p>
-
-                    <h2 style="margin:0 0 16px; font-size:22px; color:#111827;">
-                        Reset your Pryde password
-                    </h2>
-
-                    <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">
-                        We received a request to reset the password for your Pryde account.
-                    </p>
-
-                    <p style="margin:0 0 24px; font-size:16px; line-height:1.6;">
-                        Use the verification code below to continue:
-                    </p>
-
-                    <div style="margin:24px 0; padding:22px; text-align:center; background-color:#f3f4f6; border-radius:8px;">
-                        <span style="font-size:32px; font-weight:700; letter-spacing:8px; color:#111827;">
-                            {safeCode}
-                        </span>
-                    </div>
-
-                    <p style="margin:0 0 18px; font-size:15px; line-height:1.6; color:#4b5563;">
-                        This code will expire in
-                        <strong>10 minutes</strong>.
-                    </p>
-
-                    <p style="margin:0 0 18px; font-size:15px; line-height:1.6; color:#4b5563;">
-                        For your security, do not share this code with anyone.
-                        Pryde representatives will never ask you to provide your password reset code.
-                    </p>
-
-                    <p style="margin:0 0 24px; font-size:15px; line-height:1.6; color:#4b5563;">
-                        If you did not request a password reset, you can safely ignore this email.
-                    </p>
-
-                    <p style="margin:0; font-size:15px; line-height:1.6;">
-                        Regards,<br />
-                        <strong>The Pryde Team</strong>
-                    </p>
-                </div>
-
-                <div style="padding:20px 32px; text-align:center; background-color:#f9fafb; border-top:1px solid #e5e7eb;">
-                    <p style="margin:0; font-size:13px; color:#6b7280;">
-                        © {DateTime.UtcNow.Year} Pryde. All rights reserved.
-                    </p>
-                </div>
-
-            </div>
-        </div>
-        """;
-
         return emailService.SendAsync( email, "Reset your Pryde password",
-            emailBody, cancellationToken);
+            PrydeEmailTemplates.PasswordResetOtp(firstName, code),
+            cancellationToken);
     }
 
     public async Task ResetPasswordAsync(
@@ -706,88 +633,13 @@ private Task SendEmailVerificationCodeAsync(
     string code,
     CancellationToken cancellationToken)
 {
-    var safeFirstName = string.IsNullOrWhiteSpace(firstName)
-        ? null
-        : HtmlEncoder.Default.Encode(firstName.Trim());
-
-    var safeCode = HtmlEncoder.Default.Encode(code);
-
-    var greeting = safeFirstName is null
-        ? "Hello,"
-        : $"Hello {safeFirstName},";
-
-    var emailBody = $"""
-        <div style="margin:0; padding:24px; background-color:#f5f7fa; font-family:Arial, Helvetica, sans-serif; color:#1f2937;">
-            <div style="max-width:600px; margin:0 auto; background-color:#ffffff; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden;">
-
-                <div style="padding:28px 32px; text-align:center; background-color:#111827;">
-                    <h1 style="margin:0; color:#ffffff; font-size:28px;">
-                        Pryde
-                    </h1>
-                </div>
-
-                <div style="padding:32px;">
-                    <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">
-                        {greeting}
-                    </p>
-
-                    <h2 style="margin:0 0 16px; font-size:22px; color:#111827;">
-                        Welcome to Pryde.
-                    </h2>
-
-                    <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">
-                        Pryde connects drivers with available seats to passengers travelling
-                        along the same route, making everyday journeys more convenient and affordable.
-                    </p>
-
-                    <p style="margin:0 0 24px; font-size:16px; line-height:1.6;">
-                        Use the verification code below to confirm your email address
-                        and continue setting up your account:
-                    </p>
-
-                    <div style="margin:24px 0; padding:22px; text-align:center; background-color:#f3f4f6; border-radius:8px;">
-                        <span style="font-size:32px; font-weight:700; letter-spacing:8px; color:#111827;">
-                            {safeCode}
-                        </span>
-                    </div>
-
-                    <p style="margin:0 0 18px; font-size:15px; line-height:1.6; color:#4b5563;">
-                        This code will expire in
-                        <strong>{_emailSettings.OtpExpiryMinutes} minutes</strong>.
-                    </p>
-
-                    <p style="margin:0 0 18px; font-size:15px; line-height:1.6; color:#4b5563;">
-                        For your security, do not share this code with anyone.
-                        Pryde representatives will never ask you to provide your verification code.
-                    </p>
-
-                    <p style="margin:0 0 24px; font-size:15px; line-height:1.6; color:#4b5563;">
-                        If you did not create a Pryde account, you can safely ignore this email.
-                    </p>
-
-                    <p style="margin:0; font-size:15px; line-height:1.6;">
-                        Regards,<br />
-                        <strong>The Pryde Team</strong>
-                    </p>
-                </div>
-
-                <div style="padding:20px 32px; text-align:center; background-color:#f9fafb; border-top:1px solid #e5e7eb;">
-                    <p style="margin:0 0 8px; font-size:13px; color:#6b7280;">
-                    </p>
-
-                    <p style="margin:0; font-size:13px; color:#6b7280;">
-                        © {DateTime.UtcNow.Year} Pryde. All rights reserved.
-                    </p>
-                </div>
-
-            </div>
-        </div>
-        """;
-
     return emailService.SendAsync(
         email,
         "Welcome to Pryde — Verify your email address",
-        emailBody,
+        PrydeEmailTemplates.EmailVerificationOtp(
+            firstName,
+            code,
+            _emailSettings.OtpExpiryMinutes),
         cancellationToken);
 }
 

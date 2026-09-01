@@ -7,11 +7,11 @@ using Pryde.Domain.Constants;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Persistence.Repository.Interfaces;
+using Pryde.Services.Notifications;
 using Pryde.Services.Notifications.Interface;
 using Pryde.Services.Providers.Paystack;
 using Pryde.Services.Security.Implementation;
 using Pryde.Services.Service.Interface;
-using System.Text.Encodings.Web;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -548,71 +548,12 @@ public class DriverWithdrawalService : IDriverWithdrawalService
      string code,
      CancellationToken cancellationToken)
     {
-        var safeCode = HtmlEncoder.Default.Encode(code);
-
-        var emailBody = $"""
-        <div style="margin:0; padding:24px; background-color:#f5f7fa; font-family:Arial, Helvetica, sans-serif; color:#1f2937;">
-            <div style="max-width:600px; margin:0 auto; background-color:#ffffff; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden;">
-
-                <div style="padding:28px 32px; text-align:center; background-color:#111827;">
-                    <h1 style="margin:0; color:#ffffff; font-size:28px;">
-                        Pryde
-                    </h1>
-                </div>
-
-                <div style="padding:32px;">
-                    <p style="margin:0 0 20px; font-size:16px; line-height:1.6;">
-                        Hello,
-                    </p>
-
-                    <h2 style="margin:0 0 16px; font-size:22px; color:#111827;">
-                        Confirm your withdrawal
-                    </h2>
-
-                    <p style="margin:0 0 24px; font-size:16px; line-height:1.6;">
-                        Use the verification code below to confirm your Pryde wallet withdrawal:
-                    </p>
-
-                    <div style="margin:24px 0; padding:22px; text-align:center; background-color:#f3f4f6; border-radius:8px;">
-                        <span style="font-size:32px; font-weight:700; letter-spacing:8px; color:#111827;">
-                            {safeCode}
-                        </span>
-                    </div>
-
-                    <p style="margin:0 0 18px; font-size:15px; line-height:1.6; color:#4b5563;">
-                        This code will expire in
-                        <strong>{OtpExpiryMinutes} minutes</strong>.
-                    </p>
-
-                    <p style="margin:0 0 18px; font-size:15px; line-height:1.6; color:#4b5563;">
-                        For your security, do not share this code with anyone.
-                        Pryde representatives will never ask you to provide your withdrawal verification code.
-                    </p>
-
-                    <p style="margin:0 0 24px; font-size:15px; line-height:1.6; color:#4b5563;">
-                        If you did not request this withdrawal, do not use this code and review your account activity.
-                    </p>
-
-                    <p style="margin:0; font-size:15px; line-height:1.6;">
-                        Regards,<br />
-                        <strong>The Pryde Team</strong>
-                    </p>
-                </div>
-
-                <div style="padding:20px 32px; text-align:center; background-color:#f9fafb; border-top:1px solid #e5e7eb;">
-                    <p style="margin:0; font-size:13px; color:#6b7280;">
-                        &copy; {DateTime.UtcNow.Year} Pryde. All rights reserved.
-                    </p>
-                </div>
-
-            </div>
-        </div>
-        """;
-
         return _emailService.SendAsync(
             email,
             "Confirm your Pryde withdrawal",
-            emailBody,
+            PrydeEmailTemplates.WithdrawalOtp(
+                code,
+                OtpExpiryMinutes),
             cancellationToken);
     }
 

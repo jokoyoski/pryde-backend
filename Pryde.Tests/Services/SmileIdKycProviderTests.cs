@@ -1132,31 +1132,119 @@ public class SmileIdKycProviderTests
     }
 
     [Fact]
-    public async Task JobStatusHistoryRecoversSubmittedAttemptAfterMissedFinalCallback()
+    public async Task JobStatusHistoryReconciliation_WhenDatabaseHasOnly1012_ApprovesNinAttempt()
     {
-        var context = Context(RoleNames.Passenger);
+        var context = NinContext();
         var session = Assert.Single((await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId, "VOTER_ID"))).Sessions);
+            new KycProviderRequest(context.UserId, "NIN_V2"))).Sessions);
         var attempt = CurrentAttempt(context, session);
         attempt.Status = KycProviderStatus.Submitted;
-        attempt.RawStatus = "Submitted";
-        attempt.ProviderEventTimestamp = Now.UtcDateTime;
+        attempt.RawStatus = "ID Number Validated";
+        attempt.ResultCode = "1012";
+        attempt.ResultText = "ID Number Validated";
+        attempt.SmileIdentitySucceeded = true;
+        attempt.SmileActionSucceeded = false;
         context.ApiClient.JobStatus = new SmileIdJobStatusResponse
         {
             Code = "2302",
             History =
             [
-                StatusResult(session, "0810", "Machine pass"),
-                StatusResult(session, "1012", "ID authority success")
+                StatusResult(session, "0810", "Enroll User", "NIN_V2"),
+                StatusResult(session, "1012", "ID Number Validated", "NIN_V2")
             ]
         };
 
-        await context.Provider.CreateSessionAsync(
-            new KycProviderRequest(context.UserId, "VOTER_ID"));
+        var response = await StatusService(context).GetMineAsync(context.UserId);
 
-        Assert.Equal(KycStatus.Approved, CurrentKyc(context).Status);
+        Assert.True(attempt.SmileActionSucceeded);
+        Assert.True(attempt.SmileIdentitySucceeded);
         Assert.Equal(KycProviderStatus.Approved, attempt.Status);
+        Assert.Equal(KycStatus.Approved, CurrentKyc(context).Status);
+        Assert.Equal(KycStatus.Approved, response.Status);
         Assert.Single(context.ApiClient.JobStatusRequests);
+    }
+
+    [Fact]
+    public async Task JobStatusHistoryReconciliation_WhenDatabaseHasOnly0810_ApprovesNinAttempt()
+    {
+        var context = NinContext();
+        var session = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId, "NIN_V2"))).Sessions);
+        var attempt = CurrentAttempt(context, session);
+        attempt.Status = KycProviderStatus.Submitted;
+        attempt.RawStatus = "Enroll User";
+        attempt.ResultCode = "0810";
+        attempt.ResultText = "Enroll User";
+        attempt.SmileActionSucceeded = true;
+        attempt.SmileIdentitySucceeded = false;
+        context.ApiClient.JobStatus = CompleteNinHistory(session);
+
+        var response = await StatusService(context).GetMineAsync(context.UserId);
+
+        Assert.True(attempt.SmileActionSucceeded);
+        Assert.True(attempt.SmileIdentitySucceeded);
+        Assert.Equal(KycProviderStatus.Approved, attempt.Status);
+        Assert.Equal(KycStatus.Approved, CurrentKyc(context).Status);
+        Assert.Equal(KycStatus.Approved, response.Status);
+    }
+
+    [Fact]
+    public async Task JobStatusHistoryReconciliation_WhenRepeated_IsIdempotent()
+    {
+        var context = NinContext();
+        var session = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId, "NIN_V2"))).Sessions);
+        var attempt = CurrentAttempt(context, session);
+        attempt.Status = KycProviderStatus.Submitted;
+        attempt.RawStatus = "ID Number Validated";
+        attempt.ResultCode = "1012";
+        attempt.ResultText = "ID Number Validated";
+        attempt.SmileIdentitySucceeded = true;
+        context.ApiClient.JobStatus = CompleteNinHistory(session);
+        var service = StatusService(context);
+
+        await service.GetMineAsync(context.UserId);
+        var saveCount = context.UnitOfWork.SaveChangesCount;
+        var notificationCount = context.UnitOfWork.NotificationRepository.Items.Count;
+        var emailCount = context.Email.Messages.Count;
+        var requestCount = context.ApiClient.JobStatusRequests.Count;
+
+        var response = await service.GetMineAsync(context.UserId);
+
+        Assert.Equal(KycStatus.Approved, response.Status);
+        Assert.Equal(saveCount, context.UnitOfWork.SaveChangesCount);
+        Assert.Equal(notificationCount, context.UnitOfWork.NotificationRepository.Items.Count);
+        Assert.Equal(emailCount, context.Email.Messages.Count);
+        Assert.Equal(requestCount, context.ApiClient.JobStatusRequests.Count);
+    }
+
+    [Fact]
+    public async Task JobStatusHistoryReconciliation_WhenHistoryIsIncomplete_RemainsSubmitted()
+    {
+        var context = NinContext();
+        var session = Assert.Single((await context.Provider.CreateSessionAsync(
+            new KycProviderRequest(context.UserId, "NIN_V2"))).Sessions);
+        var attempt = CurrentAttempt(context, session);
+        attempt.Status = KycProviderStatus.Submitted;
+        attempt.RawStatus = "Submitted";
+        context.ApiClient.JobStatus = new SmileIdJobStatusResponse
+        {
+            Code = "2302",
+            History =
+            [
+                StatusResult(session, "1012", "ID Number Validated", "NIN_V2")
+            ]
+        };
+
+        var response = await StatusService(context).GetMineAsync(context.UserId);
+
+        Assert.False(attempt.SmileActionSucceeded);
+        Assert.True(attempt.SmileIdentitySucceeded);
+        Assert.Equal(KycProviderStatus.Submitted, attempt.Status);
+        Assert.Equal(KycStatus.Submitted, CurrentKyc(context).Status);
+        Assert.Equal(KycStatus.Submitted, response.Status);
+        Assert.Empty(context.UnitOfWork.NotificationRepository.Items);
+        Assert.Empty(context.Email.Messages);
     }
 
     [Theory]
@@ -1295,6 +1383,34 @@ public class SmileIdKycProviderTests
             context.UnitOfWork,
             NullLogger<KycProviderService>.Instance);
 
+    private static KycService StatusService(TestContext context) =>
+        new(
+            context.UnitOfWork,
+            new NotificationService(context.UnitOfWork),
+            Options.Create(new KycSettings()),
+            context.Provider);
+
+    private static TestContext NinContext() =>
+        Context(
+            RoleNames.Passenger,
+            configureSettings: settings =>
+            {
+                var nin = settings.PassengerIdentityOptions.Single(option =>
+                    option.IdType == "NIN_V2");
+                nin.Enabled = true;
+            });
+
+    private static SmileIdJobStatusResponse CompleteNinHistory(
+        KycProviderSession session) => new()
+        {
+            Code = "2302",
+            History =
+            [
+                StatusResult(session, "0810", "Enroll User", "NIN_V2"),
+                StatusResult(session, "1012", "ID Number Validated", "NIN_V2")
+            ]
+        };
+
     private static TestContext Context(
         string role,
         string environment = "Sandbox",
@@ -1421,13 +1537,16 @@ public class SmileIdKycProviderTests
     private static SmileIdResultPayload StatusResult(
         KycProviderSession session,
         string code,
-        string text) => new()
+        string text,
+        string? idType = null) => new()
         {
             ResultCode = code,
             ResultText = text,
             SmileJobId = "smile-internal",
             Country = "NG",
-            IdType = session.Flow == SmileIdKycProvider.IdentityFlow ? "VOTER_ID" : "DRIVERS_LICENSE",
+            IdType = idType ?? (session.Flow == SmileIdKycProvider.IdentityFlow
+                ? "VOTER_ID"
+                : "DRIVERS_LICENSE"),
             PartnerParams = new SmileIdPartnerParams
             {
                 JobId = session.JobId,
