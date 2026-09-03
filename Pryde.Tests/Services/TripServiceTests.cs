@@ -4,6 +4,7 @@ using Pryde.Domain.Common.Exceptions;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Services.Service.Implementation;
+using Pryde.Services.Service.Interface;
 using Pryde.Tests.TestInfrastructure;
 
 namespace Pryde.Tests.Services;
@@ -817,6 +818,51 @@ public class TripServiceTests
         BookingWindowMinutes = request.BookingWindowMinutes,
         RoutePolyline = request.RoutePolyline
     };
+
+    [Fact]
+    public async Task RouteSearchPassesTripPolylineToMatcher()
+    {
+        var (unitOfWork, driverId, vehicle) =
+            TestData.CreateDriverContext();
+        var trip = TestData.OpenTrip(driverId, vehicle);
+        trip.RoutePolyline = "encoded-route";
+        unitOfWork.TripRepository.Items.Add(trip);
+        var matcher = new CapturingRouteMatchingService();
+
+        await TestData.CreateTripService(
+                unitOfWork,
+                routeMatchingService: matcher)
+            .SearchAsync(new SearchTripsRequestDto
+            {
+                OriginLatitude = 6.53,
+                OriginLongitude = 3.38,
+                DestinationLatitude = 6.60,
+                DestinationLongitude = 3.35
+            });
+
+        Assert.Equal(trip.RoutePolyline, matcher.RoutePolyline);
+    }
+
+    private sealed class CapturingRouteMatchingService : IRouteMatchingService
+    {
+        public string? RoutePolyline { get; private set; }
+
+        public bool IsPassengerOnRoute(
+            double driverOriginLat,
+            double driverOriginLng,
+            double driverDestLat,
+            double driverDestLng,
+            string? routePolyline,
+            double passengerLat,
+            double passengerLng,
+            double passengerDestLat,
+            double passengerDestLng,
+            double radiusKm)
+        {
+            RoutePolyline = routePolyline;
+            return true;
+        }
+    }
 
     private static Trip SearchTripAtDistance(
         Guid driverId,
