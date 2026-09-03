@@ -21,6 +21,8 @@ public class PrydeDbContext(DbContextOptions<PrydeDbContext> options)
     public DbSet<VerificationCode> VerificationCodes { get; set; }
     public DbSet<Trip> Trips { get; set; }
     public DbSet<TripBooking> TripBookings { get; set; }
+    public DbSet<BookingChat> BookingChats { get; set; }
+    public DbSet<ChatMessage> ChatMessages { get; set; }
     public DbSet<RecurringTrip> RecurringTrips { get; set; }
     public DbSet<TripSubscription> TripSubscriptions { get; set; }
     public DbSet<SavedRecurringTrip> SavedRecurringTrips { get; set; }

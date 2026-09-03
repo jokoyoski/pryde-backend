@@ -48,6 +48,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IVerificationCodeRepository, VerificationCodeRepository>();
         services.AddScoped<ITripRepository, TripRepository>();
         services.AddScoped<ITripBookingRepository, TripBookingRepository>();
+        services.AddScoped<IBookingChatRepository, BookingChatRepository>();
         services.AddScoped<IRecurringTripRepository, RecurringTripRepository>();
         services.AddScoped<ITripSubscriptionRepository, TripSubscriptionRepository>();
         services.AddScoped<ISavedRecurringTripRepository, SavedRecurringTripRepository>();

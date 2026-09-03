@@ -250,6 +250,14 @@ public class TripBookingService(
 
         unitOfWork.TripBookings.Update(booking);
         unitOfWork.Trips.Update(booking.Trip);
+        if (await unitOfWork.BookingChats.GetByBookingIdAsync(
+                booking.Id,
+                cancellationToken) is null)
+        {
+            await unitOfWork.BookingChats.CreateAsync(
+                new BookingChat { BookingId = booking.Id },
+                cancellationToken);
+        }
         await SaveWithConcurrencyHandlingAsync(cancellationToken);
         var response = WorkflowResponse(
             booking,

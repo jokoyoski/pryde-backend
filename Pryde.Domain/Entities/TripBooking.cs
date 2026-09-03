@@ -24,5 +24,6 @@ namespace Pryde.Domain.Entities
         public DateTime? PaymentExpiresAt { get; set; }
         public DateTime? PaidAt { get; set; }
         public Escrow? Escrow { get; set; }
+        public BookingChat? Chat { get; set; }
     }
 }
