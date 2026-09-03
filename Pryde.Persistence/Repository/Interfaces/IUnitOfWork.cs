@@ -17,6 +17,7 @@ public interface IUnitOfWork
     IVerificationCodeRepository VerificationCodes { get; }
     ITripRepository Trips { get; }
     ITripBookingRepository TripBookings { get; }
+    IBookingChatRepository BookingChats { get; }
     IRecurringTripRepository RecurringTrips { get; }
     ITripSubscriptionRepository TripSubscriptions { get; }
     ISavedRecurringTripRepository SavedRecurringTrips { get; }

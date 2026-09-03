@@ -23,6 +23,9 @@ internal sealed class TestUnitOfWork : IUnitOfWork
         SavedRecurringTrips = new TestSavedRecurringTripRepository(
             (TestRecurringTripRepository)RecurringTrips);
         TripBookings = new TestTripBookingRepository((TestTripRepository)Trips);
+        BookingChats = new TestBookingChatRepository(
+            (TestTripBookingRepository)TripBookings,
+            (TestUserRepository)Users);
         Vehicles = new TestVehicleRepository();
         UserRoles = new TestUserRoleRepository(((TestUserRepository)Users).Items, ((TestRoleRepository)Roles).Items);
         Profiles = new TestProfileRepository(((TestUserRepository)Users).Items);
@@ -49,6 +52,8 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public TestTripRepository TripRepository => (TestTripRepository)Trips;
     public TestUserRepository UserRepository => (TestUserRepository)Users;
     public TestTripBookingRepository TripBookingRepository => (TestTripBookingRepository)TripBookings;
+    public TestBookingChatRepository BookingChatRepository =>
+        (TestBookingChatRepository)BookingChats;
     public TestVehicleRepository VehicleRepository => (TestVehicleRepository)Vehicles;
     public TestVehicleDocumentRepository VehicleDocumentRepository =>
         (TestVehicleDocumentRepository)VehicleDocuments;
@@ -100,6 +105,7 @@ internal sealed class TestUnitOfWork : IUnitOfWork
     public IVerificationCodeRepository VerificationCodes { get; }
     public ITripRepository Trips { get; }
     public ITripBookingRepository TripBookings { get; }
+    public IBookingChatRepository BookingChats { get; }
     public IRecurringTripRepository RecurringTrips { get; }
     public ITripSubscriptionRepository TripSubscriptions { get; }
     public ISavedRecurringTripRepository SavedRecurringTrips { get; }
@@ -1662,6 +1668,118 @@ internal sealed class TestTripBookingRepository(TestTripRepository trips) : ITri
     }
 
     public void Update(TripBooking booking) { }
+}
+
+internal sealed class TestBookingChatRepository(
+    TestTripBookingRepository bookings,
+    TestUserRepository users) : IBookingChatRepository
+{
+    public List<BookingChat> Items { get; } = [];
+    public List<ChatMessage> Messages { get; } = [];
+
+    public Task<BookingChat?> GetByBookingIdAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Items.FirstOrDefault(chat =>
+            chat.BookingId == bookingId));
+    }
+
+    public Task<BookingChat> CreateAsync(
+        BookingChat chat,
+        CancellationToken cancellationToken = default)
+    {
+        chat.Booking = bookings.Items.Single(booking =>
+            booking.Id == chat.BookingId);
+        Items.Add(chat);
+        return Task.FromResult(chat);
+    }
+
+    public Task<(IReadOnlyList<ChatMessage> Items, int TotalCount)>
+        GetMessagesAsync(
+            Guid chatId,
+            int pageNumber,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+    {
+        var query = Messages
+            .Where(message => message.ChatId == chatId)
+            .OrderByDescending(message => message.SentAt)
+            .ThenByDescending(message => message.Id)
+            .ToList();
+        return Task.FromResult<(
+            IReadOnlyList<ChatMessage> Items,
+            int TotalCount)>((query
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToList(), query.Count));
+    }
+
+    public Task<ChatMessage?> GetMessageByClientIdAsync(
+        Guid chatId,
+        Guid senderId,
+        Guid clientMessageId,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Messages.FirstOrDefault(message =>
+            message.ChatId == chatId &&
+            message.SenderId == senderId &&
+            message.ClientMessageId == clientMessageId));
+    }
+
+    public Task<ChatMessage> CreateMessageAsync(
+        ChatMessage message,
+        CancellationToken cancellationToken = default)
+    {
+        message.Sender = users.Items.FirstOrDefault(user =>
+            user.Id == message.SenderId) ?? message.Sender;
+        Messages.Add(message);
+        return Task.FromResult(message);
+    }
+
+    public Task<(
+        IReadOnlyList<AdminBookingChatData> Items,
+        int TotalCount)> SearchAsync(
+            Guid? bookingId,
+            Guid? tripId,
+            int pageNumber,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+    {
+        var query = Items.AsEnumerable();
+        if (bookingId.HasValue)
+            query = query.Where(chat => chat.BookingId == bookingId.Value);
+        if (tripId.HasValue)
+            query = query.Where(chat => chat.Booking.TripId == tripId.Value);
+        var chats = query
+            .OrderByDescending(chat => chat.CreatedAt)
+            .ThenByDescending(chat => chat.Id)
+            .ToList();
+        var items = chats
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .Select(chat => new AdminBookingChatData
+            {
+                ChatId = chat.Id,
+                BookingId = chat.BookingId,
+                TripId = chat.Booking.TripId,
+                DriverId = chat.Booking.Trip.DriverId,
+                PassengerId = chat.Booking.PassengerId,
+                CreatedAt = chat.CreatedAt,
+                DriverEndedAt = chat.Booking.Trip.DriverEndedAt,
+                CompletedAt = chat.Booking.Trip.CompletedAt,
+                AutoCompletedAt = chat.Booking.Trip.AutoCompletedAt,
+                MessageCount = Messages.Count(message =>
+                    message.ChatId == chat.Id),
+                LastMessageAt = Messages
+                    .Where(message => message.ChatId == chat.Id)
+                    .Select(message => (DateTime?)message.SentAt)
+                    .Max()
+            }).ToList();
+        return Task.FromResult<(
+            IReadOnlyList<AdminBookingChatData> Items,
+            int TotalCount)>((items, chats.Count));
+    }
 }
 
 internal sealed class TestVehicleRepository : IVehicleRepository

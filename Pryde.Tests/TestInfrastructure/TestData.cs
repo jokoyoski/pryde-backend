@@ -3,6 +3,7 @@ using Pryde.Contracts.RequestModels;
 using Pryde.Domain.Entities;
 using Pryde.Domain.Enums;
 using Pryde.Services.Service.Implementation;
+using Pryde.Services.Service.Interface;
 using Pryde.Services.Settings;
 
 namespace Pryde.Tests.TestInfrastructure;
@@ -52,10 +53,11 @@ internal static class TestData
 
     public static TripService CreateTripService(
         TestUnitOfWork unitOfWork,
-        TripSettings? tripSettings = null) => new(
+        TripSettings? tripSettings = null,
+        IRouteMatchingService? routeMatchingService = null) => new(
             unitOfWork,
             new FareCalculator(Options.Create(Pricing)),
-            new RouteMatchingService(),
+            routeMatchingService ?? new RouteMatchingService(),
             Options.Create(Pricing),
             Options.Create(tripSettings ?? new TripSettings()),
             new FinancialService(unitOfWork),

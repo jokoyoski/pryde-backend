@@ -213,6 +213,7 @@ public class TripService(
             trips = trips.Where(t => routeMatchingService.IsPassengerOnRoute(
                 t.OriginLatitude, t.OriginLongitude,
                 t.DestinationLatitude, t.DestinationLongitude,
+                t.RoutePolyline,
                 request.OriginLatitude!.Value, request.OriginLongitude!.Value,
                 request.DestinationLatitude!.Value, request.DestinationLongitude!.Value,
                 radius)).ToList();

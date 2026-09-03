@@ -62,7 +62,7 @@ public class NotificationHubTests
     }
 
     [Fact]
-    public async Task JwtQueryTokenIsReadOnlyForNotificationHub()
+    public async Task JwtQueryTokenIsReadOnlyForSupportedHubs()
     {
         using var provider = CreateAuthenticationServices();
         var options = provider
@@ -76,6 +76,12 @@ public class NotificationHubTests
             "hub-token");
         await options.Events.OnMessageReceived(hubContext);
 
+        var chatContext = CreateMessageReceivedContext(
+            options,
+            "/hubs/chat",
+            "chat-token");
+        await options.Events.OnMessageReceived(chatContext);
+
         var apiContext = CreateMessageReceivedContext(
             options,
             "/api/v1/notifications",
@@ -83,6 +89,7 @@ public class NotificationHubTests
         await options.Events.OnMessageReceived(apiContext);
 
         Assert.Equal("hub-token", hubContext.Token);
+        Assert.Equal("chat-token", chatContext.Token);
         Assert.Null(apiContext.Token);
     }
 

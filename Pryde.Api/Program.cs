@@ -34,6 +34,9 @@ builder.Services.AddServices();
 builder.Services.AddScoped<
     Pryde.Services.Service.Interface.INotificationRealtimeSender,
     SignalRNotificationRealtimeSender>();
+builder.Services.AddScoped<
+    Pryde.Services.Service.Interface.IChatRealtimeSender,
+    SignalRChatRealtimeSender>();
 builder.Services.AddDojahIntegration(builder.Configuration);
 builder.Services.AddPaystackIntegration(builder.Configuration);
 
@@ -172,5 +175,6 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<NotificationHub>("/hubs/notifications");
+app.MapHub<ChatHub>("/hubs/chat");
 
 app.Run();

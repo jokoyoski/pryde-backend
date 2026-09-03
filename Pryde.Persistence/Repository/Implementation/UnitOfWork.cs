@@ -20,6 +20,7 @@ public class UnitOfWork(
     IPasswordResetCodeRepository passwordResetCodes,
     IVerificationCodeRepository verificationCodes,
     ITripBookingRepository tripBooking,
+    IBookingChatRepository bookingChat,
     ITripRepository trip,
     IRecurringTripRepository recurringTrip,
     ITripSubscriptionRepository tripSubscription,
@@ -49,6 +50,7 @@ public class UnitOfWork(
     public IPasswordResetCodeRepository PasswordResetCodes { get; } = passwordResetCodes;
     public IVerificationCodeRepository VerificationCodes { get; } = verificationCodes;
     public ITripBookingRepository TripBookings { get; } = tripBooking;
+    public IBookingChatRepository BookingChats { get; } = bookingChat;
     public ITripRepository Trips { get; } = trip;
     public IRecurringTripRepository RecurringTrips { get; } = recurringTrip;
     public ITripSubscriptionRepository TripSubscriptions { get; } = tripSubscription;
