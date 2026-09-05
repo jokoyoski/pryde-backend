@@ -22,31 +22,40 @@ builder.Services.AddControllers()
     .AddJsonOptions(options =>
         options.JsonSerializerOptions.Converters.Add(
             new JsonStringEnumConverter()));
+
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSignalR().AddJsonProtocol(options =>options.PayloadSerializerOptions.Converters
-.Add( new JsonStringEnumConverter()));
+
+builder.Services.AddSignalR()
+    .AddJsonProtocol(options =>
+        options.PayloadSerializerOptions.Converters.Add(
+            new JsonStringEnumConverter()));
 
 builder.Services.AddApiVersioningConfiguration();
 builder.Services.AddSwaggerConfiguration();
 
 builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddServices();
+
 builder.Services.AddScoped<
     Pryde.Services.Service.Interface.INotificationRealtimeSender,
     SignalRNotificationRealtimeSender>();
+
 builder.Services.AddScoped<
     Pryde.Services.Service.Interface.IChatRealtimeSender,
     SignalRChatRealtimeSender>();
+
 builder.Services.AddDojahIntegration(builder.Configuration);
 builder.Services.AddPaystackIntegration(builder.Configuration);
 
 builder.Services
     .AddOptions<VehicleUploadSettings>()
-    .Bind(builder.Configuration.GetSection(VehicleUploadSettings.SectionName))
+    .Bind(builder.Configuration.GetSection(
+        VehicleUploadSettings.SectionName))
     .Validate(
-        settings => settings.VehicleImageMaxBytes > 0 &&
-                    settings.WalkAroundVideoMaxBytes > 0 &&
-                    settings.VehicleDocumentMaxBytes > 0,
+        settings =>
+            settings.VehicleImageMaxBytes > 0 &&
+            settings.WalkAroundVideoMaxBytes > 0 &&
+            settings.VehicleDocumentMaxBytes > 0,
         "Vehicle upload limits must be greater than zero.")
     .ValidateOnStart();
 
@@ -61,7 +70,8 @@ builder.Services
 
 builder.Services
     .AddOptions<EmailSettings>()
-    .Bind(builder.Configuration.GetSection(EmailSettings.SectionName))
+    .Bind(builder.Configuration.GetSection(
+        EmailSettings.SectionName))
     .Validate(
         settings => !string.IsNullOrWhiteSpace(settings.ApiKey),
         "EmailSettings:ApiKey is required.")
@@ -92,7 +102,8 @@ builder.Services
 
 builder.Services
     .AddOptions<TripSettings>()
-    .Bind(builder.Configuration.GetSection(TripSettings.SectionName))
+    .Bind(builder.Configuration.GetSection(
+        TripSettings.SectionName))
     .Validate(
         settings => settings.DefaultBookingWindowMinutes > 0,
         "Trips:DefaultBookingWindowMinutes must be greater than zero.")
@@ -103,8 +114,9 @@ builder.Services
     .Bind(builder.Configuration.GetSection(
         RecurringTripSettings.SectionName))
     .Validate(
-        settings => settings.GenerationHorizonDays > 0 &&
-                    settings.GenerationIntervalMinutes > 0,
+        settings =>
+            settings.GenerationHorizonDays > 0 &&
+            settings.GenerationIntervalMinutes > 0,
         "Recurring trip settings must be greater than zero.")
     .ValidateOnStart();
 
@@ -174,7 +186,14 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
 app.MapHub<NotificationHub>("/hubs/notifications");
 app.MapHub<ChatHub>("/hubs/chat");
+
+app.MapGet("/", () => Results.Ok(new
+{
+    name = "Pryde API",
+    status = "Running"
+}));
 
 app.Run();
